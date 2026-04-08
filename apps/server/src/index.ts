@@ -68,7 +68,17 @@ function normalizeProjectsShape(config: RawConfig): RawConfig {
     sections[sectionSlug] = section;
   }
 
-  config.projects = sections;
+  const normalizedSections: Record<string, unknown> = {};
+  for (const [sectionSlug, sectionRaw] of Object.entries(sections)) {
+    const section = toRecord(sectionRaw);
+    const sectionDirectories = toRecord(section.directories);
+    if (!Object.keys(sectionDirectories).length) {
+      continue;
+    }
+    normalizedSections[sectionSlug] = section;
+  }
+
+  config.projects = normalizedSections;
   return config;
 }
 

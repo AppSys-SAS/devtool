@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { RouterLink } from "vue-router";
-import { Bookmark, FolderTree, Play, RotateCcw, Square } from "lucide-vue-next";
+import { useColorMode } from "@vueuse/core";
+import { Bookmark, FolderTree, Monitor, Moon, Play, RotateCcw, Square, Sun } from "lucide-vue-next";
 import SidebarStreamItem from "@/components/SidebarStreamItem.vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -33,6 +34,32 @@ interface SidebarProject {
 
 const bookmarkedOnly = ref(false);
 const appVersion = window.devtool?.version ?? "0.0.0";
+const colorMode = useColorMode({
+  emitAuto: true,
+  storageKey: "devtool-color-mode",
+});
+
+const colorModeLabel = computed(() => {
+  if (colorMode.value === "dark") {
+    return "Dark";
+  }
+  if (colorMode.value === "light") {
+    return "Light";
+  }
+  return "Auto";
+});
+
+function toggleColorMode(): void {
+  if (colorMode.value === "auto") {
+    colorMode.value = "light";
+    return;
+  }
+  if (colorMode.value === "light") {
+    colorMode.value = "dark";
+    return;
+  }
+  colorMode.value = "auto";
+}
 
 watch(
   () => bookmarkStore.slugs.value.length,
@@ -302,11 +329,33 @@ function startDirectoryCommand(directory: SidebarDirectory): void {
       </div>
     </ScrollArea>
     <Separator />
-    <RouterLink
-      :to="{ name: 'dashboard' }"
-      class="px-3 py-2 text-center text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
-    >
-      Devtool <sup>{{ appVersion }}</sup>
-    </RouterLink>
+    <div class="flex items-center justify-between gap-2 px-3 py-2">
+      <RouterLink
+        :to="{ name: 'dashboard' }"
+        class="min-w-0 truncate text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+      >
+        Devtool <sup>{{ appVersion }}</sup>
+      </RouterLink>
+      <Button
+        size="sm"
+        variant="ghost"
+        class="h-8 shrink-0 gap-1.5 px-2 text-xs"
+        @click="toggleColorMode"
+      >
+        <Monitor
+          v-if="colorMode === 'auto'"
+          class="size-3.5"
+        />
+        <Sun
+          v-else-if="colorMode === 'light'"
+          class="size-3.5"
+        />
+        <Moon
+          v-else
+          class="size-3.5"
+        />
+        {{ colorModeLabel }}
+      </Button>
+    </div>
   </aside>
 </template>

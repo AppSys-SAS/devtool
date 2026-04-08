@@ -68,7 +68,7 @@ export async function loadConfigFile(filePath: string): Promise<RawConfig> {
 }
 
 export function resolveDefaultConfigPaths(cwd = process.cwd()): string[] {
-  return [path.join(cwd, "devtool-config.yml"), path.join(os.homedir(), ".config/appsys/devtool/config.yml")];
+  return [path.join(cwd, "../../devtool-config.yml"), path.join(os.homedir(), ".config/appsys/devtool/config.yml")];
 }
 
 export async function loadMergedConfig(configPaths = resolveDefaultConfigPaths()): Promise<{ config: RawConfig; loadedPaths: string[] }> {

@@ -1,5 +1,7 @@
 import { spawn as spawnDetached } from "node:child_process";
-import { existsSync } from "node:fs";
+import { chmodSync, existsSync, readdirSync, statSync } from "node:fs";
+import path from "node:path";
+import { createRequire } from "node:module";
 import { spawn as spawnPty, type IPty } from "node-pty";
 import treeKill from "tree-kill";
 import type { StreamOutputLine, StreamUpdatePayload } from "@appsys/devtool-shared";
@@ -35,6 +37,46 @@ function getShellCandidates(): string[] {
   }
 
   return unique;
+}
+
+let didCheckNodePtyPermissions = false;
+
+function ensureNodePtySpawnHelperExecutable(): void {
+  if (didCheckNodePtyPermissions || process.platform !== "darwin") {
+    return;
+  }
+  didCheckNodePtyPermissions = true;
+
+  try {
+    const require = createRequire(import.meta.url);
+    const entry = require.resolve("node-pty");
+    const packageRoot = path.dirname(path.dirname(entry));
+    const prebuildsDir = path.join(packageRoot, "prebuilds");
+
+    if (!existsSync(prebuildsDir)) {
+      return;
+    }
+
+    for (const directory of readdirSync(prebuildsDir)) {
+      if (!directory.startsWith("darwin-")) {
+        continue;
+      }
+
+      const spawnHelperPath = path.join(prebuildsDir, directory, "spawn-helper");
+      if (!existsSync(spawnHelperPath)) {
+        continue;
+      }
+
+      const mode = statSync(spawnHelperPath).mode;
+      if ((mode & 0o111) !== 0) {
+        continue;
+      }
+
+      chmodSync(spawnHelperPath, mode | 0o755);
+    }
+  } catch {
+    // Silent fallback: spawn logic below will surface detailed errors if it still fails.
+  }
 }
 
 export class DevtoolCommandStream {
@@ -246,9 +288,11 @@ export class DevtoolCommandStream {
   }
 
   private async startDetached(): Promise<void> {
+    ensureNodePtySpawnHelperExecutable();
     const args = this.convertArgs(this.args);
     const env = { ...process.env, ...this.defaultEnv, ...this.env };
     let child = null as ReturnType<typeof spawnDetached> | null;
+    const spawnErrors: string[] = [];
 
     const directError = (() => {
       try {
@@ -260,6 +304,7 @@ export class DevtoolCommandStream {
         });
         return null;
       } catch (error) {
+        spawnErrors.push(`direct: ${error instanceof Error ? error.message : String(error)}`);
         return error;
       }
     })();
@@ -274,6 +319,7 @@ export class DevtoolCommandStream {
       const command = args.map(shellEscapePosix).join(" ");
       for (const shell of getShellCandidates()) {
         if (!existsSync(shell)) {
+          spawnErrors.push(`shell ${shell}: not found`);
           continue;
         }
 
@@ -286,13 +332,17 @@ export class DevtoolCommandStream {
             stdio: "ignore",
           });
           break;
-        } catch {
-          // Try next shell candidate.
+        } catch (error) {
+          spawnErrors.push(`shell ${shell}: ${error instanceof Error ? error.message : String(error)}`);
         }
       }
 
       if (!child) {
-        throw new Error(`Unable to spawn detached command in shells: ${args.join(" ")}`);
+        throw new Error(
+          `Unable to spawn detached command in shells: ${args.join(" ")}${
+            spawnErrors.length ? ` | attempts: ${spawnErrors.join(" || ")}` : ""
+          }`,
+        );
       }
     }
 
@@ -320,6 +370,7 @@ export class DevtoolCommandStream {
     args?: string[];
     notifications?: boolean;
   } = {}): Promise<void> {
+    ensureNodePtySpawnHelperExecutable();
     const finalArgs = this.convertArgs(args);
     if (this.proc) {
       throw new Error("Command already running");
@@ -336,11 +387,18 @@ export class DevtoolCommandStream {
       name: "xterm-256color",
     } as const;
 
+    const spawnErrors: string[] = [];
+
     try {
       this.proc = spawnPty(finalArgs[0], finalArgs.slice(1), spawnOptions);
     } catch (error) {
+      spawnErrors.push(`direct: ${error instanceof Error ? error.message : String(error)}`);
       if (process.platform === "win32") {
-        await this.handleStartFailure(error);
+        await this.handleStartFailure(
+          new Error(
+            `Unable to start command: ${finalArgs.join(" ")}${spawnErrors.length ? ` | attempts: ${spawnErrors.join(" || ")}` : ""}`,
+          ),
+        );
         await this.sendUpdate();
         return;
       }
@@ -348,6 +406,7 @@ export class DevtoolCommandStream {
       const command = finalArgs.map(shellEscapePosix).join(" ");
       for (const shell of getShellCandidates()) {
         if (!existsSync(shell)) {
+          spawnErrors.push(`shell ${shell}: not found`);
           continue;
         }
 
@@ -356,13 +415,17 @@ export class DevtoolCommandStream {
           this.proc = spawnPty(shell, [flag, command], spawnOptions);
           await this.addOutput("info", `Fallback shell: ${shell}`);
           break;
-        } catch {
-          // Try next shell candidate.
+        } catch (fallbackError) {
+          spawnErrors.push(`shell ${shell}: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`);
         }
       }
 
       if (!this.proc) {
-        await this.handleStartFailure(error);
+        await this.handleStartFailure(
+          new Error(
+            `Unable to start command: ${finalArgs.join(" ")}${spawnErrors.length ? ` | attempts: ${spawnErrors.join(" || ")}` : ""}`,
+          ),
+        );
         await this.sendUpdate();
         return;
       }
