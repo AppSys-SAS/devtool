@@ -1,0 +1,67 @@
+<script setup lang="ts">
+import { computed } from "vue";
+import StreamView from "@/views/StreamView.vue";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import configStore from "@/stores/config";
+import wsStore from "@/stores/ws";
+
+const props = defineProps<{
+  projectSlug: string;
+  directorySlug: string;
+}>();
+
+const directoryDefinition = computed(() => configStore.getDirectory(props.projectSlug, props.directorySlug));
+const directory = computed(() => directoryDefinition.value?.directory ?? null);
+const directoryName = computed(() => directory.value?.name ?? props.directorySlug);
+const directoryDescription = computed(() => directory.value?.description ?? null);
+const directoryArgs = computed(() => directory.value?.args ?? ["N/A"]);
+const streamSlug = computed(() => configStore.getDirectoryStreamPrimary(props.projectSlug, props.directorySlug));
+
+function runCommand(): void {
+  if (!directory.value) {
+    return;
+  }
+
+  wsStore.newCommandStream(
+    props.projectSlug,
+    props.directorySlug,
+    true,
+    directory.value.args,
+    directory.value.env,
+    directory.value.notifications,
+    directory.value.name,
+  );
+}
+</script>
+
+<template>
+  <StreamView
+    v-if="streamSlug"
+    :project-slug="projectSlug"
+    :directory-slug="directorySlug"
+    :stream-slug="streamSlug"
+    :key="streamSlug"
+  />
+  <div
+    v-else
+    class="flex h-full items-center justify-center p-6"
+  >
+    <Card class="w-full max-w-xl">
+      <CardHeader>
+        <CardTitle>{{ directoryName }}</CardTitle>
+      </CardHeader>
+      <CardContent class="space-y-4">
+        <p
+          v-if="directoryDescription"
+          class="text-sm text-muted-foreground"
+        >
+          {{ directoryDescription }}
+        </p>
+        <Button @click="runCommand">
+          {{ directoryArgs.join(" ") }}
+        </Button>
+      </CardContent>
+    </Card>
+  </div>
+</template>

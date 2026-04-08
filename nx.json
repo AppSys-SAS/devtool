@@ -1,0 +1,11 @@
+{
+  "useDaemonProcess": false,
+  "targetDefaults": {
+    "build": {
+      "dependsOn": [
+        "^build"
+      ],
+      "cache": false
+    }
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "name": "@appsys/devtool-cli",
+  "version": "0.1.0",
+  "type": "module",
+  "bin": {
+    "devtool": "./lib/index.js"
+  },
+  "main": "./lib/index.js",
+  "types": "./lib/index.d.ts",
+  "files": [
+    "lib"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "dev": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "@appsys/devtool-config": "workspace:*",
+    "@appsys/devtool-proxy": "workspace:*",
+    "@appsys/devtool-server": "workspace:*",
+    "@appsys/devtool-shared": "workspace:*",
+    "commander": "^14.0.3"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.2",
+    "tsx": "^4.21.0"
+  }
+}

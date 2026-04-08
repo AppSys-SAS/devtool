@@ -1,0 +1,32 @@
+{
+  "name": "@appsys/devtool-config",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./lib/index.js",
+  "types": "./lib/index.d.ts",
+  "files": [
+    "lib"
+  ],
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "import": "./lib/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "glob": "^13.0.6",
+    "js-yaml": "^4.1.1",
+    "lodash.clonedeep": "^4.5.0",
+    "lodash.mergewith": "^4.6.2"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/lodash.clonedeep": "^4.5.9",
+    "@types/lodash.mergewith": "^4.6.9"
+  }
+}

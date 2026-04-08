@@ -1,0 +1,22 @@
+{
+  "name": "@appsys/devtool",
+  "private": true,
+  "packageManager": "pnpm@10.33.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "dev": "pnpm --parallel --filter @appsys/devtool-server --filter @appsys/devtool-ui dev",
+    "dev:ui": "pnpm --filter @appsys/devtool-ui dev",
+    "dev:server": "pnpm --filter @appsys/devtool-server dev",
+    "dev:cli": "pnpm --filter @appsys/devtool-cli dev",
+    "lint": "pnpm -r lint"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.2",
+    "typescript": "^6.0.2"
+  }
+}
