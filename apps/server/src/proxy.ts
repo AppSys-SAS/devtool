@@ -17,6 +17,31 @@ interface ServerCandidate {
   roundRobinTargetIndex: number;
 }
 
+function readUiProxyTarget(uiPath: string | undefined): { url: string; tls: boolean } | null {
+  if (typeof uiPath !== "string") {
+    return null;
+  }
+
+  const value = uiPath.trim();
+  if (!value.length) {
+    return null;
+  }
+
+  try {
+    const parsed = new URL(value);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return null;
+    }
+
+    return {
+      url: parsed.toString(),
+      tls: parsed.protocol === "https:",
+    };
+  } catch {
+    return null;
+  }
+}
+
 export class DevtoolProxy {
   private readonly proxy: httpProxy;
 
@@ -72,7 +97,8 @@ export class DevtoolProxy {
     }
 
     if (config.adt.host) {
-      const targets = [{ url: `http://127.0.0.1:${config.adt.ports.server}`, tls: true }];
+      const uiProxyTarget = readUiProxyTarget(config.adt.uiPath);
+      const targets = [uiProxyTarget ?? { url: `http://127.0.0.1:${config.adt.ports.server}`, tls: true }];
       nextServers.push({
         slug: "DEVTOOL:HTTP",
         hosts: [config.adt.host.toLowerCase()],

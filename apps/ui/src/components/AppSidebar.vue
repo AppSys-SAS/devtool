@@ -251,15 +251,14 @@ function resolveStreamIcon(directory: SidebarDirectory, stream: CommandStream): 
           {{ configStore.warnings.value.length }} config warning{{ configStore.warnings.value.length > 1 ? "s" : "" }}
         </RouterLink>
 
-        <div class="flex items-center justify-between rounded-md bg-muted p-1">
+        <div class="flex items-center justify-between rounded-md p-1">
           <Button
             size="sm"
             variant="ghost"
             class="h-8 w-full justify-start gap-2"
-            :class="{ 'bg-background': bookmarkedOnly }"
             @click="bookmarkedOnly = !bookmarkedOnly"
           >
-            <Bookmark class="size-4" />
+            <Bookmark class="size-4" :class="{ 'fill-current': bookmarkedOnly }" />
             Bookmarks
           </Button>
         </div>
