@@ -2,6 +2,7 @@
 import { computed, ref, watch } from "vue";
 import { RouterLink } from "vue-router";
 import { useColorMode } from "@vueuse/core";
+import { Icon } from "@iconify/vue";
 import { Bookmark, FolderTree, Monitor, Moon, Play, RotateCcw, Square, Sun } from "lucide-vue-next";
 import SidebarStreamItem from "@/components/SidebarStreamItem.vue";
 import { Badge } from "@/components/ui/badge";
@@ -30,6 +31,7 @@ interface SidebarProject {
   name: string;
   directories: SidebarDirectory[];
   streams: CommandStream[];
+  meta?: unknown;
 }
 
 const bookmarkedOnly = ref(false);
@@ -115,6 +117,7 @@ const sidebarData = computed(() => {
         name: project.name || projectSlug,
         directories,
         streams: [],
+        meta: project.meta,
       };
 
       for (const stream of allStreams.value) {
@@ -179,6 +182,21 @@ function startDirectoryCommand(directory: SidebarDirectory): void {
   }
   wsStore.newCommandStream(directory.projectSlug, directory.slug, true, directory.args, directory.env, directory.notifications);
 }
+
+function resolveIconFromMeta(meta: unknown, fallback = "ph:terminal-window-duotone"): string {
+  if (typeof meta !== "object" || meta === null) {
+    return fallback;
+  }
+  const maybeIcon = "icon" in meta ? (meta as { icon?: unknown }).icon : null;
+  if (typeof maybeIcon !== "string" || maybeIcon.trim().length === 0) {
+    return fallback;
+  }
+  const icon = maybeIcon.trim();
+  if (icon.includes(":")) {
+    return icon;
+  }
+  return `lucide:${icon}`;
+}
 </script>
 
 <template>
@@ -221,6 +239,7 @@ function startDirectoryCommand(directory: SidebarDirectory): void {
           <SidebarStreamItem
             :stream="stream"
             :label="stream.name"
+            icon="ph:terminal-window-duotone"
             :route="{ name: 'stream', params: { streamSlug: stream.slug } }"
             @start="streamUpdate($event, 'start')"
             @stop="streamUpdate($event, 'stop')"
@@ -248,6 +267,7 @@ function startDirectoryCommand(directory: SidebarDirectory): void {
               :key="`project/${project.slug}/stream/${stream.slug}`"
               :stream="stream"
               :label="stream.name"
+              :icon="resolveIconFromMeta(project.meta)"
               :route="{ name: 'project-stream', params: { projectSlug: project.slug, streamSlug: stream.slug } }"
               @start="streamUpdate($event, 'start')"
               @stop="streamUpdate($event, 'stop')"
@@ -268,6 +288,10 @@ function startDirectoryCommand(directory: SidebarDirectory): void {
                   'border border-destructive/40': directory.stream?.status === 'ERROR'
                 }"
               >
+                <Icon
+                  :icon="resolveIconFromMeta(directory.meta, 'lucide:folder-tree')"
+                  class="size-3.5 shrink-0 text-muted-foreground"
+                />
                 <span class="min-w-0 flex-1 truncate">{{ directory.name }}</span>
                 <Badge
                   v-if="directory.stream?.unread"
@@ -313,6 +337,7 @@ function startDirectoryCommand(directory: SidebarDirectory): void {
                   :key="`project/${project.slug}/directory/${directory.slug}/stream/${stream.slug}`"
                   :stream="stream"
                   :label="stream.name"
+                  :icon="resolveIconFromMeta(directory.meta)"
                   :route="{
                     name: 'directory-stream',
                     params: { projectSlug: project.slug, directorySlug: directory.slug, streamSlug: stream.slug }

@@ -2,14 +2,14 @@ import net from "node:net";
 import { logger } from "@appsys/devtool-shared";
 
 export interface ProxyOptions {
-  gceSecurePort?: number;
+  adtSecurePort?: number;
   proxyPort?: number;
 }
 
-export default function runProxy({ gceSecurePort = 6731, proxyPort = 443 }: ProxyOptions = {}): net.Server {
+export default function runProxy({ adtSecurePort = 6731, proxyPort = 443 }: ProxyOptions = {}): net.Server {
   const server = net.createServer((client) => {
     client.once("data", (buffer) => {
-      const upstream = net.createConnection({ host: "127.0.0.1", port: gceSecurePort }, () => {
+      const upstream = net.createConnection({ host: "127.0.0.1", port: adtSecurePort }, () => {
         upstream.write(buffer);
         client.pipe(upstream).pipe(client);
       });

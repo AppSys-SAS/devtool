@@ -54,7 +54,7 @@ export class DevtoolLB {
       return;
     }
     const wasListening = this.server.listening;
-    const port = this.serverContext.config.gce.ports.loadBalancer;
+    const port = this.serverContext.config.adt.ports.loadBalancer;
     if (wasListening) {
       await new Promise<void>((resolve) => this.server?.close(() => resolve()));
     }
@@ -64,7 +64,7 @@ export class DevtoolLB {
     }
   }
 
-  async listen(port = this.serverContext.config.gce.ports.loadBalancer): Promise<void> {
+  async listen(port = this.serverContext.config.adt.ports.loadBalancer): Promise<void> {
     if (!this.server) {
       return;
     }

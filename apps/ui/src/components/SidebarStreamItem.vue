@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { RouterLink, type RouteLocationRaw } from "vue-router";
+import { Icon } from "@iconify/vue";
 import { Circle, Play, RotateCcw, Square, Trash2 } from "lucide-vue-next";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -10,6 +11,7 @@ const props = defineProps<{
   stream: CommandStream;
   route: RouteLocationRaw;
   label: string;
+  icon?: string;
 }>();
 
 const emit = defineEmits<{
@@ -31,6 +33,10 @@ const isRunning = computed(() => props.stream.status === "RUNNING");
       'border border-destructive/40': stream.status === 'ERROR'
     }"
   >
+    <Icon
+      :icon="icon ?? 'ph:terminal-window-duotone'"
+      class="size-3.5 shrink-0 text-muted-foreground"
+    />
     <span class="min-w-0 flex-1 truncate">{{ label }}</span>
     <Badge
       v-if="stream.unread"

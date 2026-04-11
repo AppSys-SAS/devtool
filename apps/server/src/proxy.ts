@@ -25,6 +25,7 @@ export class DevtoolProxy {
         "X-Forwarded-Proto": "https",
       },
       ws: true,
+      changeOrigin: true,
     });
     this.serversAvailable = [];
 
@@ -61,11 +62,11 @@ export class DevtoolProxy {
       }
     }
 
-    if (config.gce.host) {
+    if (config.adt.host) {
       nextServers.push({
         slug: "DEVTOOL:HTTP",
-        hosts: [config.gce.host.toLowerCase()],
-        ports: [config.gce.ports.server],
+        hosts: [config.adt.host.toLowerCase()],
+        ports: [config.adt.ports.server],
         path: null,
         prefix: null,
         pathNot: null,
@@ -89,10 +90,7 @@ export class DevtoolProxy {
     logger.debug("Proxy", `${server.slug}:${port}`, req.url ?? "/");
 
     this.proxy.web(req, res, {
-      target: {
-        host: "127.0.0.1",
-        port,
-      },
+      target: `http://127.0.0.1:${port}`,
     });
 
     return true;
@@ -111,10 +109,7 @@ export class DevtoolProxy {
     logger.debug("Proxy", `${server.slug}:${port}`, req.url ?? "/");
 
     this.proxy.ws(req, socket, head, {
-      target: {
-        host: "127.0.0.1",
-        port,
-      },
+      target: `http://127.0.0.1:${port}`,
     });
 
     return true;

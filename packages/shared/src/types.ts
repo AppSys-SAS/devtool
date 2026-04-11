@@ -1,4 +1,4 @@
-export interface GceDefinition {
+export interface AdtDefinition {
   host: string | null;
   uiPath?: string;
   ports: {
@@ -57,7 +57,7 @@ export interface ProjectDefinition {
 }
 
 export interface RuntimeConfig {
-  gce: GceDefinition;
+  adt: AdtDefinition;
   loadBalancers: Record<string, LoadBalancerCertificate>;
   projects: Record<string, ProjectDefinition>;
   warnings: string[];

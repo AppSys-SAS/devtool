@@ -1,6 +1,6 @@
 import path from "node:path";
 import fs from "node:fs/promises";
-import type { ClientConfigPayload, DirectoryDefinition, GceDefinition, LoadBalancerCertificate, ProjectDefinition, RuntimeConfig } from "@appsys/devtool-shared";
+import type { ClientConfigPayload, DirectoryDefinition, AdtDefinition, LoadBalancerCertificate, ProjectDefinition, RuntimeConfig } from "@appsys/devtool-shared";
 import { logger } from "@appsys/devtool-shared";
 import { isObject, toIntegerArray, toRecord, toStringArray, toStringRecord } from "./utils.js";
 
@@ -9,7 +9,7 @@ const SLUG_REGEXP = /^[a-zA-Z0-9\-\/_.]+$/i;
 export class DevtoolConfigure {
   private readonly initialConfig: Record<string, unknown>;
 
-  public gce: GceDefinition;
+  public adt: AdtDefinition;
 
   public loadBalancers: Record<string, LoadBalancerCertificate>;
 
@@ -19,7 +19,7 @@ export class DevtoolConfigure {
 
   constructor(config: Record<string, unknown>) {
     this.initialConfig = config;
-    this.gce = {
+    this.adt = {
       host: null,
       ports: {
         server: 6730,
@@ -36,7 +36,7 @@ export class DevtoolConfigure {
 
   get runtimeConfig(): RuntimeConfig {
     return {
-      gce: this.gce,
+      adt: this.adt,
       loadBalancers: this.loadBalancers,
       projects: this.projects,
       warnings: this.warnings,
@@ -53,7 +53,7 @@ export class DevtoolConfigure {
   }
 
   async reconfigure(): Promise<void> {
-    this.gce = {
+    this.adt = {
       host: null,
       ports: {
         server: 6730,
@@ -68,9 +68,9 @@ export class DevtoolConfigure {
     this.warnings = [];
 
     try {
-      await this.reconfigureGce();
+      await this.reconfigureAdt();
     } catch (error) {
-      this.addWarning("gce", error instanceof Error ? error.message : "Unknown gce error");
+      this.addWarning("adt", error instanceof Error ? error.message : "Unknown adt error");
     }
 
     try {
@@ -86,44 +86,44 @@ export class DevtoolConfigure {
     }
   }
 
-  private async reconfigureGce(): Promise<void> {
-    const gce = toRecord(this.initialConfig.gce);
-    if (Object.keys(gce).length === 0) {
+  private async reconfigureAdt(): Promise<void> {
+    const adt = toRecord(this.initialConfig.adt);
+    if (Object.keys(adt).length === 0) {
       return;
     }
 
-    if (typeof gce.host === "string") {
-      this.gce.host = gce.host;
+    if (typeof adt.host === "string") {
+      this.adt.host = adt.host;
     }
 
-    if (typeof gce.uiPath === "string") {
-      this.gce.uiPath = gce.uiPath;
+    if (typeof adt.uiPath === "string") {
+      this.adt.uiPath = adt.uiPath;
     }
 
-    if (gce.secure === true || gce.secure === false) {
-      if (gce.secure && !this.gce.host) {
-        this.addWarning("gce.secure", "You have to define gce.host if you want secure connections.");
+    if (adt.secure === true || adt.secure === false) {
+      if (adt.secure && !this.adt.host) {
+        this.addWarning("adt.secure", "You have to define adt.host if you want secure connections.");
       } else {
-        this.gce.secure = gce.secure;
+        this.adt.secure = adt.secure;
       }
     }
 
-    if (isObject(gce.ports)) {
-      if (Number.isInteger(gce.ports.server) && (gce.ports.server as number) > 0) {
-        this.gce.ports.server = gce.ports.server as number;
+    if (isObject(adt.ports)) {
+      if (Number.isInteger(adt.ports.server) && (adt.ports.server as number) > 0) {
+        this.adt.ports.server = adt.ports.server as number;
       }
-      if (Number.isInteger(gce.ports.loadBalancer) && (gce.ports.loadBalancer as number) > 0) {
-        this.gce.ports.loadBalancer = gce.ports.loadBalancer as number;
+      if (Number.isInteger(adt.ports.loadBalancer) && (adt.ports.loadBalancer as number) > 0) {
+        this.adt.ports.loadBalancer = adt.ports.loadBalancer as number;
       }
     }
 
-    if (gce.notifications === true || gce.notifications === false) {
-      this.gce.notifications = gce.notifications;
+    if (adt.notifications === true || adt.notifications === false) {
+      this.adt.notifications = adt.notifications;
     }
 
-    const hosts = toStringArray(gce.hosts);
+    const hosts = toStringArray(adt.hosts);
     if (hosts) {
-      this.gce.hosts = hosts;
+      this.adt.hosts = hosts;
     }
   }
 
@@ -193,7 +193,7 @@ export class DevtoolConfigure {
       description: typeof project.description === "string" ? project.description : null,
       path: projectPath,
       directories: {},
-      notifications: project.notifications === false ? false : this.gce.notifications,
+      notifications: project.notifications === false ? false : this.adt.notifications,
       meta: project.meta,
     };
 

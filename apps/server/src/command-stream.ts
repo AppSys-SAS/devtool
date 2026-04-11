@@ -358,7 +358,7 @@ export class DevtoolCommandStream {
       throw new Error("Bad command args");
     }
 
-    return args.map((item) => item.replace(/%\{GCE:CWD\}/g, this.cwd));
+    return args.map((item) => item.replace(/%\{ADT:CWD\}/g, this.cwd));
   }
 
   private async start({

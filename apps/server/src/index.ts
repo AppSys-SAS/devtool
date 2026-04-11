@@ -82,33 +82,48 @@ function normalizeProjectsShape(config: RawConfig): RawConfig {
   return config;
 }
 
-function createRuntimeConfig(raw: RawConfig, options: Required<Pick<ServerBootstrapOptions, "serverPort" | "loadBalancerPort">> & { ssl: string | null; uiPath: string | null }): RawConfig {
+function createRuntimeConfig(raw: RawConfig, options: Pick<ServerBootstrapOptions, "serverPort" | "loadBalancerPort"> & { ssl: string | null; uiPath: string | null }): RawConfig {
+  const adtRuntimeOverrides: Record<string, unknown> = {
+  };
+
+  if (typeof options.uiPath === "string" && options.uiPath.length > 0) {
+    adtRuntimeOverrides.uiPath = options.uiPath;
+  }
+
+  const portOverrides: Record<string, number> = {};
+  if (Number.isInteger(options.serverPort) && (options.serverPort as number) > 0) {
+    portOverrides.server = options.serverPort as number;
+  }
+  if (Number.isInteger(options.loadBalancerPort) && (options.loadBalancerPort as number) > 0) {
+    portOverrides.loadBalancer = options.loadBalancerPort as number;
+  }
+  if (Object.keys(portOverrides).length > 0) {
+    adtRuntimeOverrides.ports = portOverrides;
+  }
+
+  if (typeof options.ssl === "string" && options.ssl.length > 0) {
+    adtRuntimeOverrides.host = options.ssl;
+    adtRuntimeOverrides.secure = true;
+  }
+
   const base = mergeDeep(
     {
       loadBalancers: {},
-      gce: {
+      adt: {
         notifications: true,
       },
     },
     raw,
     {
-      gce: {
-        host: options.ssl,
-        uiPath: options.uiPath ?? undefined,
-        ports: {
-          server: options.serverPort,
-          loadBalancer: options.loadBalancerPort,
-        },
-        secure: Boolean(options.ssl),
-      },
+      adt: adtRuntimeOverrides,
     },
   ) as RawConfig;
 
   const serverConfig = toRecord(base.server);
   const serverHosts = toStringArray(serverConfig.hosts);
-  const gceConfig = toRecord(base.gce);
-  gceConfig.hosts = serverHosts ?? [];
-  base.gce = gceConfig;
+  const adtConfig = toRecord(base.adt);
+  adtConfig.hosts = serverHosts ?? [];
+  base.adt = adtConfig;
 
   const serverDomains = toRecord(serverConfig.domains);
   const loadBalancers = toRecord(base.loadBalancers);
@@ -127,8 +142,8 @@ function createRuntimeConfig(raw: RawConfig, options: Required<Pick<ServerBootst
 }
 
 export default async function runServer({
-  serverPort = 6730,
-  loadBalancerPort = 6731,
+  serverPort,
+  loadBalancerPort,
   ssl = null,
   uiPath = null,
   configPaths,

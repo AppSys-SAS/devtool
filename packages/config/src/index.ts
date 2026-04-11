@@ -8,12 +8,48 @@ import mergeWith from "lodash.mergewith";
 
 export type RawConfig = Record<string, unknown>;
 
+const ENV_VAR_PATTERN = /\$(\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))/g;
+
 function resolveHomePath(input: string): string {
   if (input.startsWith("~/")) {
     return path.join(os.homedir(), input.slice(2));
   }
 
   return input;
+}
+
+function expandEnvVars(input: string): string {
+  const withHome = resolveHomePath(input);
+
+  return withHome.replace(ENV_VAR_PATTERN, (_, _full, bracedName: string | undefined, plainName: string | undefined) => {
+    const varName = bracedName ?? plainName;
+    if (!varName) {
+      return _;
+    }
+
+    const value = process.env[varName];
+    return typeof value === "string" ? value : _;
+  });
+}
+
+function expandEnvVarsDeep(value: unknown): unknown {
+  if (typeof value === "string") {
+    return expandEnvVars(value);
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => expandEnvVarsDeep(item));
+  }
+
+  if (typeof value === "object" && value !== null) {
+    const output: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(value)) {
+      output[key] = expandEnvVarsDeep(item);
+    }
+    return output;
+  }
+
+  return value;
 }
 
 async function pathExists(fullPath: string): Promise<boolean> {
@@ -64,7 +100,8 @@ async function loadConfigFileInternal(filePath: string, seen: Set<string>): Prom
 }
 
 export async function loadConfigFile(filePath: string): Promise<RawConfig> {
-  return loadConfigFileInternal(filePath, new Set<string>());
+  const loaded = await loadConfigFileInternal(filePath, new Set<string>());
+  return expandEnvVarsDeep(loaded) as RawConfig;
 }
 
 export function resolveDefaultConfigPaths(cwd = process.cwd()): string[] {

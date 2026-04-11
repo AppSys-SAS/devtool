@@ -57,7 +57,7 @@ export class DevtoolHttp {
   }
 
   async listen(): Promise<void> {
-    const port = this.context.config.gce.ports.server;
+    const port = this.context.config.adt.ports.server;
     await new Promise<void>((resolve) => {
       this.server.listen(port, "0.0.0.0", () => resolve());
     });
@@ -79,7 +79,7 @@ export class DevtoolHttp {
 
   private async onRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     try {
-      const uiPath = this.context.config.gce.uiPath;
+      const uiPath = this.context.config.adt.uiPath;
       if (!uiPath) {
         res.writeHead(404);
         res.end("No UI path configured");

@@ -22,6 +22,13 @@ function parsePort(input: string, label: string): number {
   return parsed;
 }
 
+function parseOptionalPort(input: string | undefined, label: string): number | undefined {
+  if (typeof input !== "string") {
+    return undefined;
+  }
+  return parsePort(input, label);
+}
+
 async function main(): Promise<void> {
   const program = new Command();
 
@@ -31,17 +38,20 @@ async function main(): Promise<void> {
     .command("server [configurations...]")
     .description("Run Devtool server")
     .option("-s, --ssl <domain>", "enable SSL for the domain given")
-    .option("-g, --server-port <port>", "server port", "6730")
-    .option("-l, --load-balancer-port <port>", "load balancer port", "6731")
+    .option("-g, --server-port <port>", "server port")
+    .option("-l, --load-balancer-port <port>", "load balancer port")
     .option("--ui-path <path>", "path to static UI files", DEFAULT_UI_PATH)
     .option("--log-level <level>", "set log level (error|warn|info|debug)", "info")
-    .action(async (configurations: string[], options: Record<string, string>) => {
+    .action(async (configurations: string[], options: Record<string, string | undefined>) => {
       logger.setLevel((options.logLevel ?? "info") as LogLevel);
 
-      const configPaths = configurations.length ? configurations : resolveDefaultConfigPaths();
+      const invocationCwd = process.env.INIT_CWD && process.env.INIT_CWD.length ? process.env.INIT_CWD : process.cwd();
+      const configPaths = configurations.length
+        ? configurations.map((configuration) => (path.isAbsolute(configuration) ? configuration : path.resolve(invocationCwd, configuration)))
+        : resolveDefaultConfigPaths();
       await runServer({
-        serverPort: parsePort(options.serverPort, "server port"),
-        loadBalancerPort: parsePort(options.loadBalancerPort, "load balancer port"),
+        serverPort: parseOptionalPort(options.serverPort, "server port"),
+        loadBalancerPort: parseOptionalPort(options.loadBalancerPort, "load balancer port"),
         ssl: options.ssl ?? null,
         uiPath: options.uiPath ?? null,
         configPaths,
@@ -54,11 +64,11 @@ async function main(): Promise<void> {
     .option("-l, --load-balancer-port <port>", "Devtool load-balancer port", "6731")
     .option("-p, --proxy-port <port>", "proxy port", "443")
     .option("--log-level <level>", "set log level (error|warn|info|debug)", "info")
-    .action((options: Record<string, string>) => {
+    .action((options: Record<string, string | undefined>) => {
       logger.setLevel((options.logLevel ?? "info") as LogLevel);
       runProxy({
-        gceSecurePort: parsePort(options.loadBalancerPort, "load balancer port"),
-        proxyPort: parsePort(options.proxyPort, "proxy port"),
+        adtSecurePort: parsePort(options.loadBalancerPort ?? "6731", "load balancer port"),
+        proxyPort: parsePort(options.proxyPort ?? "443", "proxy port"),
       });
     });
 
