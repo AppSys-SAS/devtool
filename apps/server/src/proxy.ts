@@ -8,6 +8,7 @@ interface ServerCandidate {
   slug: string;
   hosts: string[];
   ports: number[];
+  tls: boolean;
   path: string | null;
   prefix: string | null;
   pathNot: string | null;
@@ -21,9 +22,6 @@ export class DevtoolProxy {
 
   constructor() {
     this.proxy = httpProxy.createProxyServer({
-      headers: {
-        "X-Forwarded-Proto": "https",
-      },
       ws: true,
       changeOrigin: true,
     });
@@ -53,6 +51,7 @@ export class DevtoolProxy {
             slug: `${projectSlug}:${directorySlug}:${serverSlug}`,
             hosts: server.hosts.map((host) => host.toLowerCase()),
             ports: server.ports,
+            tls: server.tls,
             path: server.path,
             prefix: server.prefix,
             pathNot: server.pathNot,
@@ -67,6 +66,7 @@ export class DevtoolProxy {
         slug: "DEVTOOL:HTTP",
         hosts: [config.adt.host.toLowerCase()],
         ports: [config.adt.ports.server],
+        tls: true,
         path: null,
         prefix: null,
         pathNot: null,
@@ -86,6 +86,7 @@ export class DevtoolProxy {
     }
 
     const port = this.nextPort(server);
+    this.applyForwardedHeaders(req, server);
     this.rewriteRequest(req, server);
     logger.debug("Proxy", `${server.slug}:${port}`, req.url ?? "/");
 
@@ -105,6 +106,7 @@ export class DevtoolProxy {
     }
 
     const port = this.nextPort(server);
+    this.applyForwardedHeaders(req, server);
     this.rewriteRequest(req, server);
     logger.debug("Proxy", `${server.slug}:${port}`, req.url ?? "/");
 
@@ -147,5 +149,16 @@ export class DevtoolProxy {
     if (!(request.url ?? "").startsWith("/")) {
       request.url = `/${request.url ?? ""}`;
     }
+  }
+
+  private applyForwardedHeaders(request: IncomingMessage, server: ServerCandidate): void {
+    const host = request.headers.host ?? "";
+    const hostParts = host.split(":");
+    const lastHostPart = hostParts.length > 1 ? hostParts[hostParts.length - 1] : null;
+    const forwardedPort = lastHostPart && /^\d+$/.test(lastHostPart) ? lastHostPart : server.tls ? "443" : "80";
+
+    request.headers["x-forwarded-proto"] = server.tls ? "https" : "http";
+    request.headers["x-forwarded-port"] = forwardedPort;
+    request.headers["x-forwarded-ssl"] = server.tls ? "on" : "off";
   }
 }

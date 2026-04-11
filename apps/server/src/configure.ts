@@ -279,6 +279,12 @@ export class DevtoolConfigure {
         continue;
       }
 
+      const tls = lb.tls === true;
+      if ("tls" in lb && lb.tls !== true && lb.tls !== false) {
+        this.addWarning(`${slug}.loadBalancer[${lbSlug}].tls`, "is not a boolean");
+        continue;
+      }
+
       if (lb.path && !this.checkString(`${slug}.loadBalancer[${lbSlug}].path`, lb.path)) {
         continue;
       }
@@ -293,6 +299,7 @@ export class DevtoolConfigure {
         slug: lbSlug,
         hosts,
         ports,
+        tls,
         path: typeof lb.path === "string" ? lb.path : null,
         prefix: typeof lb.prefix === "string" ? lb.prefix : null,
         pathNot: typeof lb.pathNot === "string" ? lb.pathNot : null,
