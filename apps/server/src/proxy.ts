@@ -7,12 +7,14 @@ import type { RuntimeConfig } from "@appsys/devtool-shared";
 interface ServerCandidate {
   slug: string;
   hosts: string[];
-  ports: number[];
-  tls: boolean;
+  targets: Array<{
+    url: string;
+    tls: boolean;
+  }>;
   path: string | null;
   prefix: string | null;
   pathNot: string | null;
-  roundRobinPortIndex: number;
+  roundRobinTargetIndex: number;
 }
 
 export class DevtoolProxy {
@@ -47,30 +49,38 @@ export class DevtoolProxy {
     for (const [projectSlug, project] of Object.entries(config.projects)) {
       for (const [directorySlug, directory] of Object.entries(project.directories)) {
         for (const [serverSlug, server] of Object.entries(directory.loadBalancer)) {
+          const targets = [
+            ...server.ports.map((port) => ({ url: `http://127.0.0.1:${port}`, tls: server.tls })),
+            ...server.urls.map((url) => ({ url, tls: server.tls || url.startsWith("https://") })),
+          ];
+
+          if (!targets.length) {
+            continue;
+          }
+
           nextServers.push({
             slug: `${projectSlug}:${directorySlug}:${serverSlug}`,
             hosts: server.hosts.map((host) => host.toLowerCase()),
-            ports: server.ports,
-            tls: server.tls,
+            targets,
             path: server.path,
             prefix: server.prefix,
             pathNot: server.pathNot,
-            roundRobinPortIndex: server.ports.length - 1,
+            roundRobinTargetIndex: targets.length - 1,
           });
         }
       }
     }
 
     if (config.adt.host) {
+      const targets = [{ url: `http://127.0.0.1:${config.adt.ports.server}`, tls: true }];
       nextServers.push({
         slug: "DEVTOOL:HTTP",
         hosts: [config.adt.host.toLowerCase()],
-        ports: [config.adt.ports.server],
-        tls: true,
+        targets,
         path: null,
         prefix: null,
         pathNot: null,
-        roundRobinPortIndex: 0,
+        roundRobinTargetIndex: targets.length - 1,
       });
     }
 
@@ -85,13 +95,13 @@ export class DevtoolProxy {
       return false;
     }
 
-    const port = this.nextPort(server);
-    this.applyForwardedHeaders(req, server);
+    const target = this.nextTarget(server);
+    this.applyForwardedHeaders(req, target);
     this.rewriteRequest(req, server);
-    logger.debug("Proxy", `${server.slug}:${port}`, req.url ?? "/");
+    logger.debug("Proxy", `${server.slug}:${target.url}`, req.url ?? "/");
 
     this.proxy.web(req, res, {
-      target: `http://127.0.0.1:${port}`,
+      target: target.url,
     });
 
     return true;
@@ -105,13 +115,13 @@ export class DevtoolProxy {
       return false;
     }
 
-    const port = this.nextPort(server);
-    this.applyForwardedHeaders(req, server);
+    const target = this.nextTarget(server);
+    this.applyForwardedHeaders(req, target);
     this.rewriteRequest(req, server);
-    logger.debug("Proxy", `${server.slug}:${port}`, req.url ?? "/");
+    logger.debug("Proxy", `${server.slug}:${target.url}`, req.url ?? "/");
 
     this.proxy.ws(req, socket, head, {
-      target: `http://127.0.0.1:${port}`,
+      target: this.toWebSocketTarget(target.url),
     });
 
     return true;
@@ -135,9 +145,9 @@ export class DevtoolProxy {
     return servers[0] ?? null;
   }
 
-  private nextPort(server: ServerCandidate): number {
-    server.roundRobinPortIndex = (server.roundRobinPortIndex + 1) % server.ports.length;
-    return server.ports[server.roundRobinPortIndex];
+  private nextTarget(server: ServerCandidate): { url: string; tls: boolean } {
+    server.roundRobinTargetIndex = (server.roundRobinTargetIndex + 1) % server.targets.length;
+    return server.targets[server.roundRobinTargetIndex];
   }
 
   private rewriteRequest(request: IncomingMessage, server: ServerCandidate): void {
@@ -151,14 +161,27 @@ export class DevtoolProxy {
     }
   }
 
-  private applyForwardedHeaders(request: IncomingMessage, server: ServerCandidate): void {
+  private applyForwardedHeaders(request: IncomingMessage, target: { url: string; tls: boolean }): void {
     const host = request.headers.host ?? "";
     const hostParts = host.split(":");
     const lastHostPart = hostParts.length > 1 ? hostParts[hostParts.length - 1] : null;
-    const forwardedPort = lastHostPart && /^\d+$/.test(lastHostPart) ? lastHostPart : server.tls ? "443" : "80";
+    const forwardedPort = lastHostPart && /^\d+$/.test(lastHostPart) ? lastHostPart : target.tls ? "443" : "80";
 
-    request.headers["x-forwarded-proto"] = server.tls ? "https" : "http";
+    request.headers["x-forwarded-proto"] = target.tls ? "https" : "http";
     request.headers["x-forwarded-port"] = forwardedPort;
-    request.headers["x-forwarded-ssl"] = server.tls ? "on" : "off";
+    request.headers["x-forwarded-ssl"] = target.tls ? "on" : "off";
+  }
+
+  private toWebSocketTarget(targetUrl: string): string {
+    const parsedUrl = new URL(targetUrl);
+    if (parsedUrl.protocol === "http:") {
+      parsedUrl.protocol = "ws:";
+      return parsedUrl.toString();
+    }
+    if (parsedUrl.protocol === "https:") {
+      parsedUrl.protocol = "wss:";
+      return parsedUrl.toString();
+    }
+    return targetUrl;
   }
 }

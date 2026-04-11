@@ -268,15 +268,54 @@ export class DevtoolConfigure {
     for (const [lbSlug, lbRaw] of Object.entries(lbRecord)) {
       const lb = toRecord(lbRaw);
       const hosts = toStringArray(lb.hosts);
-      const ports = toIntegerArray(lb.ports);
+      const parsedPorts = toIntegerArray(lb.ports);
+      if ("ports" in lb && parsedPorts === null) {
+        this.addWarning(`${slug}.loadBalancer[${lbSlug}].ports`, "must be an array of positive integers");
+        continue;
+      }
+      const ports = parsedPorts ?? [];
+      const urls: string[] = [];
 
       if (!hosts?.length) {
         this.addWarning(`${slug}.loadBalancer[${lbSlug}].hosts`, "not defined or empty");
         continue;
       }
-      if (!ports?.length) {
-        this.addWarning(`${slug}.loadBalancer[${lbSlug}].ports`, "not defined or empty");
-        continue;
+
+      if ("url" in lb) {
+        if (typeof lb.url !== "string") {
+          this.addWarning(`${slug}.loadBalancer[${lbSlug}].url`, "is not a string");
+          continue;
+        }
+        urls.push(lb.url);
+      }
+
+      if ("urls" in lb) {
+        const lbUrls = toStringArray(lb.urls);
+        if (!lbUrls) {
+          this.addWarning(`${slug}.loadBalancer[${lbSlug}].urls`, "must be an array of strings");
+          continue;
+        }
+        urls.push(...lbUrls);
+      }
+
+      const validatedUrls: string[] = [];
+      for (const rawUrl of urls) {
+        const urlValue = rawUrl.trim();
+        if (!urlValue.length) {
+          continue;
+        }
+
+        try {
+          const parsedUrl = new URL(urlValue);
+          if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
+            this.addWarning(`${slug}.loadBalancer[${lbSlug}].url`, "must use http:// or https://");
+            continue;
+          }
+          validatedUrls.push(parsedUrl.toString());
+        } catch {
+          this.addWarning(`${slug}.loadBalancer[${lbSlug}].url`, `invalid URL: ${urlValue}`);
+          continue;
+        }
       }
 
       const tls = lb.tls === true;
@@ -299,6 +338,7 @@ export class DevtoolConfigure {
         slug: lbSlug,
         hosts,
         ports,
+        urls: validatedUrls,
         tls,
         path: typeof lb.path === "string" ? lb.path : null,
         prefix: typeof lb.prefix === "string" ? lb.prefix : null,

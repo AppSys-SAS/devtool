@@ -19,6 +19,7 @@ export interface DirectoryLoadBalancerRule {
   slug: string;
   hosts: string[];
   ports: number[];
+  urls: string[];
   tls: boolean;
   path: string | null;
   prefix: string | null;

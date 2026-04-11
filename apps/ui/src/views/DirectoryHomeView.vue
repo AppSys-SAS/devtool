@@ -58,7 +58,10 @@ function runCommand(): void {
         >
           {{ directoryDescription }}
         </p>
-        <Button @click="runCommand">
+        <Button
+          class="h-auto w-full justify-start whitespace-normal break-all px-3 py-2 text-left font-mono text-xs leading-5"
+          @click="runCommand"
+        >
           {{ directoryArgs.join(" ") }}
         </Button>
       </CardContent>
