@@ -267,7 +267,6 @@ function resolveIconFromMeta(meta: unknown, fallback = "ph:terminal-window-duoto
               :key="`project/${project.slug}/stream/${stream.slug}`"
               :stream="stream"
               :label="stream.name"
-              :icon="resolveIconFromMeta(project.meta)"
               :route="{ name: 'project-stream', params: { projectSlug: project.slug, streamSlug: stream.slug } }"
               @start="streamUpdate($event, 'start')"
               @stop="streamUpdate($event, 'stop')"
@@ -285,7 +284,8 @@ function resolveIconFromMeta(meta: unknown, fallback = "ph:terminal-window-duoto
                 class="group flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent/60"
                 :class="{
                   'bg-accent/60': directory.stream?.status === 'RUNNING',
-                  'border border-destructive/40': directory.stream?.status === 'ERROR'
+                  'border border-destructive/40': directory.stream?.status === 'ERROR',
+                  'border border-valid/40': directory.stream?.status === 'STOPPED'
                 }"
               >
                 <Icon
@@ -337,7 +337,6 @@ function resolveIconFromMeta(meta: unknown, fallback = "ph:terminal-window-duoto
                   :key="`project/${project.slug}/directory/${directory.slug}/stream/${stream.slug}`"
                   :stream="stream"
                   :label="stream.name"
-                  :icon="resolveIconFromMeta(directory.meta)"
                   :route="{
                     name: 'directory-stream',
                     params: { projectSlug: project.slug, directorySlug: directory.slug, streamSlug: stream.slug }
@@ -359,7 +358,7 @@ function resolveIconFromMeta(meta: unknown, fallback = "ph:terminal-window-duoto
         :to="{ name: 'dashboard' }"
         class="min-w-0 truncate text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
       >
-        Devtool <sup>{{ appVersion }}</sup>
+        AppSys Devtool <sup>{{ appVersion }}</sup>
       </RouterLink>
       <Button
         size="sm"

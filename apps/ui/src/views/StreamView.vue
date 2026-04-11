@@ -33,7 +33,24 @@ const searchVisible = ref(false);
 const searchQuery = ref("");
 const withInformation = ref(false);
 
-const stream = computed(() => configStore.commandStreams.value.find((item) => item.slug === props.streamSlug) ?? null);
+const stream = computed(
+  () =>
+    configStore.commandStreams.value.find((item) => {
+      if (item.slug !== props.streamSlug) {
+        return false;
+      }
+
+      if (props.projectSlug && item.projectSlug !== props.projectSlug) {
+        return false;
+      }
+
+      if (props.directorySlug && item.directorySlug !== props.directorySlug) {
+        return false;
+      }
+
+      return true;
+    }) ?? null,
+);
 const outputStoreRef = computed(() => configStore.getCommandStreamsOutput(props.streamSlug));
 const cwd = computed(() => stream.value?.cwd ?? "N/A");
 const runningDate = computed(() => (stream.value?.runningDate ? formatDate(stream.value.runningDate) : null));
@@ -252,17 +269,18 @@ watch(
     }
 
     if (props.projectSlug && props.directorySlug) {
-      void router.push({ name: "directory", params: { projectSlug: props.projectSlug, directorySlug: props.directorySlug } });
+      void router.replace({ name: "directory", params: { projectSlug: props.projectSlug, directorySlug: props.directorySlug } });
       return;
     }
 
     if (props.projectSlug) {
-      void router.push({ name: "project", params: { projectSlug: props.projectSlug } });
+      void router.replace({ name: "project", params: { projectSlug: props.projectSlug } });
       return;
     }
 
-    void router.push({ name: "dashboard" });
+    void router.replace({ name: "dashboard" });
   },
+  { immediate: true },
 );
 
 watch(

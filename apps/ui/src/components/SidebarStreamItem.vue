@@ -30,7 +30,8 @@ const isRunning = computed(() => props.stream.status === "RUNNING");
     class="group flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent/60"
     :class="{
       'bg-accent/60': isRunning,
-      'border border-destructive/40': stream.status === 'ERROR'
+      'border border-destructive/40': stream.status === 'ERROR',
+      'border border-valid/40': stream.status === 'STOPPED'
     }"
   >
     <Icon
