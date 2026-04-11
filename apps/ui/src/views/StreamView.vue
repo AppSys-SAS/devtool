@@ -4,7 +4,6 @@ import { Terminal } from "xterm";
 import { FitAddon } from "xterm-addon-fit";
 import { SearchAddon } from "xterm-addon-search";
 import { WebLinksAddon } from "xterm-addon-web-links";
-import { WebglAddon } from "xterm-addon-webgl";
 import { Unicode11Addon } from "xterm-addon-unicode11";
 import { Eraser, Play, RotateCcw, Search, Square, Trash2 } from "lucide-vue-next";
 import router from "@/router";
@@ -66,9 +65,9 @@ const fullName = computed(() => stream.value?.name ?? "N/A");
 let terminal: Terminal | null = null;
 let fitAddon: FitAddon | null = null;
 let searchAddon: SearchAddon | null = null;
-let webglAddon: WebglAddon | null = null;
 let resizeObserver: ResizeObserver | null = null;
 let outputStore: CommandStreamOutputStore | null = null;
+let fitFrame: number | null = null;
 
 const outputListener = (event: Event): void => {
   if (!(event instanceof CustomEvent) || !terminal) {
@@ -133,8 +132,21 @@ function fitTerminal(): void {
   if (!terminal || !fitAddon || !terminalElement.value) {
     return;
   }
-  fitAddon.fit();
-  wsStore.streamResize(props.streamSlug, terminal.cols, terminal.rows);
+
+  if (fitFrame !== null) {
+    window.cancelAnimationFrame(fitFrame);
+  }
+
+  fitFrame = window.requestAnimationFrame(() => {
+    if (!terminal || !fitAddon || !terminalElement.value) {
+      return;
+    }
+
+    fitAddon.fit();
+    terminal.scrollToBottom();
+    wsStore.streamResize(props.streamSlug, terminal.cols, terminal.rows);
+    fitFrame = null;
+  });
 }
 
 function toggleSearch(): void {
@@ -190,18 +202,16 @@ onMounted(() => {
     convertEol: true,
     cursorBlink: true,
     fontSize: 13,
+    lineHeight: 1.1,
     fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, Courier New, monospace",
     allowProposedApi: true,
   });
 
   fitAddon = new FitAddon();
   searchAddon = new SearchAddon();
-  webglAddon = new WebglAddon();
-  webglAddon.onContextLoss(() => webglAddon?.dispose());
 
   terminal.loadAddon(fitAddon);
   terminal.loadAddon(searchAddon);
-  terminal.loadAddon(webglAddon);
   terminal.loadAddon(new Unicode11Addon());
   terminal.loadAddon(
     new WebLinksAddon((_, url) => {
@@ -229,6 +239,7 @@ onMounted(() => {
     resizeObserver.observe(terminalElement.value);
   }
 
+  window.addEventListener("resize", fitTerminal);
   fitTerminal();
   syncOutputStore();
 });
@@ -238,14 +249,17 @@ onBeforeUnmount(() => {
     outputStore.removeEventListener("output", outputListener);
   }
   resizeObserver?.disconnect();
-  webglAddon?.dispose();
+  window.removeEventListener("resize", fitTerminal);
+  if (fitFrame !== null) {
+    window.cancelAnimationFrame(fitFrame);
+  }
   terminal?.dispose();
   outputStore = null;
   terminal = null;
   fitAddon = null;
   searchAddon = null;
-  webglAddon = null;
   resizeObserver = null;
+  fitFrame = null;
 });
 
 watch(
@@ -334,10 +348,12 @@ watch(
       </Button>
     </div>
 
-    <div
-      ref="terminalElement"
-      class="min-h-0 flex-1 overflow-hidden px-3 pt-2 mb:2"
-    />
+    <div class="min-h-0 flex-1 px-3 py-2">
+      <div
+        ref="terminalElement"
+        class="h-full w-full overflow-hidden"
+      />
+    </div>
 
     <section
       v-if="withInformation"
