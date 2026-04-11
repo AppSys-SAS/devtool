@@ -318,6 +318,7 @@ export class DevtoolConfigure {
         detached: extra.detached === true,
         notifications: extra.notifications === false ? false : directoryDefinition.notifications,
         env: extraEnv,
+        meta: extra.meta,
       };
     }
 

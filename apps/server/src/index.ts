@@ -36,14 +36,21 @@ function normalizeProjectsShape(config: RawConfig): RawConfig {
     }
 
     let args = ["pnpm", "run", "start"];
+    let env: unknown = project.env;
     const defaultCommand = toRecord(commands.default);
     if (Array.isArray(defaultCommand.args)) {
       args = defaultCommand.args.filter((item): item is string => typeof item === "string");
+      if ("env" in defaultCommand) {
+        env = defaultCommand.env;
+      }
     } else if (typeof defaultCommand.alias === "string") {
       const alias = toRecord(commands[defaultCommand.alias]);
       const aliasArgs = toStringArray(alias.args);
       if (aliasArgs?.length) {
         args = aliasArgs;
+      }
+      if ("env" in alias) {
+        env = alias.env;
       }
     }
 
@@ -59,6 +66,7 @@ function normalizeProjectsShape(config: RawConfig): RawConfig {
     sectionDirectories[projectSlug] = {
       ...project,
       args,
+      env,
       extras,
       loadBalancer: services,
     };

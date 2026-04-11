@@ -57,6 +57,8 @@ const runningDate = computed(() => (stream.value?.runningDate ? formatDate(strea
 const stoppedDate = computed(() =>
   stream.value?.stoppedDate ? formatDate(stream.value.stoppedDate, stream.value.runningDate ?? undefined) : null,
 );
+
+const args = computed(() => Object.entries(stream.value?.args ?? {}).map(([key, value]) => `${value}`));
 const exitCode = computed(() => stream.value?.exitCode ?? null);
 const env = computed(() => Object.entries(stream.value?.env ?? {}).map(([key, value]) => `${key}=${value}`));
 const fullName = computed(() => stream.value?.name ?? "N/A");
@@ -334,7 +336,7 @@ watch(
 
     <div
       ref="terminalElement"
-      class="min-h-0 flex-1 overflow-hidden px-3 pt-2"
+      class="min-h-0 flex-1 overflow-hidden px-3 pt-2 mb:2"
     />
 
     <section
@@ -354,11 +356,11 @@ watch(
         <p v-if="exitCode !== null">
           <strong>Exit Code:</strong> {{ exitCode }}
         </p>
-        <p
-          v-for="item in env"
-          :key="item"
-        >
-          <strong>ENV:</strong> {{ item }}
+        <p v-if="args !== null">
+          <strong>Args:</strong> {{ args }}
+        </p>
+        <p v-if="env !== null">
+          <strong>ENV Variables:</strong> {{ env }}
         </p>
       </div>
     </section>

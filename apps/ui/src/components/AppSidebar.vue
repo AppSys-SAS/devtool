@@ -20,6 +20,7 @@ interface SidebarDirectory {
   name: string;
   args: string[];
   env: Record<string, string>;
+  extras: Record<string, { name: string; args: string[]; meta?: unknown }>;
   notifications: boolean;
   stream: CommandStream | null;
   streams: CommandStream[];
@@ -92,6 +93,7 @@ const sidebarData = computed(() => {
           name: directory.name || directorySlug,
           args: directory.args,
           env: directory.env,
+          extras: directory.extras,
           notifications: directory.notifications,
           stream: null,
           streams: [],
@@ -196,6 +198,43 @@ function resolveIconFromMeta(meta: unknown, fallback = "ph:terminal-window-duoto
     return icon;
   }
   return `lucide:${icon}`;
+}
+
+function areArgsEqual(left: string[], right: string[]): boolean {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] !== right[index]) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function resolveStreamIcon(directory: SidebarDirectory, stream: CommandStream): string {
+  const extras = Object.values(directory.extras);
+  for (const extra of extras) {
+    if (extra.name === stream.name && areArgsEqual(extra.args, stream.args)) {
+      return resolveIconFromMeta(extra.meta);
+    }
+  }
+
+  for (const extra of extras) {
+    if (areArgsEqual(extra.args, stream.args)) {
+      return resolveIconFromMeta(extra.meta);
+    }
+  }
+
+  for (const extra of extras) {
+    if (extra.name === stream.name) {
+      return resolveIconFromMeta(extra.meta);
+    }
+  }
+
+  return resolveIconFromMeta(directory.meta);
 }
 </script>
 
@@ -337,6 +376,7 @@ function resolveIconFromMeta(meta: unknown, fallback = "ph:terminal-window-duoto
                   :key="`project/${project.slug}/directory/${directory.slug}/stream/${stream.slug}`"
                   :stream="stream"
                   :label="stream.name"
+                  :icon="resolveStreamIcon(directory, stream)"
                   :route="{
                     name: 'directory-stream',
                     params: { projectSlug: project.slug, directorySlug: directory.slug, streamSlug: stream.slug }

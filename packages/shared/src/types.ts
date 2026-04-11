@@ -31,6 +31,7 @@ export interface DirectoryExtra {
   detached: boolean;
   notifications: boolean;
   env: Record<string, string>;
+  meta?: unknown;
 }
 
 export interface DirectoryDefinition {

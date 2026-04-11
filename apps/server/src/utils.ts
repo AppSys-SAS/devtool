@@ -37,18 +37,38 @@ export function toRecord(value: unknown): Record<string, unknown> {
 }
 
 export function toStringRecord(value: unknown): Record<string, string> | null {
-  if (!isObject(value)) {
-    return null;
-  }
+  const readRecord = (record: Record<string, unknown>, output: Record<string, string>): boolean => {
+    for (const [key, item] of Object.entries(record)) {
+      if (typeof item !== "string") {
+        return false;
+      }
+      output[key] = item;
+    }
+    return true;
+  };
 
-  const output: Record<string, string> = {};
-  for (const [key, item] of Object.entries(value)) {
-    if (typeof item !== "string") {
+  if (isObject(value)) {
+    const output: Record<string, string> = {};
+    if (!readRecord(value, output)) {
       return null;
     }
-    output[key] = item;
+    return output;
   }
-  return output;
+
+  if (Array.isArray(value)) {
+    const output: Record<string, string> = {};
+    for (const item of value) {
+      if (!isObject(item)) {
+        return null;
+      }
+      if (!readRecord(item, output)) {
+        return null;
+      }
+    }
+    return output;
+  }
+
+  return null;
 }
 
 export function toStringArray(value: unknown): string[] | null {
