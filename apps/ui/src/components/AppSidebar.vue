@@ -185,7 +185,7 @@ function startDirectoryCommand(directory: SidebarDirectory): void {
   wsStore.newCommandStream(directory.projectSlug, directory.slug, true, directory.args, directory.env, directory.notifications);
 }
 
-function resolveIconFromMeta(meta: unknown, fallback = "ph:terminal-window-duotone"): string {
+function resolveIconFromMeta(meta: unknown, fallback = "ph:terminal"): string {
   if (typeof meta !== "object" || meta === null) {
     return fallback;
   }
@@ -278,7 +278,7 @@ function resolveStreamIcon(directory: SidebarDirectory, stream: CommandStream): 
           <SidebarStreamItem
             :stream="stream"
             :label="stream.name"
-            icon="ph:terminal-window-duotone"
+            icon="ph:terminal"
             :route="{ name: 'stream', params: { streamSlug: stream.slug } }"
             @start="streamUpdate($event, 'start')"
             @stop="streamUpdate($event, 'stop')"

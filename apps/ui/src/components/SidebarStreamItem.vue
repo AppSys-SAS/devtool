@@ -35,7 +35,7 @@ const isRunning = computed(() => props.stream.status === "RUNNING");
     }"
   >
     <Icon
-      :icon="icon ?? 'ph:terminal-window-duotone'"
+      :icon="icon ?? 'ph:terminal'"
       class="size-3.5 shrink-0 text-muted-foreground"
     />
     <span class="min-w-0 flex-1 truncate">{{ label }}</span>

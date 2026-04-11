@@ -2,7 +2,7 @@ import path from "node:path";
 import fs from "node:fs/promises";
 import type { ClientConfigPayload, DirectoryDefinition, AdtDefinition, LoadBalancerCertificate, ProjectDefinition, RuntimeConfig } from "@appsys/devtool-shared";
 import { logger } from "@appsys/devtool-shared";
-import { isObject, toIntegerArray, toRecord, toStringArray, toStringRecord } from "./utils.js";
+import { isObject, toCommandArgsArray, toIntegerArray, toRecord, toStringArray, toStringRecord } from "./utils.js";
 
 const SLUG_REGEXP = /^[a-zA-Z0-9\-\/_.]+$/i;
 
@@ -236,7 +236,7 @@ export class DevtoolConfigure {
       return;
     }
 
-    const args = toStringArray(directory.args);
+    const args = toCommandArgsArray(directory.args);
     if (!args || !args.length) {
       this.addWarning(`${slug}.args`, "is empty");
       return;
@@ -302,7 +302,7 @@ export class DevtoolConfigure {
     const extras = toRecord(directory.extras);
     for (const [extraSlug, extraRaw] of Object.entries(extras)) {
       const extra = toRecord(extraRaw);
-      const extraArgs = toStringArray(extra.args);
+      const extraArgs = toCommandArgsArray(extra.args);
       if (!extraArgs?.length) {
         this.addWarning(`${slug}.extras[${extraSlug}].args`, "not defined or empty");
         continue;

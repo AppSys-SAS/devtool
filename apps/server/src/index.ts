@@ -2,7 +2,7 @@ import { loadMergedConfig, type RawConfig, resolveDefaultConfigPaths } from "@ap
 import { logger } from "@appsys/devtool-shared";
 import pkg from "../package.json" with { type: "json" };
 import { DevtoolServer } from "./server.js";
-import { mergeDeep, toRecord, toStringArray } from "./utils.js";
+import { mergeDeep, toCommandArgsArray, toRecord, toStringArray } from "./utils.js";
 import type { ServerBootstrapOptions } from "./types.js";
 
 function normalizeProjectsShape(config: RawConfig): RawConfig {
@@ -39,13 +39,16 @@ function normalizeProjectsShape(config: RawConfig): RawConfig {
     let env: unknown = project.env;
     const defaultCommand = toRecord(commands.default);
     if (Array.isArray(defaultCommand.args)) {
-      args = defaultCommand.args.filter((item): item is string => typeof item === "string");
+      const defaultArgs = toCommandArgsArray(defaultCommand.args);
+      if (defaultArgs?.length) {
+        args = defaultArgs;
+      }
       if ("env" in defaultCommand) {
         env = defaultCommand.env;
       }
     } else if (typeof defaultCommand.alias === "string") {
       const alias = toRecord(commands[defaultCommand.alias]);
-      const aliasArgs = toStringArray(alias.args);
+      const aliasArgs = toCommandArgsArray(alias.args);
       if (aliasArgs?.length) {
         args = aliasArgs;
       }

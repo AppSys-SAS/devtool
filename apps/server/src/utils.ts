@@ -78,6 +78,29 @@ export function toStringArray(value: unknown): string[] | null {
   return value;
 }
 
+export function toCommandArgsArray(value: unknown): string[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  const args: string[] = [];
+  for (const item of value) {
+    if (typeof item === "string") {
+      args.push(item);
+      continue;
+    }
+
+    if (typeof item === "number" && Number.isFinite(item)) {
+      args.push(String(item));
+      continue;
+    }
+
+    return null;
+  }
+
+  return args;
+}
+
 export function toIntegerArray(value: unknown): number[] | null {
   if (!Array.isArray(value)) {
     return null;
