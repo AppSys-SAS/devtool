@@ -395,6 +395,7 @@ export class DevtoolCommandStream {
       throw new Error("Bad command args");
     }
 
+    // noinspection RegExpRedundantEscape
     return args.map((item) => item.replace(/%\{ADT:CWD\}/g, this.cwd));
   }
 

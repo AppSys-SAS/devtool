@@ -1,51 +1,54 @@
 <script setup lang="ts">
-import { computed } from "vue";
-import { RouterLink, type RouteLocationRaw } from "vue-router";
-import { Icon } from "@iconify/vue";
-import { Circle, Play, RotateCcw, Square, Trash2 } from "lucide-vue-next";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import type { CommandStream } from "@/types";
+import { computed } from 'vue'
+import { RouterLink, type RouteLocationRaw } from 'vue-router'
+import { Icon } from '@iconify/vue'
+import { Circle, Play, RotateCcw, Square, Trash2 } from 'lucide-vue-next'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import type { CommandStream } from '@/types'
 
 const props = defineProps<{
   stream: CommandStream;
   route: RouteLocationRaw;
   label: string;
   icon?: string;
-}>();
+}>()
 
 const emit = defineEmits<{
   start: [slug: string];
   stop: [slug: string];
   restart: [slug: string];
   close: [slug: string];
-}>();
+}>()
 
-const isRunning = computed(() => props.stream.status === "RUNNING");
+const isRunning = computed(() => props.stream.status === 'RUNNING')
 </script>
 
 <template>
   <RouterLink
     :to="route"
-    class="group flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent/60"
+    class="group relative flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent/60"
     :class="{
       'bg-accent/60': isRunning,
       'border border-destructive/40': stream.status === 'ERROR',
       'border border-valid/40': stream.status === 'STOPPED'
     }"
   >
+    <span
+      v-if="stream.unread"
+      class="pointer-events-none absolute -right-0.5 -top-0.5 z-[100]"
+    >
+      <span class="relative flex size-3">
+        <span
+          class="absolute inline-flex h-full w-full animate-ping rounded-full bg-sky-400 opacity-75"></span>
+        <span class="relative inline-flex size-3 rounded-full bg-sky-500"></span>
+      </span>
+    </span>
     <Icon
       :icon="icon ?? 'ph:terminal'"
       class="size-3.5 shrink-0 text-muted-foreground"
     />
     <span class="min-w-0 flex-1 truncate">{{ label }}</span>
-    <Badge
-      v-if="stream.unread"
-      variant="secondary"
-      class="h-5 px-1.5"
-    >
-      <Circle class="size-2 fill-current" />
-    </Badge>
     <div class="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
       <Button
         v-if="!isRunning"

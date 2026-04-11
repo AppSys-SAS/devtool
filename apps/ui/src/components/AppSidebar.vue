@@ -3,9 +3,8 @@ import { computed, ref, watch } from "vue";
 import { RouterLink } from "vue-router";
 import { useColorMode } from "@vueuse/core";
 import { Icon } from "@iconify/vue";
-import { Bookmark, FolderTree, Monitor, Moon, Play, RotateCcw, Square, Sun } from "lucide-vue-next";
+import { Bookmark, Circle, FolderTree, Monitor, Moon, Play, RotateCcw, Square, Sun } from 'lucide-vue-next'
 import SidebarStreamItem from "@/components/SidebarStreamItem.vue";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
@@ -242,7 +241,7 @@ function resolveStreamIcon(directory: SidebarDirectory, stream: CommandStream): 
 
 <template>
   <aside class="flex h-full min-h-0 flex-col bg-card">
-    <ScrollArea class="min-h-0 flex-1 px-3 py-3">
+    <ScrollArea class="min-h-0 flex-1 px-3 py-3 [&>[data-slot=scroll-area-viewport]]:!overflow-visible">
       <div class="flex flex-col gap-4">
         <RouterLink
           v-if="configStore.warnings.value.length"
@@ -322,25 +321,27 @@ function resolveStreamIcon(directory: SidebarDirectory, stream: CommandStream): 
             >
               <RouterLink
                 :to="{ name: 'directory', params: { projectSlug: project.slug, directorySlug: directory.slug } }"
-                class="group flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent/60"
+                class="group relative flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent/60"
                 :class="{
                   'bg-accent/60': directory.stream?.status === 'RUNNING',
                   'border border-destructive/40': directory.stream?.status === 'ERROR',
                   'border border-valid/40': directory.stream?.status === 'STOPPED'
                 }"
               >
+                <span
+                  v-if="directory.stream?.unread"
+                  class="pointer-events-none absolute -right-0.5 -top-0.5 z-[100]"
+                >
+                  <span class="relative flex size-3">
+                    <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-sky-400 opacity-75"></span>
+                    <span class="relative inline-flex size-3 rounded-full bg-sky-500"></span>
+                  </span>
+                </span>
                 <Icon
                   :icon="resolveIconFromMeta(directory.meta, 'lucide:folder-tree')"
                   class="size-3.5 shrink-0 text-muted-foreground"
                 />
                 <span class="min-w-0 flex-1 truncate">{{ directory.name }}</span>
-                <Badge
-                  v-if="directory.stream?.unread"
-                  variant="secondary"
-                  class="h-5 px-1.5"
-                >
-                  •
-                </Badge>
                 <div class="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
                   <Button
                     v-if="!directory.stream || directory.stream.status !== 'RUNNING'"
