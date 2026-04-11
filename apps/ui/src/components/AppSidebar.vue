@@ -20,7 +20,8 @@ interface SidebarDirectory {
   name: string;
   args: string[];
   env: Record<string, string>;
-  extras: Record<string, { name: string; args: string[]; meta?: unknown }>;
+  extras: Record<string, { name: string; args: string[]; killSignal: string | null; meta?: unknown }>;
+  killSignal: string | null;
   notifications: boolean;
   stream: CommandStream | null;
   streams: CommandStream[];
@@ -93,6 +94,7 @@ const sidebarData = computed(() => {
           name: directory.name || directorySlug,
           args: directory.args,
           env: directory.env,
+          killSignal: directory.killSignal,
           extras: directory.extras,
           notifications: directory.notifications,
           stream: null,
@@ -182,7 +184,7 @@ function startDirectoryCommand(directory: SidebarDirectory): void {
     streamUpdate(directory.stream.slug, "start");
     return;
   }
-  wsStore.newCommandStream(directory.projectSlug, directory.slug, true, directory.args, directory.env, directory.notifications);
+  wsStore.newCommandStream(directory.projectSlug, directory.slug, true, directory.args, directory.env, directory.killSignal, directory.notifications);
 }
 
 function resolveIconFromMeta(meta: unknown, fallback = "ph:terminal"): string {

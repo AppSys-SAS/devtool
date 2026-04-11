@@ -29,6 +29,7 @@ function runCommand(): void {
     true,
     directory.value.args,
     directory.value.env,
+    directory.value.killSignal,
     directory.value.notifications,
     directory.value.name,
   );

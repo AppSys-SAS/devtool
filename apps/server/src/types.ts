@@ -18,6 +18,7 @@ export interface CommandStreamCreatePayload {
   primary?: boolean;
   args: string[];
   env?: Record<string, string> | null;
+  killSignal?: string | null;
   name?: string | null;
   notifications?: boolean;
   options?: {

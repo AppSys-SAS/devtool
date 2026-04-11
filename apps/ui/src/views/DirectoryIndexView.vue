@@ -30,6 +30,7 @@ type DirectoryCommand =
       icon: string;
       env: Record<string, string>;
       args: string[];
+      killSignal: string | null;
       detached: boolean;
       notifications: boolean;
       description: string;
@@ -89,6 +90,7 @@ const commands = computed<DirectoryCommand[]>(() => {
       icon: resolveIconFromMeta(command.meta),
       env: command.env,
       args: command.args,
+      killSignal: command.killSignal,
       detached: command.detached,
       notifications: command.notifications,
       description: command.args.join(" "),
@@ -122,6 +124,7 @@ function runCommand(command: Extract<DirectoryCommand, { type: "command" }>): vo
     false,
     command.args,
     command.env,
+    command.killSignal,
     command.notifications,
     command.name,
     { redirect: true },

@@ -5,6 +5,7 @@ import { logger } from "@appsys/devtool-shared";
 import { isObject, toCommandArgsArray, toIntegerArray, toRecord, toStringArray, toStringRecord } from "./utils.js";
 
 const SLUG_REGEXP = /^[a-zA-Z0-9\-\/_.]+$/i;
+const SIGNAL_REGEXP = /^SIG[A-Z0-9]+$/;
 
 export class DevtoolConfigure {
   private readonly initialConfig: Record<string, unknown>;
@@ -252,6 +253,7 @@ export class DevtoolConfigure {
       extras: {},
       notifications: directory.notifications === false ? false : projectDefinition.notifications,
       env: {},
+      killSignal: null,
       meta: directory.meta,
     };
 
@@ -262,6 +264,14 @@ export class DevtoolConfigure {
     const env = toStringRecord(directory.env);
     if (env) {
       directoryDefinition.env = env;
+    }
+
+    const directoryKillSignal = this.readKillSignal(
+      `${slug}.killSignal`,
+      directory.killSignal ?? directory.killsignal,
+    );
+    if (directoryKillSignal !== null) {
+      directoryDefinition.killSignal = directoryKillSignal;
     }
 
     const lbRecord = toRecord(directory.loadBalancer);
@@ -365,6 +375,10 @@ export class DevtoolConfigure {
         detached: extra.detached === true,
         notifications: extra.notifications === false ? false : directoryDefinition.notifications,
         env: extraEnv,
+        killSignal: this.readKillSignal(
+          `${slug}.extras[${extraSlug}].killSignal`,
+          extra.killSignal ?? extra.killsignal,
+        ),
         meta: extra.meta,
       };
     }
@@ -418,6 +432,29 @@ export class DevtoolConfigure {
     }
 
     return true;
+  }
+
+  private readKillSignal(slug: string, value: unknown): string | null {
+    if (value === undefined || value === null) {
+      return null;
+    }
+
+    if (typeof value !== "string") {
+      this.addWarning(slug, "is not a string");
+      return null;
+    }
+
+    const normalized = value.trim().toUpperCase();
+    if (!normalized.length) {
+      return null;
+    }
+
+    if (!SIGNAL_REGEXP.test(normalized)) {
+      this.addWarning(slug, "must match SIG* format (example: SIGTERM, SIGKILL)");
+      return null;
+    }
+
+    return normalized;
   }
 
   private addWarning(slug: string, message: string): false {

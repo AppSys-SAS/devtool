@@ -21,6 +21,23 @@ function shellEscapePosix(arg: string): string {
   return `'${arg.replace(/'/g, `'\\''`)}'`;
 }
 
+function normalizeKillSignal(killSignal: string | null | undefined): string | null {
+  if (typeof killSignal !== "string") {
+    return null;
+  }
+
+  const normalized = killSignal.trim().toUpperCase();
+  if (!normalized.length) {
+    return null;
+  }
+
+  if (normalized.startsWith("SIG")) {
+    return normalized;
+  }
+
+  return `SIG${normalized}`;
+}
+
 function getShellCandidates(): string[] {
   const candidates = [process.env.SHELL, "/bin/zsh", "/bin/bash", "/bin/sh"].filter(
     (item): item is string => Boolean(item && item.length),
@@ -37,6 +54,20 @@ function getShellCandidates(): string[] {
   }
 
   return unique;
+}
+
+function areArgsEqual(left: string[], right: string[]): boolean {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] !== right[index]) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 let didCheckNodePtyPermissions = false;
@@ -100,6 +131,8 @@ export class DevtoolCommandStream {
 
   public env: Record<string, string>;
 
+  public killSignal: string | null;
+
   public notifications: boolean;
 
   public runningDate: number | null;
@@ -131,6 +164,7 @@ export class DevtoolCommandStream {
     this.args = [];
     this.cwd = process.cwd();
     this.env = {};
+    this.killSignal = null;
     this.notifications = false;
     this.runningDate = null;
     this.runningArgs = null;
@@ -171,6 +205,7 @@ export class DevtoolCommandStream {
     primary = false,
     args,
     env = null,
+    killSignal = null,
     name = null,
     notifications = false,
     options = {},
@@ -195,6 +230,7 @@ export class DevtoolCommandStream {
     this.name = name ?? args.join(" ");
     this.cwd = cwd;
     this.env = env ?? {};
+    this.killSignal = normalizeKillSignal(killSignal) ?? this.resolveKillSignalFromConfig();
     this.notifications = notifications;
     this.runningDate = Date.now();
 
@@ -263,6 +299,7 @@ export class DevtoolCommandStream {
       name: this.name,
       args: this.args,
       env: this.env,
+      killSignal: this.killSignal,
       cwd: this.cwd,
       notifications: this.notifications,
       creationDate: this.creationDate,
@@ -476,17 +513,61 @@ export class DevtoolCommandStream {
     await this.addOutput("info", "Process failed to start");
   }
 
+  private resolveKillSignalFromConfig(): string | null {
+    if (!this.projectSlug || !this.directorySlug) {
+      return null;
+    }
+
+    const project = this.server.config.projects[this.projectSlug];
+    if (!project) {
+      return null;
+    }
+
+    const directory = project.directories[this.directorySlug];
+    if (!directory) {
+      return null;
+    }
+
+    if (this.primary && areArgsEqual(directory.args, this.args)) {
+      return normalizeKillSignal(directory.killSignal);
+    }
+
+    const extras = Object.values(directory.extras);
+    for (const extra of extras) {
+      if (extra.name === this.name && areArgsEqual(extra.args, this.args)) {
+        return normalizeKillSignal(extra.killSignal);
+      }
+    }
+
+    for (const extra of extras) {
+      if (areArgsEqual(extra.args, this.args)) {
+        return normalizeKillSignal(extra.killSignal);
+      }
+    }
+
+    for (const extra of extras) {
+      if (extra.name === this.name) {
+        return normalizeKillSignal(extra.killSignal);
+      }
+    }
+
+    return null;
+  }
+
   private async stop(): Promise<void> {
     if (!this.proc) {
       return;
     }
 
-    await this.addOutput("info", "Killing the process...");
+    const signal = normalizeKillSignal(this.killSignal) ?? this.resolveKillSignalFromConfig() ?? "SIGTERM";
+    this.killSignal = signal;
+
+    await this.addOutput("info", `Killing the process (${signal})...`);
     this.stoppedDate = Date.now();
     const pid = this.proc.pid;
 
     await new Promise<void>((resolve, reject) => {
-      treeKill(pid, "SIGTERM", (error) => {
+      treeKill(pid, signal, (error) => {
         if (error) {
           reject(error);
           return;

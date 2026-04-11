@@ -5,6 +5,10 @@ import { DevtoolServer } from "./server.js";
 import { mergeDeep, toCommandArgsArray, toRecord, toStringArray } from "./utils.js";
 import type { ServerBootstrapOptions } from "./types.js";
 
+function readKillSignal(record: Record<string, unknown>): unknown {
+  return record.killSignal ?? record.killsignal;
+}
+
 function normalizeProjectsShape(config: RawConfig): RawConfig {
   const sections = toRecord(config.sections);
   const projects = toRecord(config.projects);
@@ -37,6 +41,7 @@ function normalizeProjectsShape(config: RawConfig): RawConfig {
 
     let args = ["pnpm", "run", "start"];
     let env: unknown = project.env;
+    let killSignal: unknown = readKillSignal(project);
     const defaultCommand = toRecord(commands.default);
     if (Array.isArray(defaultCommand.args)) {
       const defaultArgs = toCommandArgsArray(defaultCommand.args);
@@ -46,6 +51,9 @@ function normalizeProjectsShape(config: RawConfig): RawConfig {
       if ("env" in defaultCommand) {
         env = defaultCommand.env;
       }
+      if ("killSignal" in defaultCommand || "killsignal" in defaultCommand) {
+        killSignal = readKillSignal(defaultCommand);
+      }
     } else if (typeof defaultCommand.alias === "string") {
       const alias = toRecord(commands[defaultCommand.alias]);
       const aliasArgs = toCommandArgsArray(alias.args);
@@ -54,6 +62,9 @@ function normalizeProjectsShape(config: RawConfig): RawConfig {
       }
       if ("env" in alias) {
         env = alias.env;
+      }
+      if ("killSignal" in alias || "killsignal" in alias) {
+        killSignal = readKillSignal(alias);
       }
     }
 
@@ -70,6 +81,7 @@ function normalizeProjectsShape(config: RawConfig): RawConfig {
       ...project,
       args,
       env,
+      killSignal,
       extras,
       loadBalancer: services,
     };
