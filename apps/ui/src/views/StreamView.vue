@@ -205,6 +205,12 @@ onMounted(() => {
     lineHeight: 1.1,
     fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, Courier New, monospace",
     allowProposedApi: true,
+    theme: {
+      overviewRulerBorder: 'black'
+    },
+    overviewRuler: {
+      width: 9,
+    },
   });
 
   fitAddon = new FitAddon();
@@ -348,7 +354,7 @@ watch(
       </Button>
     </div>
 
-    <div class="min-h-0 flex-1 px-3 py-2">
+    <div class="min-h-0 flex-1 px-1">
       <div
         ref="terminalElement"
         class="h-full w-full overflow-hidden"
