@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { Terminal } from "xterm";
-import { FitAddon } from "xterm-addon-fit";
-import { SearchAddon } from "xterm-addon-search";
-import { WebLinksAddon } from "xterm-addon-web-links";
-import { Unicode11Addon } from "xterm-addon-unicode11";
+import { FitAddon } from "@xterm/addon-fit";
+import { SearchAddon } from "@xterm/addon-search";
+import { Unicode11Addon } from "@xterm/addon-unicode11";
+import { WebLinksAddon } from "@xterm/addon-web-links";
+import { Terminal } from "@xterm/xterm";
 import { Eraser, Play, RotateCcw, Search, Square, Trash2 } from "lucide-vue-next";
 import router from "@/router";
 import { Button } from "@/components/ui/button";
