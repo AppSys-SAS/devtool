@@ -245,8 +245,8 @@ export class DevtoolConfigure {
     }
 
     const args = toCommandArgsArray(directory.args);
-    if (!args || !args.length) {
-      this.addWarning(`${slug}.args`, "is empty");
+    if (!args) {
+      this.addWarning(`${slug}.args`, "must be an array of strings or numbers");
       return;
     }
 
@@ -376,8 +376,8 @@ export class DevtoolConfigure {
     for (const [extraSlug, extraRaw] of Object.entries(extras)) {
       const extra = toRecord(extraRaw);
       const extraArgs = toCommandArgsArray(extra.args);
-      if (!extraArgs?.length) {
-        this.addWarning(`${slug}.extras[${extraSlug}].args`, "not defined or empty");
+      if (!extraArgs) {
+        this.addWarning(`${slug}.extras[${extraSlug}].args`, "must be an array of strings or numbers");
         continue;
       }
 

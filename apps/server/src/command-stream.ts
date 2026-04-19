@@ -11,6 +11,8 @@ import type { CommandStreamCreatePayload } from "./types.js";
 import type { DevtoolServer } from "./server.js";
 
 const MAX_OUTPUT = 2048;
+const ANSI_RESET = "\u001b[0m";
+const ANSI_INFO_PREFIX = "\u001b[38;5;195m\u001b[48;5;27m";
 
 function randomSlug(): string {
   const now = Date.now();
@@ -38,8 +40,21 @@ function normalizeKillSignal(killSignal: string | null | undefined): string | nu
   return `SIG${normalized}`;
 }
 
-function getShellCandidates(): string[] {
-  const candidates = [process.env.SHELL, "/bin/zsh", "/bin/bash", "/bin/sh"].filter(
+function normalizeShell(shell: string | null | undefined): string | null {
+  if (typeof shell !== "string") {
+    return null;
+  }
+
+  const normalized = shell.trim();
+  if (!normalized.length) {
+    return null;
+  }
+
+  return normalized;
+}
+
+function getShellCandidates(preferredShell: string | null = null): string[] {
+  const candidates = [preferredShell, process.env.SHELL, "/bin/zsh", "/bin/bash", "/bin/sh"].filter(
     (item): item is string => Boolean(item && item.length),
   );
 
@@ -54,6 +69,23 @@ function getShellCandidates(): string[] {
   }
 
   return unique;
+}
+
+function canAttemptShell(shell: string): boolean {
+  if (!shell.includes(path.sep)) {
+    return true;
+  }
+
+  return existsSync(shell);
+}
+
+function getShellArgs(shell: string, command: string): string[] {
+  if (!command.length) {
+    return [];
+  }
+
+  const flag = shell.includes("zsh") || shell.includes("bash") ? "-lic" : "-lc";
+  return [flag, command];
 }
 
 function areArgsEqual(left: string[], right: string[]): boolean {
@@ -131,6 +163,8 @@ export class DevtoolCommandStream {
 
   public env: Record<string, string>;
 
+  public shell: string | null;
+
   public killSignal: string | null;
 
   public notifications: boolean;
@@ -164,6 +198,7 @@ export class DevtoolCommandStream {
     this.args = [];
     this.cwd = process.cwd();
     this.env = {};
+    this.shell = null;
     this.killSignal = null;
     this.notifications = false;
     this.runningDate = null;
@@ -205,6 +240,7 @@ export class DevtoolCommandStream {
     primary = false,
     args,
     env = null,
+    shell = null,
     killSignal = null,
     name = null,
     notifications = false,
@@ -230,6 +266,7 @@ export class DevtoolCommandStream {
     this.name = name ?? args.join(" ");
     this.cwd = cwd;
     this.env = env ?? {};
+    this.shell = normalizeShell(shell) ?? this.resolveShellFromConfig() ?? normalizeShell(this.server.config.adt.shell);
     this.killSignal = normalizeKillSignal(killSignal) ?? this.resolveKillSignalFromConfig();
     this.notifications = notifications;
     this.runningDate = Date.now();
@@ -299,6 +336,7 @@ export class DevtoolCommandStream {
       name: this.name,
       args: this.args,
       env: this.env,
+      shell: this.shell,
       killSignal: this.killSignal,
       cwd: this.cwd,
       notifications: this.notifications,
@@ -324,45 +362,35 @@ export class DevtoolCommandStream {
     );
   }
 
+  private convertArgs(args: string[]): string[] {
+    // noinspection RegExpRedundantEscape
+    return args.map((item) => item.replace(/%\{ADT:CWD\}/g, this.cwd));
+  }
+
   private async startDetached(): Promise<void> {
     ensureNodePtySpawnHelperExecutable();
-    const args = this.convertArgs(this.args);
+    const finalArgs = this.convertArgs(this.args);
     const env = { ...process.env, ...this.defaultEnv, ...this.env };
     let child = null as ReturnType<typeof spawnDetached> | null;
     const spawnErrors: string[] = [];
-
-    const directError = (() => {
-      try {
-        child = spawnDetached(args[0], args.slice(1), {
-          cwd: this.cwd,
-          env,
-          detached: true,
-          stdio: "ignore",
-        });
-        return null;
-      } catch (error) {
-        spawnErrors.push(`direct: ${error instanceof Error ? error.message : String(error)}`);
-        return error;
-      }
-    })();
+    const preferredShell = normalizeShell(this.shell);
 
     if (!child) {
       if (process.platform === "win32") {
         throw new Error(
-          `Unable to spawn detached command: ${args.join(" ")}${directError instanceof Error ? ` (${directError.message})` : ""}`,
+          `Unable to spawn detached command: ${finalArgs.join(" ")}${spawnErrors.length ? ` | attempts: ${spawnErrors.join(" || ")}` : ""}`,
         );
       }
 
-      const command = args.map(shellEscapePosix).join(" ");
-      for (const shell of getShellCandidates()) {
-        if (!existsSync(shell)) {
+      const command = finalArgs.map(shellEscapePosix).join(" ");
+      for (const shell of getShellCandidates(preferredShell)) {
+        if (!canAttemptShell(shell)) {
           spawnErrors.push(`shell ${shell}: not found`);
           continue;
         }
 
         try {
-          const flag = shell.includes("zsh") || shell.includes("bash") ? "-lic" : "-lc";
-          child = spawnDetached(shell, [flag, command], {
+          child = spawnDetached(shell, getShellArgs(shell, command), {
             cwd: this.cwd,
             env,
             detached: true,
@@ -376,7 +404,7 @@ export class DevtoolCommandStream {
 
       if (!child) {
         throw new Error(
-          `Unable to spawn detached command in shells: ${args.join(" ")}${
+          `Unable to spawn detached command in shells: ${finalArgs.join(" ")}${
             spawnErrors.length ? ` | attempts: ${spawnErrors.join(" || ")}` : ""
           }`,
         );
@@ -388,15 +416,6 @@ export class DevtoolCommandStream {
     });
 
     child.unref();
-  }
-
-  private convertArgs(args: string[]): string[] {
-    if (!args.length) {
-      throw new Error("Bad command args");
-    }
-
-    // noinspection RegExpRedundantEscape
-    return args.map((item) => item.replace(/%\{ADT:CWD\}/g, this.cwd));
   }
 
   private async start({
@@ -414,8 +433,8 @@ export class DevtoolCommandStream {
       throw new Error("Command already running");
     }
 
-    await this.addOutput("info", `Command: ${finalArgs.join(" ")}`);
-    await this.addOutput("info", this.cwd);
+    await this.addOutput("info", finalArgs.length ? `Execute Command: ${finalArgs.join(" ")}\n` : "Execute Shell\n");
+    // await this.addOutput("info", this.cwd);
 
     const spawnOptions = {
       cwd: this.cwd,
@@ -426,11 +445,9 @@ export class DevtoolCommandStream {
     } as const;
 
     const spawnErrors: string[] = [];
+    const preferredShell = normalizeShell(this.shell);
 
-    try {
-      this.proc = spawnPty(finalArgs[0], finalArgs.slice(1), spawnOptions);
-    } catch (error) {
-      spawnErrors.push(`direct: ${error instanceof Error ? error.message : String(error)}`);
+    if (!this.proc) {
       if (process.platform === "win32") {
         await this.handleStartFailure(
           new Error(
@@ -442,16 +459,15 @@ export class DevtoolCommandStream {
       }
 
       const command = finalArgs.map(shellEscapePosix).join(" ");
-      for (const shell of getShellCandidates()) {
-        if (!existsSync(shell)) {
+      for (const shell of getShellCandidates(preferredShell)) {
+        if (!canAttemptShell(shell)) {
           spawnErrors.push(`shell ${shell}: not found`);
           continue;
         }
 
         try {
-          const flag = shell.includes("zsh") || shell.includes("bash") ? "-lic" : "-lc";
-          this.proc = spawnPty(shell, [flag, command], spawnOptions);
-          await this.addOutput("info", `Fallback shell: ${shell}`);
+          this.proc = spawnPty(shell, getShellArgs(shell, command), spawnOptions);
+          // await this.addOutput("info", `${preferredShell ? "Using shell" : "Using shell"}: ${shell}`);
           break;
         } catch (fallbackError) {
           spawnErrors.push(`shell ${shell}: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`);
@@ -555,6 +571,47 @@ export class DevtoolCommandStream {
     return null;
   }
 
+  private resolveShellFromConfig(): string | null {
+    if (!this.projectSlug || !this.directorySlug) {
+      return null;
+    }
+
+    const project = this.server.config.projects[this.projectSlug];
+    if (!project) {
+      return null;
+    }
+
+    const directory = project.directories[this.directorySlug];
+    if (!directory) {
+      return null;
+    }
+
+    if (this.primary && areArgsEqual(directory.args, this.args)) {
+      return normalizeShell(directory.shell);
+    }
+
+    const extras = Object.values(directory.extras);
+    for (const extra of extras) {
+      if (extra.name === this.name && areArgsEqual(extra.args, this.args)) {
+        return normalizeShell(extra.shell);
+      }
+    }
+
+    for (const extra of extras) {
+      if (areArgsEqual(extra.args, this.args)) {
+        return normalizeShell(extra.shell);
+      }
+    }
+
+    for (const extra of extras) {
+      if (extra.name === this.name) {
+        return normalizeShell(extra.shell);
+      }
+    }
+
+    return normalizeShell(directory.shell);
+  }
+
   private async stop(): Promise<void> {
     if (!this.proc) {
       return;
@@ -598,6 +655,10 @@ export class DevtoolCommandStream {
   }
 
   private async addOutput(type: StreamOutputLine["type"], content: string): Promise<void> {
+    if (type === "info") {
+      content = `${ANSI_INFO_PREFIX}${content}${ANSI_RESET}`;
+    }
+
     const output: StreamOutputLine = {
       date: Date.now(),
       type,

@@ -50,7 +50,7 @@ function normalizeProjectsShape(config: RawConfig): RawConfig {
     const defaultCommand = toRecord(commands.default);
     if (Array.isArray(defaultCommand.args)) {
       const defaultArgs = toCommandArgsArray(defaultCommand.args);
-      if (defaultArgs?.length) {
+      if (defaultArgs) {
         args = defaultArgs;
       }
       if ("env" in defaultCommand) {
@@ -65,7 +65,7 @@ function normalizeProjectsShape(config: RawConfig): RawConfig {
     } else if (typeof defaultCommand.alias === "string") {
       const alias = toRecord(commands[defaultCommand.alias]);
       const aliasArgs = toCommandArgsArray(alias.args);
-      if (aliasArgs?.length) {
+      if (aliasArgs) {
         args = aliasArgs;
       }
       if ("env" in alias) {
