@@ -22,6 +22,7 @@ export class DevtoolConfigure {
     this.initialConfig = config;
     this.adt = {
       host: null,
+      shell: null,
       ports: {
         server: 6730,
         loadBalancer: 6731,
@@ -56,6 +57,7 @@ export class DevtoolConfigure {
   async reconfigure(): Promise<void> {
     this.adt = {
       host: null,
+      shell: null,
       ports: {
         server: 6730,
         loadBalancer: 6731,
@@ -99,6 +101,11 @@ export class DevtoolConfigure {
 
     if (typeof adt.uiPath === "string") {
       this.adt.uiPath = adt.uiPath;
+    }
+
+    const adtShell = this.readShell("adt.shell", adt.shell);
+    if (adtShell !== null) {
+      this.adt.shell = adtShell;
     }
 
     if (adt.secure === true || adt.secure === false) {
@@ -253,6 +260,7 @@ export class DevtoolConfigure {
       extras: {},
       notifications: directory.notifications === false ? false : projectDefinition.notifications,
       env: {},
+      shell: this.adt.shell,
       killSignal: null,
       meta: directory.meta,
     };
@@ -264,6 +272,14 @@ export class DevtoolConfigure {
     const env = toStringRecord(directory.env);
     if (env) {
       directoryDefinition.env = env;
+    }
+
+    const directoryShell = this.readShell(
+      `${slug}.shell`,
+      directory.shell,
+    );
+    if (directoryShell !== null) {
+      directoryDefinition.shell = directoryShell;
     }
 
     const directoryKillSignal = this.readKillSignal(
@@ -375,6 +391,10 @@ export class DevtoolConfigure {
         detached: extra.detached === true,
         notifications: extra.notifications === false ? false : directoryDefinition.notifications,
         env: extraEnv,
+        shell: this.readShell(
+          `${slug}.extras[${extraSlug}].shell`,
+          extra.shell,
+        ) ?? directoryDefinition.shell,
         killSignal: this.readKillSignal(
           `${slug}.extras[${extraSlug}].killSignal`,
           extra.killSignal ?? extra.killsignal,
@@ -451,6 +471,24 @@ export class DevtoolConfigure {
 
     if (!SIGNAL_REGEXP.test(normalized)) {
       this.addWarning(slug, "must match SIG* format (example: SIGTERM, SIGKILL)");
+      return null;
+    }
+
+    return normalized;
+  }
+
+  private readShell(slug: string, value: unknown): string | null {
+    if (value === undefined || value === null) {
+      return null;
+    }
+
+    if (typeof value !== "string") {
+      this.addWarning(slug, "is not a string");
+      return null;
+    }
+
+    const normalized = value.trim();
+    if (!normalized.length) {
       return null;
     }
 

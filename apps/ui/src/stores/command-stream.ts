@@ -24,6 +24,8 @@ export class CommandStreamStore implements CommandStream {
 
   env: Record<string, string> = {};
 
+  shell: string | null = null;
+
   killSignal: string | null = null;
 
   notifications = false;
@@ -51,6 +53,7 @@ export class CommandStreamStore implements CommandStream {
     this.args = payload.args;
     this.cwd = payload.cwd;
     this.env = payload.env;
+    this.shell = payload.shell;
     this.killSignal = payload.killSignal;
     this.notifications = payload.notifications;
     this.creationDate = payload.creationDate;

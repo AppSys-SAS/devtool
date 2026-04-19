@@ -9,6 +9,10 @@ function readKillSignal(record: Record<string, unknown>): unknown {
   return record.killSignal ?? record.killsignal;
 }
 
+function readShell(record: Record<string, unknown>): unknown {
+  return record.shell;
+}
+
 function normalizeProjectsShape(config: RawConfig): RawConfig {
   const sections = toRecord(config.sections);
   const projects = toRecord(config.projects);
@@ -41,6 +45,7 @@ function normalizeProjectsShape(config: RawConfig): RawConfig {
 
     let args = ["pnpm", "run", "start"];
     let env: unknown = project.env;
+    let shell: unknown = readShell(project);
     let killSignal: unknown = readKillSignal(project);
     const defaultCommand = toRecord(commands.default);
     if (Array.isArray(defaultCommand.args)) {
@@ -50,6 +55,9 @@ function normalizeProjectsShape(config: RawConfig): RawConfig {
       }
       if ("env" in defaultCommand) {
         env = defaultCommand.env;
+      }
+      if ("shell" in defaultCommand) {
+        shell = readShell(defaultCommand);
       }
       if ("killSignal" in defaultCommand || "killsignal" in defaultCommand) {
         killSignal = readKillSignal(defaultCommand);
@@ -62,6 +70,9 @@ function normalizeProjectsShape(config: RawConfig): RawConfig {
       }
       if ("env" in alias) {
         env = alias.env;
+      }
+      if ("shell" in alias) {
+        shell = readShell(alias);
       }
       if ("killSignal" in alias || "killsignal" in alias) {
         killSignal = readKillSignal(alias);
@@ -81,6 +92,7 @@ function normalizeProjectsShape(config: RawConfig): RawConfig {
       ...project,
       args,
       env,
+      shell,
       killSignal,
       extras,
       loadBalancer: services,

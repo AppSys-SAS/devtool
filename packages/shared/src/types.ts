@@ -1,6 +1,7 @@
 export interface AdtDefinition {
   host: string | null;
   uiPath?: string;
+  shell: string | null;
   ports: {
     server: number;
     loadBalancer: number;
@@ -33,6 +34,7 @@ export interface DirectoryExtra {
   detached: boolean;
   notifications: boolean;
   env: Record<string, string>;
+  shell: string | null;
   killSignal: string | null;
   meta?: unknown;
 }
@@ -47,6 +49,7 @@ export interface DirectoryDefinition {
   extras: Record<string, DirectoryExtra>;
   notifications: boolean;
   env: Record<string, string>;
+  shell: string | null;
   killSignal: string | null;
   meta?: unknown;
 }
@@ -89,6 +92,7 @@ export interface StreamUpdatePayload {
   name: string;
   args: string[];
   env: Record<string, string>;
+  shell: string | null;
   killSignal: string | null;
   cwd: string;
   notifications: boolean;

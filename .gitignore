@@ -8,3 +8,5 @@ lib
 .turbo
 
 *.tsbuildinfo
+
+tasks/
