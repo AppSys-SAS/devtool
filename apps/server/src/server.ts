@@ -99,8 +99,10 @@ export class DevtoolServer {
 
   private async reconfigure(): Promise<void> {
     await this.loadConfig();
-    await this.lb.reload(this.config);
-    await this.lb.recreate();
+    const shouldRecreateLb = await this.lb.reload(this.config);
+    if (shouldRecreateLb) {
+      await this.lb.recreate();
+    }
     await this.http.sendToWsConnections("config", this.configWrapper.getForClient(this.version));
   }
 

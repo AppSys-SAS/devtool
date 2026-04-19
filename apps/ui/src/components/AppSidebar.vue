@@ -3,7 +3,7 @@ import { computed, ref, watch } from "vue";
 import { RouterLink } from "vue-router";
 import { useColorMode } from "@vueuse/core";
 import { Icon } from "@iconify/vue";
-import { Bookmark, Circle, FolderTree, Monitor, Moon, Play, RotateCcw, Square, Sun } from 'lucide-vue-next'
+import { Bookmark, Circle, FolderTree, Monitor, Moon, Play, RefreshCw, RotateCcw, Square, Sun } from 'lucide-vue-next'
 import SidebarStreamItem from "@/components/SidebarStreamItem.vue";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -402,6 +402,15 @@ function resolveStreamIcon(directory: SidebarDirectory, stream: CommandStream): 
       >
         AppSys Devtool <sup>{{ appVersion }}</sup>
       </RouterLink>
+
+      <Button
+        size="icon"
+        variant="ghost"
+        class="size-8 shrink-0"
+        @click="wsStore.reconfigure()"
+      >
+        <RefreshCw class="size-3.5" />
+      </Button>
       <Button
         size="sm"
         variant="ghost"

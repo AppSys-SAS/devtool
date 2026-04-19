@@ -136,7 +136,6 @@ class WsStore {
   }
 
   reconfigure(): void {
-    configStore.loadConfig(null);
     this.send("reconfigure", {});
   }
 

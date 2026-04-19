@@ -37,7 +37,11 @@ export class DevtoolLB {
     return instance;
   }
 
-  async reload(config: RuntimeConfig): Promise<void> {
+  async reload(config: RuntimeConfig): Promise<boolean> {
+    const nextSecure = Object.keys(config.loadBalancers).length > 0;
+    const currentPort = this.getListeningPort();
+    const shouldRecreate = this.server !== null && (this.isSecure !== nextSecure || currentPort !== config.adt.ports.loadBalancer);
+
     this.proxy.reload(config);
     this.certificates = {};
 
@@ -47,6 +51,8 @@ export class DevtoolLB {
 
       this.certificates[serverName] = tls.createSecureContext({ cert, key });
     }
+
+    return shouldRecreate;
   }
 
   async recreate(): Promise<void> {
@@ -74,6 +80,19 @@ export class DevtoolLB {
     });
 
     logger.info("LoadBalancer", this.isSecure ? "HTTPS" : "HTTP", `Started on port ${port}`);
+  }
+
+  private getListeningPort(): number | null {
+    if (!this.server) {
+      return null;
+    }
+
+    const address = this.server.address();
+    if (!address || typeof address === "string") {
+      return null;
+    }
+
+    return address.port;
   }
 
   private async createServer(): Promise<void> {

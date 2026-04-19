@@ -16,6 +16,7 @@ const directory = computed(() => directoryDefinition.value?.directory ?? null);
 const directoryName = computed(() => directory.value?.name ?? props.directorySlug);
 const directoryDescription = computed(() => directory.value?.description ?? null);
 const directoryArgs = computed(() => directory.value?.args ?? ["N/A"]);
+const directoryShell = computed(() => directory.value?.shell ?? ["N/A"]);
 const streamSlug = computed(() => configStore.getDirectoryStreamPrimary(props.projectSlug, props.directorySlug));
 
 function runCommand(): void {
@@ -63,7 +64,7 @@ function runCommand(): void {
           class="h-auto w-full justify-start whitespace-normal break-all px-3 py-2 text-left font-mono text-xs leading-5"
           @click="runCommand"
         >
-          {{ directoryArgs.join(" ") }}
+          {{ directoryArgs.join(" ") || directoryShell }}
         </Button>
       </CardContent>
     </Card>
