@@ -1,6 +1,8 @@
 node_modules
 dist
 lib
+!apps/ui/src/lib/
+!apps/ui/src/lib/**
 .DS_Store
 *.log
 .idea
