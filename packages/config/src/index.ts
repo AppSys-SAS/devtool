@@ -91,6 +91,23 @@ function resolveAdtPaths(config: RawConfig, cwd: string): void {
   }
 }
 
+function resolveSectionPaths(config: RawConfig, cwd: string): void {
+  if (typeof config.sections !== "object" || config.sections === null) {
+    return;
+  }
+
+  for (const sectionValue of Object.values(config.sections)) {
+    if (typeof sectionValue !== "object" || sectionValue === null) {
+      continue;
+    }
+
+    const section = sectionValue as Record<string, unknown>;
+    if (typeof section.path === "string") {
+      section.path = resolveConfigPath(cwd, section.path);
+    }
+  }
+}
+
 async function pathExists(fullPath: string): Promise<boolean> {
   try {
     await fs.stat(fullPath);
@@ -135,6 +152,7 @@ async function loadConfigFileInternal(filePath: string, seen: Set<string>): Prom
 
   delete config.include;
   resolveAdtPaths(config, cwd);
+  resolveSectionPaths(config, cwd);
   resolveLoadBalancerCertificatePaths(config, cwd);
 
   return config;
