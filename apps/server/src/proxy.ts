@@ -195,6 +195,7 @@ export class DevtoolProxy {
 
     request.headers["x-forwarded-proto"] = target.tls ? "https" : "http";
     request.headers["x-forwarded-port"] = forwardedPort;
+    request.headers["x-forwarded-for"] = request.headers['x-forwarded-for'] || request.socket.remoteAddress
     request.headers["x-forwarded-ssl"] = target.tls ? "on" : "off";
   }
 
