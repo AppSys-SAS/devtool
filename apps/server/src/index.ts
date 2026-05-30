@@ -117,7 +117,7 @@ function normalizeProjectsShape(config: RawConfig): RawConfig {
   return config;
 }
 
-function createRuntimeConfig(raw: RawConfig, options: Pick<ServerBootstrapOptions, "serverPort" | "loadBalancerPort"> & { ssl: string | null; uiPath: string | null }): RawConfig {
+export function createRuntimeConfig(raw: RawConfig, options: Pick<ServerBootstrapOptions, "serverPort" | "loadBalancerPort"> & { ssl: string | null; uiPath: string | null }): RawConfig {
   const adtRuntimeOverrides: Record<string, unknown> = {
   };
 
