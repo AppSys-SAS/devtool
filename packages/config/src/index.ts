@@ -52,6 +52,45 @@ function expandEnvVarsDeep(value: unknown): unknown {
   return value;
 }
 
+function resolveConfigPath(cwd: string, input: string): string {
+  if (path.isAbsolute(input) || input.trimStart().startsWith("-----BEGIN ")) {
+    return input;
+  }
+
+  return path.resolve(cwd, input);
+}
+
+function resolveLoadBalancerCertificatePaths(config: RawConfig, cwd: string): void {
+  if (typeof config.loadBalancers !== "object" || config.loadBalancers === null) {
+    return;
+  }
+
+  for (const options of Object.values(config.loadBalancers)) {
+    if (typeof options !== "object" || options === null) {
+      continue;
+    }
+
+    const certificate = options as Record<string, unknown>;
+    if (typeof certificate.crt === "string") {
+      certificate.crt = resolveConfigPath(cwd, certificate.crt);
+    }
+    if (typeof certificate.key === "string") {
+      certificate.key = resolveConfigPath(cwd, certificate.key);
+    }
+  }
+}
+
+function resolveAdtPaths(config: RawConfig, cwd: string): void {
+  if (typeof config.adt !== "object" || config.adt === null) {
+    return;
+  }
+
+  const adt = config.adt as Record<string, unknown>;
+  if (typeof adt.uiPath === "string") {
+    adt.uiPath = resolveConfigPath(cwd, adt.uiPath);
+  }
+}
+
 async function pathExists(fullPath: string): Promise<boolean> {
   try {
     await fs.stat(fullPath);
@@ -81,12 +120,12 @@ async function loadConfigFileInternal(filePath: string, seen: Set<string>): Prom
 
   const fileContent = await fs.readFile(resolvedFilePath, { encoding: "utf-8" });
   const loaded = yaml.load(fileContent);
-  const config = (typeof loaded === "object" && loaded ? (loaded as RawConfig) : {}) as RawConfig;
+  const config = expandEnvVarsDeep(typeof loaded === "object" && loaded ? (loaded as RawConfig) : {}) as RawConfig;
   const cwd = path.dirname(resolvedFilePath);
   const includes = Array.isArray(config.include) ? (config.include as unknown[]).filter((item): item is string => typeof item === "string") : [];
 
   for (const include of includes) {
-    const includeGlob = resolveHomePath(include);
+    const includeGlob = expandEnvVars(include);
     const files = (await glob(includeGlob, { cwd, absolute: true })).sort((a, b) => a.localeCompare(b));
 
     for (const includePath of files) {
@@ -95,13 +134,14 @@ async function loadConfigFileInternal(filePath: string, seen: Set<string>): Prom
   }
 
   delete config.include;
+  resolveAdtPaths(config, cwd);
+  resolveLoadBalancerCertificatePaths(config, cwd);
 
   return config;
 }
 
 export async function loadConfigFile(filePath: string): Promise<RawConfig> {
-  const loaded = await loadConfigFileInternal(filePath, new Set<string>());
-  return expandEnvVarsDeep(loaded) as RawConfig;
+  return loadConfigFileInternal(filePath, new Set<string>());
 }
 
 export function resolveDefaultConfigPaths(cwd = process.cwd()): string[] {
