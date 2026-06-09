@@ -10,5 +10,4 @@ lib
 .turbo
 
 *.tsbuildinfo
-
-tasks/
+.data
