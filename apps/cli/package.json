@@ -21,10 +21,10 @@
     "@appsys/devtool-proxy": "workspace:*",
     "@appsys/devtool-server": "workspace:*",
     "@appsys/devtool-shared": "workspace:*",
-    "commander": "^14.0.3"
+    "commander": "^15.0.0"
   },
   "devDependencies": {
-    "@types/node": "^25.5.2",
-    "tsx": "^4.21.0"
+    "@types/node": "^26.2.0",
+    "tsx": "^4.23.11"
   }
 }

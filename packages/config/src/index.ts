@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { glob } from "glob";
-import yaml from "js-yaml";
+import { load } from "js-yaml";
 import cloneDeep from "lodash.clonedeep";
 import mergeWith from "lodash.mergewith";
 
@@ -127,6 +127,12 @@ export function mergeConfig<T extends RawConfig>(a: T, b: RawConfig): T {
   }) as T;
 }
 
+/**
+ * Loads a YAML config file, expands environment variables, merges its includes recursively, and normalizes relative paths.
+ * @param filePath Path of the YAML config file to load.
+ * @param seen Set of already loaded absolute file paths used to prevent include cycles.
+ * @returns The merged raw configuration object.
+ */
 async function loadConfigFileInternal(filePath: string, seen: Set<string>): Promise<RawConfig> {
   const resolvedFilePath = path.resolve(filePath);
   if (seen.has(resolvedFilePath)) {
@@ -136,7 +142,7 @@ async function loadConfigFileInternal(filePath: string, seen: Set<string>): Prom
   seen.add(resolvedFilePath);
 
   const fileContent = await fs.readFile(resolvedFilePath, { encoding: "utf-8" });
-  const loaded = yaml.load(fileContent);
+  const loaded = load(fileContent);
   const config = expandEnvVarsDeep(typeof loaded === "object" && loaded ? (loaded as RawConfig) : {}) as RawConfig;
   const cwd = path.dirname(resolvedFilePath);
   const includes = Array.isArray(config.include) ? (config.include as unknown[]).filter((item): item is string => typeof item === "string") : [];
