@@ -25,6 +25,7 @@ export interface DirectoryLoadBalancerRule {
   path: string | null;
   prefix: string | null;
   pathNot: string | null;
+  preserveHost: boolean;
 }
 
 export interface DirectoryExtra {

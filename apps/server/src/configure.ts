@@ -360,6 +360,12 @@ export class DevtoolConfigure {
         continue;
       }
 
+      const preserveHost = lb.preserveHost === true;
+      if ("preserveHost" in lb && lb.preserveHost !== true && lb.preserveHost !== false) {
+        this.addWarning(`${slug}.loadBalancer[${lbSlug}].preserveHost`, "is not a boolean");
+        continue;
+      }
+
       directoryDefinition.loadBalancer[lbSlug] = {
         slug: lbSlug,
         hosts,
@@ -369,6 +375,7 @@ export class DevtoolConfigure {
         path: typeof lb.path === "string" ? lb.path : null,
         prefix: typeof lb.prefix === "string" ? lb.prefix : null,
         pathNot: typeof lb.pathNot === "string" ? lb.pathNot : null,
+        preserveHost,
       };
     }
 

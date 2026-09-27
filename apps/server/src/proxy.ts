@@ -14,6 +14,7 @@ interface ServerCandidate {
   path: string | null;
   prefix: string | null;
   pathNot: string | null;
+  preserveHost: boolean;
   roundRobinTargetIndex: number;
 }
 
@@ -90,6 +91,7 @@ export class DevtoolProxy {
             path: server.path,
             prefix: server.prefix,
             pathNot: server.pathNot,
+            preserveHost: server.preserveHost,
             roundRobinTargetIndex: targets.length - 1,
           });
         }
@@ -106,6 +108,7 @@ export class DevtoolProxy {
         path: null,
         prefix: null,
         pathNot: null,
+        preserveHost: false,
         roundRobinTargetIndex: targets.length - 1,
       });
     }
@@ -128,6 +131,7 @@ export class DevtoolProxy {
 
     this.proxy.web(req, res, {
       target: target.url,
+      changeOrigin: !server.preserveHost,
     });
 
     return true;
@@ -148,6 +152,7 @@ export class DevtoolProxy {
 
     this.proxy.ws(req, socket, head, {
       target: this.toWebSocketTarget(target.url),
+      changeOrigin: !server.preserveHost,
     });
 
     return true;
