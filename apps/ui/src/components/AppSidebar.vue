@@ -241,8 +241,8 @@ function resolveStreamIcon(directory: SidebarDirectory, stream: CommandStream): 
 
 <template>
   <aside class="flex h-full min-h-0 flex-col bg-card">
-    <ScrollArea class="min-h-0 flex-1 px-3 py-3 [&>[data-slot=scroll-area-viewport]]:!overflow-visible">
-      <div class="flex flex-col gap-4">
+    <ScrollArea class="min-h-0 flex-1">
+      <div class="flex flex-col gap-4 px-3 py-3">
         <RouterLink
           v-if="configStore.warnings.value.length"
           :to="{ name: 'dashboard' }"
