@@ -175,6 +175,9 @@ importers:
 
   apps/cli:
     dependencies:
+      '@appsys/devtool-cdn':
+        specifier: workspace:*
+        version: link:../../packages/cdn
       '@appsys/devtool-config':
         specifier: workspace:*
         version: link:../../packages/config
@@ -206,6 +209,9 @@ importers:
 
   apps/server:
     dependencies:
+      '@appsys/devtool-cdn':
+        specifier: workspace:*
+        version: link:../../packages/cdn
       '@appsys/devtool-config':
         specifier: workspace:*
         version: link:../../packages/config
@@ -319,6 +325,12 @@ importers:
       vue-tsc:
         specifier: ^3.3.13
         version: 3.3.13(typescript@6.0.3)
+
+  packages/cdn:
+    dependencies:
+      oauth4webapi:
+        specifier: ^3.8.8
+        version: 3.8.8
 
   packages/config:
     dependencies:
@@ -1428,6 +1440,9 @@ packages:
   nostics@1.3.0:
     resolution: {integrity: sha512-wzRsrJwNlFbqIRQt8aCeL2WE8USip/uuvGSOZV1D02CxX8ABTMbw8IywKjH7yWHETMXbWJI4OBpihg9rmz2Vyg==}
 
+  oauth4webapi@3.8.8:
+    resolution: {integrity: sha512-8N28E+a/oxfXWBgOMt+ZP/JUf/XR+IFbvkAEPP3gznXOMv9BpAAwiIj0TFNz3tGTPc0ZQ8zmWBNgN1nAys0gng==}
+
   ohash@2.0.11:
     resolution: {integrity: sha512-RdR9FQrFwNBNXAr4GixM8YaRZRJ5PUWbKYbE5eOsrwAjJW0q2REGcf79oYPsLyskQCZG1PLN+S/K1V00joZAoQ==}
 
@@ -2531,6 +2546,8 @@ snapshots:
       node-addon-api: 7.1.1
 
   nostics@1.3.0: {}
+
+  oauth4webapi@3.8.8: {}
 
   ohash@2.0.11: {}
 

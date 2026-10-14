@@ -1,4 +1,6 @@
-import { loadMergedConfig, type RawConfig, resolveDefaultConfigPaths } from "@appsys/devtool-config";
+import path from "node:path";
+import { CdnClient, readCdnOptions, REMOTE_CONFIG_PATH } from "@appsys/devtool-cdn";
+import { loadMergedConfig, mergeConfig, parseConfigText, type RawConfig, resolveDefaultConfigPaths } from "@appsys/devtool-config";
 import { logger } from "@appsys/devtool-shared";
 import pkg from "../package.json" with { type: "json" };
 import { DevtoolServer } from "./server.js";
@@ -176,6 +178,55 @@ export function createRuntimeConfig(raw: RawConfig, options: Pick<ServerBootstra
   return normalizeProjectsShape(base);
 }
 
+/**
+ * Loads the devtool configuration stored on the CDN named by the local configuration.
+ * @param local Local configuration, holding the `cdn` section.
+ * @param cwd Directory relative paths of the stored configuration are resolved from.
+ * @returns The stored configuration with its address, or null when there is none or it cannot be loaded.
+ */
+async function loadRemoteConfig(local: RawConfig, cwd: string): Promise<{ config: RawConfig; source: string } | null> {
+  const options = readCdnOptions(local.cdn);
+  if (!options) {
+    return null;
+  }
+
+  const source = `${options.url}/devtool/${REMOTE_CONFIG_PATH}`;
+  try {
+    const text = await new CdnClient(options).readText(REMOTE_CONFIG_PATH);
+    if (text === null) {
+      logger.warn("Server", "Config", `No configuration stored at ${source}`);
+      return null;
+    }
+
+    return { config: await parseConfigText(text, cwd), source };
+  } catch (error) {
+    logger.warn("Server", "Config", `Configuration of ${source} not loaded, local files only: ${error instanceof Error ? error.message : String(error)}`);
+    return null;
+  }
+}
+
+/**
+ * Loads the configuration: the first file, overridden by the configuration stored on the CDN, overridden by the other files.
+ * @param paths Paths of the configuration files, the shared one first.
+ * @returns The merged configuration and the sources it was loaded from.
+ */
+async function loadConfiguration(paths: string[]): Promise<{ config: RawConfig; loadedPaths: string[] }> {
+  const base = await loadMergedConfig(paths.slice(0, 1));
+  const overrides = await loadMergedConfig(paths.slice(1));
+  const local = mergeConfig(mergeConfig({}, base.config), overrides.config);
+  const remote = await loadRemoteConfig(local, paths.length ? path.dirname(path.resolve(paths[0])) : process.cwd());
+
+  return {
+    config: mergeConfig(mergeConfig(base.config, remote?.config ?? {}), overrides.config),
+    loadedPaths: [...base.loadedPaths, ...(remote ? [remote.source] : []), ...overrides.loadedPaths],
+  };
+}
+
+/**
+ * Starts the devtool server, reloading its configuration on every reconfiguration.
+ * @param options Ports, SSL domain, UI path and configuration files of the server.
+ * @returns The running server.
+ */
 export default async function runServer({
   serverPort,
   loadBalancerPort,
@@ -188,7 +239,7 @@ export default async function runServer({
   logger.info("Server", "Startup", `Config paths: ${resolvedPaths.join(", ")}`);
 
   return DevtoolServer.run(async () => {
-    const { config, loadedPaths } = await loadMergedConfig(resolvedPaths);
+    const { config, loadedPaths } = await loadConfiguration(resolvedPaths);
     return {
       raw: createRuntimeConfig(config, {
         serverPort,

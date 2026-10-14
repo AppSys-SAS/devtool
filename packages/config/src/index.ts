@@ -142,9 +142,20 @@ async function loadConfigFileInternal(filePath: string, seen: Set<string>): Prom
   seen.add(resolvedFilePath);
 
   const fileContent = await fs.readFile(resolvedFilePath, { encoding: "utf-8" });
-  const loaded = load(fileContent);
+
+  return parseConfig(fileContent, path.dirname(resolvedFilePath), seen);
+}
+
+/**
+ * Parses a YAML configuration, expands environment variables, merges its includes recursively, and normalizes relative paths.
+ * @param content YAML text of the configuration.
+ * @param cwd Directory relative paths and includes are resolved from.
+ * @param seen Set of already loaded absolute file paths used to prevent include cycles.
+ * @returns The merged raw configuration object.
+ */
+async function parseConfig(content: string, cwd: string, seen: Set<string>): Promise<RawConfig> {
+  const loaded = load(content);
   const config = expandEnvVarsDeep(typeof loaded === "object" && loaded ? (loaded as RawConfig) : {}) as RawConfig;
-  const cwd = path.dirname(resolvedFilePath);
   const includes = Array.isArray(config.include) ? (config.include as unknown[]).filter((item): item is string => typeof item === "string") : [];
 
   for (const include of includes) {
@@ -166,6 +177,16 @@ async function loadConfigFileInternal(filePath: string, seen: Set<string>): Prom
 
 export async function loadConfigFile(filePath: string): Promise<RawConfig> {
   return loadConfigFileInternal(filePath, new Set<string>());
+}
+
+/**
+ * Parses a YAML configuration that does not come from a file, as a file of a directory would be.
+ * @param content YAML text of the configuration.
+ * @param cwd Directory relative paths and includes are resolved from.
+ * @returns The merged raw configuration object.
+ */
+export async function parseConfigText(content: string, cwd: string): Promise<RawConfig> {
+  return parseConfig(content, cwd, new Set<string>());
 }
 
 export function resolveDefaultConfigPaths(cwd = process.cwd()): string[] {
