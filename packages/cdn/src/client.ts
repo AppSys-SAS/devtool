@@ -40,6 +40,14 @@ function lengthCheck(expected: number | null): Transform {
   });
 }
 
+/** A file stored on the CDN. */
+export interface CdnFile {
+  path: string;
+  /** Size once decrypted, in bytes. */
+  size: number;
+  updatedAt: Date;
+}
+
 /**
  * Files of the developer tools on the CDN, read and written with the access token of the signed-in
  * developer.
@@ -49,6 +57,23 @@ export class CdnClient {
    * @param _options - The CDN options.
    */
   constructor(private readonly _options: CdnOptions) {}
+
+  /**
+   * Lists the stored files, with their size once decrypted and their last upload.
+   *
+   * @returns The files, or null when the CDN cannot list them.
+   */
+  async list(): Promise<CdnFile[] | null> {
+    const response = await this.request("GET", "");
+    if (response.status === 404) {
+      await response.body?.cancel();
+      return null;
+    }
+
+    await this.assertOk(response);
+    const { files } = (await response.json()) as { files: { path: string; size: number; updatedAt: string }[] };
+    return files.map((file) => ({ path: file.path, size: file.size, updatedAt: new Date(file.updatedAt) }));
+  }
 
   /**
    * Opens a file for download. The stream fails when the file arrives incomplete, as a damaged file
@@ -120,13 +145,13 @@ export class CdnClient {
    * Calls the devtool files of the CDN with the access token of the developer.
    *
    * @param method - The HTTP method.
-   * @param path - The path of the file.
+   * @param path - The path of the file, empty for the list of the files.
    * @param init - The other request options.
    * @returns The answer.
    */
   private async request(method: string, path: string, init: RequestInit & { duplex?: "half" } = {}): Promise<Response> {
     const token = await accessToken(this._options);
-    const url = `${this._options.url}/devtool/${path.split("/").map(encodeURIComponent).join("/")}`;
+    const url = path === "" ? `${this._options.url}/devtool` : `${this._options.url}/devtool/${path.split("/").map(encodeURIComponent).join("/")}`;
 
     return fetch(url, { ...init, method, headers: { ...init.headers, Authorization: `Bearer ${token}` } });
   }

@@ -61,6 +61,18 @@ export type ConnectionMessage =
       data: Record<string, never>;
     }
   | {
+      type: "envRefresh";
+      data: Record<string, never>;
+    }
+  | {
+      type: "envTables";
+      data: { path: string };
+    }
+  | {
+      type: "envRun";
+      data: { direction: "pull" | "push"; targets: { path: string; tables: string[] | null }[] };
+    }
+  | {
       type: "newCommandStream";
       data: CommandStreamCreatePayload;
     }

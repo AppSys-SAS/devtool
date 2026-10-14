@@ -120,9 +120,60 @@ export interface CdnSessionPayload {
   error: string | null;
 }
 
+/** Size and last change of a copy of an environment item, the date in ISO format. */
+export interface EnvironmentCopyPayload {
+  size: number;
+  updatedAt: string;
+}
+
+/** An item of the development environment with its local copy and its copy on the CDN. */
+export interface EnvironmentItemPayload {
+  path: string;
+  kind: "file" | "database" | "bucket";
+  engine: string | null;
+  container: string | null;
+  bucket: string | null;
+  local: EnvironmentCopyPayload | null;
+  /** The CDN copy, null when there is none, "unknown" when the CDN copies could not be listed. */
+  remote: EnvironmentCopyPayload | null | "unknown";
+}
+
+/** Progress of one item of a pull or a push. */
+export interface EnvironmentStepPayload {
+  target: string;
+  status: "pending" | "running" | "done" | "skipped" | "failed";
+  detail: string | null;
+}
+
+/** A pull or a push of environment items, running or finished. */
+export interface EnvironmentRunPayload {
+  direction: "pull" | "push";
+  steps: EnvironmentStepPayload[];
+  finished: boolean;
+}
+
+/** State of the development environment. */
+export interface EnvironmentPayload {
+  /** Whether the configuration declares an environment and a CDN. */
+  configured: boolean;
+  items: EnvironmentItemPayload[];
+  /** Why the CDN copies are unknown, or why the environment could not be read. */
+  error: string | null;
+  run: EnvironmentRunPayload | null;
+}
+
+/** Tables of the local database of an environment item. */
+export interface EnvironmentTablesPayload {
+  path: string;
+  tables: string[];
+  error: string | null;
+}
+
 export interface WsPayloadMap {
   config: ClientConfigPayload;
   cdnSession: CdnSessionPayload;
+  environment: EnvironmentPayload;
+  environmentTables: EnvironmentTablesPayload;
   streamUpdate: StreamUpdatePayload;
   streamOutput: {
     slug: string;

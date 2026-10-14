@@ -4,6 +4,7 @@ import type { WebSocket } from "ws";
 import { DevtoolCdnSession } from "./cdn-session.js";
 import { DevtoolCommandStream } from "./command-stream.js";
 import { DevtoolConfigure } from "./configure.js";
+import { DevtoolEnvironment } from "./environment.js";
 import { DevtoolHttp } from "./http.js";
 import { DevtoolLB } from "./lb.js";
 import type {
@@ -32,6 +33,8 @@ export class DevtoolServer {
 
   private readonly cdnSession: DevtoolCdnSession;
 
+  private readonly environment: DevtoolEnvironment;
+
   /**
    * @param configProvider Loads the configuration.
    * @param version Version of the devtool.
@@ -44,7 +47,13 @@ export class DevtoolServer {
     this.http = null as unknown as DevtoolHttp;
     this.lb = null as unknown as DevtoolLB;
     this.commandStreams = [];
-    this.cdnSession = new DevtoolCdnSession((payload) => this.http.sendToWsConnections("cdnSession", payload));
+    this.environment = new DevtoolEnvironment((payload) => this.http.sendToWsConnections("environment", payload));
+    this.cdnSession = new DevtoolCdnSession(async (payload) => {
+      await this.http.sendToWsConnections("cdnSession", payload);
+      if (!payload.pendingLoginUrl) {
+        this.refreshEnvironment();
+      }
+    });
   }
 
   static async run(configProvider: ConfigProvider, version: string): Promise<DevtoolServer> {
@@ -53,16 +62,19 @@ export class DevtoolServer {
     await instance.createHttp();
     await instance.createLB();
     await instance.listen();
+    instance.refreshEnvironment();
     return instance;
   }
 
   /**
-   * Sends a new interface the configuration, the CDN sign-in state and the command streams.
+   * Sends a new interface the configuration, the CDN sign-in state, the development environment and
+   * the command streams.
    * @param ws The connection of the interface.
    */
   async onNewConnection(ws: WebSocket): Promise<void> {
     await this.http.sendToWsConnections("config", this.configWrapper.getForClient(this.version), ws);
     await this.http.sendToWsConnections("cdnSession", await this.cdnSession.status(), ws);
+    await this.http.sendToWsConnections("environment", this.environment.state(), ws);
     for (const stream of this.commandStreams) {
       await stream.sendUpdate(ws);
       await stream.sendOutput(null, ws);
@@ -93,6 +105,23 @@ export class DevtoolServer {
       return;
     }
 
+    if (message.type === "envRefresh") {
+      this.refreshEnvironment();
+      return;
+    }
+
+    if (message.type === "envTables") {
+      await this.http.sendToWsConnections("environmentTables", await this.environment.tables(message.data.path), ws);
+      return;
+    }
+
+    if (message.type === "envRun") {
+      this.environment.run(message.data.direction, message.data.targets).catch((error: unknown) => {
+        logger.warn("Server", "Environment", `Run failed: ${error instanceof Error ? error.message : String(error)}`);
+      });
+      return;
+    }
+
     if (message.type === "newCommandStream") {
       await this.newCommandStream(message.data);
       return;
@@ -120,6 +149,15 @@ export class DevtoolServer {
 
     logger.warn("Server", "WS", `Unknown message type ${type}`);
     ws.send(JSON.stringify({ type: "error", data: { message: `Unknown WS action type: ${type}` } }));
+  }
+
+  /**
+   * Describes the development environment again in the background and publishes it.
+   */
+  private refreshEnvironment(): void {
+    this.environment.refresh().catch((error: unknown) => {
+      logger.warn("Server", "Environment", `Not described: ${error instanceof Error ? error.message : String(error)}`);
+    });
   }
 
   async removeCommandStream(streamSlug: string): Promise<void> {
@@ -178,6 +216,7 @@ export class DevtoolServer {
     await this.configWrapper.reconfigure();
     this.config = this.configWrapper.runtimeConfig;
     this.cdnSession.configure(nextConfig.raw.cdn);
+    this.environment.configure(nextConfig.raw);
 
     if (nextConfig.loadedPaths.length) {
       logger.info("Server", "Config", `Loaded: ${nextConfig.loadedPaths.join(", ")}`);

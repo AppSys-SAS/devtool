@@ -34,6 +34,20 @@ export interface TransferResult {
   detail: string;
 }
 
+/** Size and last change of a copy of an item. */
+export interface CopyInfo {
+  size: number;
+  updatedAt: Date;
+}
+
+/** An item with its local copy and its copy on the CDN. */
+export interface DescribedItem {
+  item: EnvironmentItem;
+  local: CopyInfo | null;
+  /** The CDN copy, null when there is none, "unknown" when the CDN cannot list its files. */
+  remote: CopyInfo | null | "unknown";
+}
+
 /**
  * Reads a record of the configuration.
  *
@@ -189,6 +203,36 @@ export class Environment {
   ) {}
 
   /**
+   * Describes every item with its local copy and its copy on the CDN. The local copies are described
+   * even when the CDN cannot be reached.
+   *
+   * @returns The items, in their declaration order, and why the CDN copies are unknown, if they are.
+   */
+  async describe(): Promise<{ items: DescribedItem[]; remoteError: string | null }> {
+    let remoteFiles: Awaited<ReturnType<CdnClient["list"]>> = null;
+    let remoteError: string | null = null;
+    try {
+      remoteFiles = await this._client.list();
+    } catch (error) {
+      remoteError = error instanceof Error ? error.message : String(error);
+    }
+
+    const remoteByPath = new Map(remoteFiles?.map((file) => [file.path, { size: file.size, updatedAt: file.updatedAt }]));
+    const items = await Promise.all(
+      this._options.items.map(async (item) => {
+        const stat = await fs.stat(localPathOf(item.path)).catch(() => null);
+        return {
+          item,
+          local: stat?.isFile() ? { size: stat.size, updatedAt: stat.mtime } : null,
+          remote: remoteFiles === null ? ("unknown" as const) : (remoteByPath.get(item.path) ?? null),
+        };
+      }),
+    );
+
+    return { items, remoteError };
+  }
+
+  /**
    * Replaces the local copy of an item, and the local data it holds, by the one of the CDN.
    *
    * @param selection - The item, and the tables to restore for a database.
@@ -201,6 +245,7 @@ export class Environment {
     }
 
     const localPath = localPathOf(item.path);
+    await this.dateLikeRemote(item.path);
     if (item.kind === "file") {
       return { done: true, detail: localPath };
     }
@@ -260,7 +305,21 @@ export class Environment {
     }
 
     await this._client.upload(item.path, localPath, mediaTypeOf(item.path));
+    await this.dateLikeRemote(item.path);
     return { done: true, detail };
+  }
+
+  /**
+   * Gives the local copy of an item the date of its copy on the CDN, so equal dates mean equal
+   * copies and a later local date means a local change.
+   *
+   * @param filePath - The path of the item.
+   */
+  private async dateLikeRemote(filePath: string): Promise<void> {
+    const remote = (await this._client.list())?.find((file) => file.path === filePath);
+    if (remote) {
+      await fs.utimes(localPathOf(filePath), remote.updatedAt, remote.updatedAt);
+    }
   }
 
   /**

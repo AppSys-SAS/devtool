@@ -1,7 +1,9 @@
 export { accessToken, type CdnSessionStatus, CdnSignInRequiredError, hasSession, login, logout, openInBrowser, sessionStatus } from "./auth.js";
-export { CdnClient, CdnRequestError } from "./client.js";
+export { CdnClient, type CdnFile, CdnRequestError } from "./client.js";
 export { APPSYS_DIRECTORY, localPathOf } from "./directory.js";
 export {
+  type CopyInfo,
+  type DescribedItem,
   Environment,
   type EnvironmentItem,
   type EnvironmentOptions,

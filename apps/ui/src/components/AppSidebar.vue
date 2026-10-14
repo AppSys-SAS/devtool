@@ -3,7 +3,7 @@ import { computed, ref, watch } from "vue";
 import { RouterLink } from "vue-router";
 import { useColorMode } from "@vueuse/core";
 import { Icon } from "@iconify/vue";
-import { Bookmark, Circle, FolderTree, Monitor, Moon, Play, RefreshCw, RotateCcw, Square, Sun } from '@lucide/vue'
+import { ArrowDownUp, Bookmark, Circle, FolderTree, Monitor, Moon, Play, RefreshCw, RotateCcw, Square, Sun } from '@lucide/vue'
 import CdnSession from "@/components/CdnSession.vue";
 import SidebarStreamItem from "@/components/SidebarStreamItem.vue";
 import { Button } from "@/components/ui/button";
@@ -261,6 +261,19 @@ function resolveStreamIcon(directory: SidebarDirectory, stream: CommandStream): 
           >
             <Bookmark class="size-4" :class="{ 'fill-current': bookmarkedOnly }" />
             Bookmarks
+          </Button>
+        </div>
+        <div class="flex items-center justify-between rounded-md px-1 pb-1">
+          <Button
+            as-child
+            size="sm"
+            variant="ghost"
+            class="h-8 w-full justify-start gap-2"
+          >
+            <RouterLink :to="{ name: 'environment' }">
+              <ArrowDownUp class="size-4" />
+              Environment
+            </RouterLink>
           </Button>
         </div>
 

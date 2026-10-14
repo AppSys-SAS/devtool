@@ -1,5 +1,6 @@
 import { ref } from "vue";
 import configStore from "./config";
+import environmentStore from "./environment";
 import sessionStore from "./session";
 
 class WsStore {
@@ -53,6 +54,12 @@ class WsStore {
             break;
           case "cdnSession":
             sessionStore.load(payload.data as never);
+            break;
+          case "environment":
+            environmentStore.load(payload.data as never);
+            break;
+          case "environmentTables":
+            environmentStore.loadTables(payload.data as never);
             break;
           case "streamUpdate":
             configStore.streamUpdate(payload.data as never);
@@ -157,6 +164,30 @@ class WsStore {
     this.send("cdnLogout", {});
   }
 
+  /**
+   * Asks the server to describe the development environment again.
+   */
+  envRefresh(): void {
+    this.send("envRefresh", {});
+  }
+
+  /**
+   * Asks the server for the tables of the local database of an environment item.
+   * @param path The path of the item.
+   */
+  envTables(path: string): void {
+    this.send("envTables", { path });
+  }
+
+  /**
+   * Asks the server to pull or push environment items.
+   * @param direction Whether the CDN copies replace the local ones, or the reverse.
+   * @param targets The items, and the tables of the databases (null for the whole database).
+   */
+  envRun(direction: "pull" | "push", targets: { path: string; tables: string[] | null }[]): void {
+    this.send("envRun", { direction, targets });
+  }
+
   disconnect(alreadyClosed = false): void {
     if (!alreadyClosed && this.socket) {
       this.socket.close();
@@ -166,6 +197,7 @@ class WsStore {
     this.socket = null;
     configStore.reset();
     sessionStore.load(null);
+    environmentStore.load(null);
   }
 }
 

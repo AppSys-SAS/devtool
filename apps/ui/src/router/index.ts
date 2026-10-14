@@ -9,6 +9,11 @@ const router = createRouter({
       component: () => import("@/views/DashboardView.vue"),
     },
     {
+      name: "environment",
+      path: "/environment",
+      component: () => import("@/views/EnvironmentView.vue"),
+    },
+    {
       name: "stream",
       path: "/s/:streamSlug",
       component: () => import("@/views/StreamView.vue"),
