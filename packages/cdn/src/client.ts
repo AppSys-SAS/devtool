@@ -5,9 +5,6 @@ import type { ReadableStream as WebReadableStream } from "node:stream/web";
 import { accessToken } from "./auth.js";
 import type { CdnOptions } from "./options.js";
 
-/** Path of the devtool configuration among the devtool files of the CDN. */
-export const REMOTE_CONFIG_PATH = "devtool/config.yml";
-
 /** Raised when the CDN answers with an error. */
 export class CdnRequestError extends Error {
   /**

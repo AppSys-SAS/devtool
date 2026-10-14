@@ -20,7 +20,6 @@
     "dev": "tsx watch src/dev.ts"
   },
   "dependencies": {
-    "@appsys/devtool-cdn": "workspace:*",
     "@appsys/devtool-config": "workspace:*",
     "@appsys/devtool-shared": "workspace:*",
     "http-proxy": "^1.18.1",

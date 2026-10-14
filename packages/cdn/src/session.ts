@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
+import { localPathOf } from "./directory.js";
 import type { CdnOptions } from "./options.js";
 
 /** Tokens of a signed-in developer, kept between runs. */
@@ -14,7 +14,7 @@ export interface CdnSession {
   refreshToken: string | null;
 }
 
-const SESSION_PATH = path.join(os.homedir(), ".config/appsys/devtool/session.json");
+const SESSION_PATH = localPathOf("devtool/session.json");
 const LOCK_PATH = `${SESSION_PATH}.lock`;
 const LOCK_STALE_MS = 30_000;
 const LOCK_WAIT_MS = 15_000;

@@ -5,8 +5,29 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
+import { checkbox, confirm, select } from "@inquirer/prompts";
 import { Command } from "commander";
-import { CdnClient, type CdnOptions, hasSession, login, logout, openInBrowser, readCdnOptions } from "@appsys/devtool-cdn";
+import {
+  CdnClient,
+  type CdnOptions,
+  CdnSignInRequiredError,
+  Environment,
+  type EnvironmentItem,
+  type EnvironmentOptions,
+  type EnvironmentSelection,
+  hasSession,
+  listTables,
+  localPathOf,
+  login,
+  logout,
+  openInBrowser,
+  overwritesLocalData,
+  parseTargets,
+  readCdnOptions,
+  readEnvironmentOptions,
+  SHARED_CONFIG_PATH,
+  type TransferResult,
+} from "@appsys/devtool-cdn";
 import { loadMergedConfig, resolveDefaultConfigPaths } from "@appsys/devtool-config";
 import runProxy from "@appsys/devtool-proxy";
 import runServer from "@appsys/devtool-server";
@@ -53,6 +74,171 @@ async function signIn(options: CdnOptions): Promise<void> {
   logger.info("CLI", "Login", "Signed in");
 }
 
+const SHARED_CONFIG_SELECTION: EnvironmentSelection = { item: { kind: "file", path: SHARED_CONFIG_PATH }, tables: null };
+
+/**
+ * Loads the environment declared by the shared configuration, downloading that configuration first when it is not
+ * there yet.
+ * @param client The client of the devtool files of the CDN.
+ * @param configPaths Paths of the configuration files.
+ * @returns The environment.
+ */
+async function loadEnvironment(client: CdnClient, configPaths: string[]): Promise<EnvironmentOptions> {
+  const read = async (): Promise<EnvironmentOptions | null> => readEnvironmentOptions((await loadMergedConfig(configPaths)).config.environment);
+  const options = (await read()) ?? ((await new Environment(client, { items: [], s3: null }).pull(SHARED_CONFIG_SELECTION)).done ? await read() : null);
+  if (!options) {
+    throw new Error(`no \`environment\` section in ${localPathOf(SHARED_CONFIG_PATH)}`);
+  }
+
+  return options;
+}
+
+/**
+ * Downloads the shared configuration and the configuration files of the environment, without touching databases or
+ * buckets.
+ * @param cdn The CDN options.
+ * @param configPaths Paths of the configuration files.
+ */
+async function pullConfigurations(cdn: CdnOptions, configPaths: string[]): Promise<void> {
+  const client = new CdnClient(cdn);
+  await new Environment(client, { items: [], s3: null }).pull(SHARED_CONFIG_SELECTION);
+  const options = await loadEnvironment(client, configPaths);
+  const files = options.items.filter((item) => item.kind === "file").map((item): EnvironmentSelection => ({ item, tables: null }));
+  await transfer(files, (selection) => new Environment(client, options).pull(selection));
+}
+
+/**
+ * Describes an item of the environment.
+ * @param item The item.
+ * @returns Its path and what it holds.
+ */
+function describeItem(item: EnvironmentItem): string {
+  if (item.kind === "database") {
+    return `${item.path} (${item.engine} database of container ${item.container})`;
+  }
+
+  return item.kind === "bucket" ? `${item.path} (bucket ${item.bucket})` : `${item.path} (file)`;
+}
+
+/**
+ * Names a selection the way targets are written.
+ * @param selection The selection.
+ * @returns The target.
+ */
+function targetOf(selection: EnvironmentSelection): string {
+  return selection.tables ? `${selection.item.path}:${selection.tables.join(",")}` : selection.item.path;
+}
+
+/**
+ * Asks which items, and which tables of the databases, to transfer.
+ * @param options The environment.
+ * @param verb What is done with them.
+ * @returns The selections.
+ */
+async function chooseSelections(options: EnvironmentOptions, verb: string): Promise<EnvironmentSelection[]> {
+  const items = await checkbox({
+    message: `Items to ${verb}`,
+    choices: options.items.map((item) => ({ name: describeItem(item), value: item })),
+    required: true,
+    pageSize: 15,
+  });
+
+  const selections: EnvironmentSelection[] = [];
+  for (const item of items) {
+    if (item.kind !== "database") {
+      selections.push({ item, tables: null });
+      continue;
+    }
+
+    const whole = await select({
+      message: `${item.path}: whole database or some tables?`,
+      choices: [
+        { name: "Whole database", value: true },
+        { name: "Some tables", value: false },
+      ],
+    });
+    const tables = whole
+      ? null
+      : await checkbox({ message: `Tables of ${item.path}`, choices: (await listTables(item)).map((table) => ({ name: table, value: table })), required: true, pageSize: 20 });
+    selections.push({ item, tables });
+  }
+
+  return selections;
+}
+
+/**
+ * Makes sure the developer accepts losing the local data a pull replaces.
+ * @param selections The selections to pull.
+ * @param yes Whether the developer already accepted.
+ * @returns False when the developer declines.
+ */
+async function acceptOverwrite(selections: EnvironmentSelection[], yes: boolean): Promise<boolean> {
+  const overwritten = selections.filter(overwritesLocalData).map(targetOf);
+  if (overwritten.length === 0 || yes) {
+    return true;
+  }
+
+  if (!process.stdin.isTTY) {
+    throw new Error(`pulling ${overwritten.join(", ")} replaces local data: pass --yes`);
+  }
+
+  return confirm({ message: `Replace the local data of ${overwritten.join(", ")}?`, default: false });
+}
+
+/**
+ * Transfers selections one by one, reporting each, and fails at the end when one of them failed.
+ * @param selections The selections.
+ * @param run Transfers one selection.
+ */
+async function transfer(selections: EnvironmentSelection[], run: (selection: EnvironmentSelection) => Promise<TransferResult>): Promise<void> {
+  let failures = 0;
+  for (const selection of selections) {
+    try {
+      const result = await run(selection);
+      if (result.done) {
+        logger.info("CLI", "Env", `${targetOf(selection)}: ${result.detail}`);
+      } else {
+        logger.warn("CLI", "Env", `${targetOf(selection)}: ${result.detail}`);
+      }
+    } catch (error) {
+      if (error instanceof CdnSignInRequiredError) {
+        throw error;
+      }
+
+      failures += 1;
+      logger.error("CLI", "Env", `${targetOf(selection)}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  if (failures > 0) {
+    throw new Error(`${failures} of ${selections.length} items failed`);
+  }
+}
+
+/**
+ * Pulls or pushes items of the environment, chosen by targets or interactively.
+ * @param direction Whether the CDN copy replaces the local one, or the reverse.
+ * @param targets The targets, every item when empty.
+ * @param flags Whether to choose interactively and whether local data may be replaced without asking.
+ */
+async function syncEnvironment(direction: "pull" | "push", targets: string[], flags: { interactive?: boolean; yes?: boolean }): Promise<void> {
+  const client = new CdnClient(await requireConfiguredCdn());
+  const options = await loadEnvironment(client, INSTALLATION_CONFIG_PATHS);
+  const selections = flags.interactive ? await chooseSelections(options, direction) : parseTargets(options, targets);
+  const environment = new Environment(client, options);
+  if (direction === "push") {
+    await transfer(selections, (selection) => environment.push(selection));
+    return;
+  }
+
+  if (!(await acceptOverwrite(selections, flags.yes === true))) {
+    logger.warn("CLI", "Env", "Nothing pulled");
+    return;
+  }
+
+  await transfer(selections, (selection) => environment.pull(selection));
+}
+
 function parsePort(input: string, label: string): number {
   const parsed = Number(input);
   if (!Number.isInteger(parsed) || parsed <= 0) {
@@ -93,10 +279,15 @@ async function main(): Promise<void> {
         ? configurations.map((configuration) => (path.isAbsolute(configuration) ? configuration : path.resolve(invocationCwd, configuration)))
         : resolveDefaultConfigPaths();
       const cdn = await readConfiguredCdn(configPaths);
-      if (cdn && !(await hasSession(cdn))) {
-        await signIn(cdn).catch((error: unknown) => {
-          logger.warn("CLI", "Login", `Not signed in, the configuration stored on the CDN is skipped: ${error instanceof Error ? error.message : String(error)}`);
-        });
+      if (cdn) {
+        try {
+          if (!(await hasSession(cdn))) {
+            await signIn(cdn);
+          }
+          await pullConfigurations(cdn, configPaths);
+        } catch (error) {
+          logger.warn("CLI", "Config", `Configurations not updated from the CDN, local copies used: ${error instanceof Error ? error.message : String(error)}`);
+        }
       }
 
       await runServer({
@@ -179,6 +370,28 @@ async function main(): Promise<void> {
     .action(async (filePath: string) => {
       await new CdnClient(await requireConfiguredCdn()).remove(filePath);
       logger.info("CLI", "Remove", filePath);
+    });
+
+  const env = program
+    .command("env")
+    .description(`Development environment in ${localPathOf("")}, mirrored on the CDN: configurations, databases, buckets`)
+    .addHelpText("after", "\nTargets: <path> for an item, <path>:<table>,<table> for tables of a database; every item without target.");
+
+  env
+    .command("pull [targets...]")
+    .description("Replace local items, and the local databases and buckets they hold, by the CDN copies")
+    .option("-i, --interactive", "choose items and tables")
+    .option("-y, --yes", "replace local databases and buckets without asking")
+    .action(async (targets: string[], flags: { interactive?: boolean; yes?: boolean }) => {
+      await syncEnvironment("pull", targets, flags);
+    });
+
+  env
+    .command("push [targets...]")
+    .description("Dump local databases and buckets, and send local items to the CDN (write group only)")
+    .option("-i, --interactive", "choose items and tables")
+    .action(async (targets: string[], flags: { interactive?: boolean }) => {
+      await syncEnvironment("push", targets, flags);
     });
 
   await program.parseAsync();

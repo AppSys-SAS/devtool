@@ -131,9 +131,10 @@ export function mergeConfig<T extends RawConfig>(a: T, b: RawConfig): T {
  * Loads a YAML config file, expands environment variables, merges its includes recursively, and normalizes relative paths.
  * @param filePath Path of the YAML config file to load.
  * @param seen Set of already loaded absolute file paths used to prevent include cycles.
+ * @param baseDirectory Directory relative paths are resolved from; includes are resolved from the file directory.
  * @returns The merged raw configuration object.
  */
-async function loadConfigFileInternal(filePath: string, seen: Set<string>): Promise<RawConfig> {
+async function loadConfigFileInternal(filePath: string, seen: Set<string>, baseDirectory: string): Promise<RawConfig> {
   const resolvedFilePath = path.resolve(filePath);
   if (seen.has(resolvedFilePath)) {
     return {};
@@ -142,20 +143,9 @@ async function loadConfigFileInternal(filePath: string, seen: Set<string>): Prom
   seen.add(resolvedFilePath);
 
   const fileContent = await fs.readFile(resolvedFilePath, { encoding: "utf-8" });
-
-  return parseConfig(fileContent, path.dirname(resolvedFilePath), seen);
-}
-
-/**
- * Parses a YAML configuration, expands environment variables, merges its includes recursively, and normalizes relative paths.
- * @param content YAML text of the configuration.
- * @param cwd Directory relative paths and includes are resolved from.
- * @param seen Set of already loaded absolute file paths used to prevent include cycles.
- * @returns The merged raw configuration object.
- */
-async function parseConfig(content: string, cwd: string, seen: Set<string>): Promise<RawConfig> {
-  const loaded = load(content);
+  const loaded = load(fileContent);
   const config = expandEnvVarsDeep(typeof loaded === "object" && loaded ? (loaded as RawConfig) : {}) as RawConfig;
+  const cwd = path.dirname(resolvedFilePath);
   const includes = Array.isArray(config.include) ? (config.include as unknown[]).filter((item): item is string => typeof item === "string") : [];
 
   for (const include of includes) {
@@ -163,39 +153,50 @@ async function parseConfig(content: string, cwd: string, seen: Set<string>): Pro
     const files = (await glob(includeGlob, { cwd, absolute: true })).sort((a, b) => a.localeCompare(b));
 
     for (const includePath of files) {
-      mergeConfig(config, await loadConfigFileInternal(includePath, seen));
+      mergeConfig(config, await loadConfigFileInternal(includePath, seen, baseDirectory));
     }
   }
 
   delete config.include;
-  resolveAdtPaths(config, cwd);
-  resolveSectionPaths(config, cwd);
-  resolveLoadBalancerCertificatePaths(config, cwd);
+  resolveAdtPaths(config, baseDirectory);
+  resolveSectionPaths(config, baseDirectory);
+  resolveLoadBalancerCertificatePaths(config, baseDirectory);
 
   return config;
 }
 
-export async function loadConfigFile(filePath: string): Promise<RawConfig> {
-  return loadConfigFileInternal(filePath, new Set<string>());
+/**
+ * Loads a YAML config file and its includes.
+ * @param filePath Path of the YAML config file to load.
+ * @param baseDirectory Directory relative paths are resolved from, the file directory by default.
+ * @returns The merged raw configuration object.
+ */
+export async function loadConfigFile(filePath: string, baseDirectory = path.dirname(path.resolve(filePath))): Promise<RawConfig> {
+  return loadConfigFileInternal(filePath, new Set<string>(), baseDirectory);
 }
 
 /**
- * Parses a YAML configuration that does not come from a file, as a file of a directory would be.
- * @param content YAML text of the configuration.
- * @param cwd Directory relative paths and includes are resolved from.
- * @returns The merged raw configuration object.
+ * Lists the default configuration files: the one of the devtool installation, then the shared configuration of the
+ * environment directory, then the personal overrides.
+ * @param cwd Directory of the devtool application, two levels below the installation root.
+ * @returns The configuration paths, in merge order.
  */
-export async function parseConfigText(content: string, cwd: string): Promise<RawConfig> {
-  return parseConfig(content, cwd, new Set<string>());
-}
-
 export function resolveDefaultConfigPaths(cwd = process.cwd()): string[] {
-  return [path.join(cwd, "../../devtool-config.yml"), path.join(os.homedir(), ".config/appsys/devtool/config.yml")];
+  const environmentDirectory = path.join(os.homedir(), ".config/appsys/devtool");
+
+  return [path.join(cwd, "../../devtool-config.yml"), path.join(environmentDirectory, "config.yml"), path.join(environmentDirectory, "config.local.yml")];
 }
 
+/**
+ * Loads and merges configuration files, each overriding the previous ones. Relative paths of every file are resolved
+ * from the directory of the first one, the devtool installation.
+ * @param configPaths Paths of the configuration files; missing files are skipped.
+ * @returns The merged configuration and the files loaded.
+ */
 export async function loadMergedConfig(configPaths = resolveDefaultConfigPaths()): Promise<{ config: RawConfig; loadedPaths: string[] }> {
   const loadedPaths: string[] = [];
   const result: RawConfig = {};
+  const baseDirectory = configPaths.length ? path.dirname(path.resolve(resolveHomePath(configPaths[0]))) : process.cwd();
 
   for (const configPath of configPaths) {
     const absolutePath = path.resolve(resolveHomePath(configPath));
@@ -203,7 +204,7 @@ export async function loadMergedConfig(configPaths = resolveDefaultConfigPaths()
       continue;
     }
 
-    mergeConfig(result, await loadConfigFile(absolutePath));
+    mergeConfig(result, await loadConfigFile(absolutePath, baseDirectory));
     loadedPaths.push(absolutePath);
   }
 
