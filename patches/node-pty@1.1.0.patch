@@ -1,0 +1,15 @@
+diff --git a/scripts/prebuild.js b/scripts/prebuild.js
+index 17f1d980e62e017d77058627a7a15c4c29f9470c..3bc5fe172c5a0b0dcee3174fa701dca64d739d3d 100644
+--- a/scripts/prebuild.js
++++ b/scripts/prebuild.js
+@@ -31,4 +31,10 @@ if (!fs.existsSync(PREBUILD_DIR)) {
+   process.exit(1);
+ }
+ 
++// The 1.1.0 tarball ships the prebuilt spawn-helper without its execute bit (fixed upstream in 1.2.0).
++const SPAWN_HELPER = path.join(PREBUILD_DIR, 'spawn-helper');
++if (fs.existsSync(SPAWN_HELPER)) {
++  fs.chmodSync(SPAWN_HELPER, 0o755);
++}
++
+ process.exit(0);

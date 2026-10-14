@@ -5,3 +5,5 @@ allowBuilds:
   esbuild: true
   node-pty: true
   vue-demi: true
+patchedDependencies:
+  node-pty@1.1.0: patches/node-pty@1.1.0.patch
