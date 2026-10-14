@@ -65,6 +65,10 @@ export type ConnectionMessage =
       data: Record<string, never>;
     }
   | {
+      type: "envPullConfig";
+      data: Record<string, never>;
+    }
+  | {
       type: "envTables";
       data: { path: string };
     }

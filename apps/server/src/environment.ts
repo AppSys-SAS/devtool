@@ -8,6 +8,7 @@ import {
   listTables,
   readCdnOptions,
   readEnvironmentOptions,
+  SHARED_CONFIG_PATH,
 } from "@appsys/devtool-cdn";
 import type { RawConfig } from "@appsys/devtool-config";
 import type {
@@ -107,6 +108,28 @@ export class DevtoolEnvironment {
     }
 
     await this._publish(this.state());
+  }
+
+  /**
+   * Downloads the shared devtool configuration, which declares the environment, and publishes why
+   * it could not be downloaded, if it could not.
+   *
+   * @returns True when the configuration was downloaded.
+   */
+  async pullSharedConfig(): Promise<boolean> {
+    if (!this._cdn) {
+      return false;
+    }
+
+    try {
+      const result = await new Environment(new CdnClient(this._cdn), { items: [], s3: null }).pull({ item: { kind: "file", path: SHARED_CONFIG_PATH }, tables: null });
+      this._error = result.done ? null : `${SHARED_CONFIG_PATH} is not on the CDN`;
+    } catch (error) {
+      this._error = error instanceof Error ? error.message : String(error);
+    }
+
+    await this._publish(this.state());
+    return this._error === null;
   }
 
   /**

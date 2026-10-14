@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import {
   ArrowDownToLine,
   ArrowUpFromLine,
@@ -46,6 +46,7 @@ const session = sessionStore.state;
 const selected = ref<Record<string, { tables: string[] | null }>>({});
 const tableFilters = ref<Record<string, string>>({});
 const confirmOpen = ref(false);
+const pullingConfig = ref(false);
 
 const signedIn = computed(() => session.value?.signedIn === true);
 const running = computed(() => state.value?.run?.finished === false);
@@ -224,6 +225,18 @@ function stepIcon(step: EnvironmentStepPayload): { icon: unknown; class: string 
   }
 }
 
+/**
+ * Downloads the shared devtool configuration, which declares the environment.
+ */
+function pullConfig(): void {
+  pullingConfig.value = true;
+  wsStore.envPullConfig();
+}
+
+watch(state, () => {
+  pullingConfig.value = false;
+});
+
 onMounted(() => wsStore.envRefresh());
 </script>
 
@@ -293,9 +306,41 @@ onMounted(() => wsStore.envRefresh());
 
         <Card
           v-if="!state?.configured"
-          class="items-center py-10 text-center text-sm text-muted-foreground"
+          class="items-center gap-4 py-10 text-center"
         >
-          No <code>environment</code> section in the devtool configuration.
+          <div class="space-y-1">
+            <p class="font-medium">
+              No environment yet
+            </p>
+            <p
+              v-if="session?.configured"
+              class="text-sm text-muted-foreground"
+            >
+              The shared devtool configuration declares it: pull it from the CDN to list the configurations, databases and buckets.
+            </p>
+            <p
+              v-else
+              class="text-sm text-muted-foreground"
+            >
+              Add a <code>cdn</code> section to <code>devtool-config.yml</code> to get the shared devtool configuration.
+            </p>
+          </div>
+          <Button
+            v-if="session?.configured"
+            class="gap-1.5"
+            :disabled="!signedIn || pullingConfig"
+            @click="pullConfig"
+          >
+            <Loader2
+              v-if="pullingConfig"
+              class="size-4 animate-spin"
+            />
+            <ArrowDownToLine
+              v-else
+              class="size-4"
+            />
+            Pull the devtool configuration
+          </Button>
         </Card>
 
         <Card

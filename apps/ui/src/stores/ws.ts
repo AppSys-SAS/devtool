@@ -165,6 +165,13 @@ class WsStore {
   }
 
   /**
+   * Asks the server to download the shared devtool configuration and load it.
+   */
+  envPullConfig(): void {
+    this.send("envPullConfig", {});
+  }
+
+  /**
    * Asks the server to describe the development environment again.
    */
   envRefresh(): void {

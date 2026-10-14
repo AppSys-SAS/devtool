@@ -110,6 +110,13 @@ export class DevtoolServer {
       return;
     }
 
+    if (message.type === "envPullConfig") {
+      if (await this.environment.pullSharedConfig()) {
+        await this.reconfigure();
+      }
+      return;
+    }
+
     if (message.type === "envTables") {
       await this.http.sendToWsConnections("environmentTables", await this.environment.tables(message.data.path), ws);
       return;
