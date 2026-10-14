@@ -1,5 +1,6 @@
 import { ref } from "vue";
 import configStore from "./config";
+import sessionStore from "./session";
 
 class WsStore {
   connected = ref(false);
@@ -49,6 +50,9 @@ class WsStore {
               this.connected.value = true;
             }
             configStore.loadConfig(payload.data as never);
+            break;
+          case "cdnSession":
+            sessionStore.load(payload.data as never);
             break;
           case "streamUpdate":
             configStore.streamUpdate(payload.data as never);
@@ -139,6 +143,20 @@ class WsStore {
     this.send("reconfigure", {});
   }
 
+  /**
+   * Asks the server to sign the developer in.
+   */
+  cdnLogin(): void {
+    this.send("cdnLogin", {});
+  }
+
+  /**
+   * Asks the server to sign the developer out.
+   */
+  cdnLogout(): void {
+    this.send("cdnLogout", {});
+  }
+
   disconnect(alreadyClosed = false): void {
     if (!alreadyClosed && this.socket) {
       this.socket.close();
@@ -147,6 +165,7 @@ class WsStore {
     this.connected.value = false;
     this.socket = null;
     configStore.reset();
+    sessionStore.load(null);
   }
 }
 

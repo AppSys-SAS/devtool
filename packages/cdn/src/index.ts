@@ -1,4 +1,4 @@
-export { accessToken, CdnSignInRequiredError, hasSession, login, logout, openInBrowser } from "./auth.js";
+export { accessToken, type CdnSessionStatus, CdnSignInRequiredError, hasSession, login, logout, openInBrowser, sessionStatus } from "./auth.js";
 export { CdnClient, CdnRequestError } from "./client.js";
 export { APPSYS_DIRECTORY, localPathOf } from "./directory.js";
 export {
@@ -14,3 +14,4 @@ export {
   type TransferResult,
 } from "./environment.js";
 export { type CdnOptions, readCdnOptions } from "./options.js";
+export { type CdnUser, sessionPath } from "./session.js";

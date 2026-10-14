@@ -53,6 +53,14 @@ export type ConnectionMessage =
       data: Record<string, never>;
     }
   | {
+      type: "cdnLogin";
+      data: Record<string, never>;
+    }
+  | {
+      type: "cdnLogout";
+      data: Record<string, never>;
+    }
+  | {
       type: "newCommandStream";
       data: CommandStreamCreatePayload;
     }

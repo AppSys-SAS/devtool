@@ -104,8 +104,25 @@ export interface StreamUpdatePayload {
   exitCode: number | null;
 }
 
+/** Sign-in state of the developer on the CDN. */
+export interface CdnSessionPayload {
+  /** Whether the configuration declares a CDN. */
+  configured: boolean;
+  signedIn: boolean;
+  user: {
+    name: string | null;
+    username: string | null;
+    groups: string[];
+  } | null;
+  /** Sign-in address to open while a sign-in started from the interface waits for the issuer. */
+  pendingLoginUrl: string | null;
+  /** Why the last sign-in started from the interface failed. */
+  error: string | null;
+}
+
 export interface WsPayloadMap {
   config: ClientConfigPayload;
+  cdnSession: CdnSessionPayload;
   streamUpdate: StreamUpdatePayload;
   streamOutput: {
     slug: string;

@@ -8,19 +8,23 @@ import {
   discoveryRequest,
   generateRandomCodeVerifier,
   generateRandomState,
+  getValidatedIdTokenClaims,
   None,
   processAuthorizationCodeResponse,
   processDiscoveryResponse,
   processRefreshTokenResponse,
+  processUserInfoResponse,
   refreshTokenGrantRequest,
   ResponseBodyError,
+  skipSubjectCheck,
   type TokenEndpointResponse,
+  userInfoRequest,
   validateAuthResponse,
 } from "oauth4webapi";
 import type { CdnOptions } from "./options.js";
-import { type CdnSession, deleteSession, readSession, withSessionLock, writeSession } from "./session.js";
+import { type CdnSession, type CdnUser, deleteSession, readSession, withSessionLock, writeSession } from "./session.js";
 
-const SCOPES = "openid offline_access groups";
+const SCOPES = "openid offline_access groups profile";
 const LOGIN_TIMEOUT_MS = 5 * 60_000;
 const EXPIRY_MARGIN_MS = 60_000;
 const CALLBACK_PAGE = "<!doctype html><meta charset=\"utf-8\"><title>Devtool</title><p>Devtool : connexion terminée, vous pouvez fermer cet onglet.</p>";
@@ -56,13 +60,36 @@ async function discover(options: CdnOptions): Promise<AuthorizationServer> {
  * @param previousRefreshToken - The refresh token to keep when the response carries none.
  * @returns The session.
  */
-function sessionOf(options: CdnOptions, tokens: TokenEndpointResponse, previousRefreshToken: string | null): CdnSession {
+function sessionOf(options: CdnOptions, tokens: TokenEndpointResponse, previousRefreshToken: string | null, user: CdnUser | null): CdnSession {
   return {
     issuer: options.issuer,
     clientId: options.clientId,
     accessToken: tokens.access_token,
     expiresAt: Date.now() + (tokens.expires_in ?? 0) * 1000,
     refreshToken: tokens.refresh_token ?? previousRefreshToken,
+    user,
+  };
+}
+
+/**
+ * Reads the identity of the developer from the user information endpoint of the issuer.
+ *
+ * @param server - The authorization server.
+ * @param client - The client.
+ * @param tokens - The tokens of the sign-in.
+ * @returns The identity, or null when the issuer publishes no such endpoint.
+ */
+async function readUser(server: AuthorizationServer, client: Client, tokens: TokenEndpointResponse): Promise<CdnUser | null> {
+  if (server.userinfo_endpoint === undefined) {
+    return null;
+  }
+
+  const subject = getValidatedIdTokenClaims(tokens)?.sub ?? skipSubjectCheck;
+  const info = await processUserInfoResponse(server, client, subject, await userInfoRequest(server, client, tokens.access_token));
+  return {
+    name: typeof info.name === "string" ? info.name : null,
+    username: typeof info.preferred_username === "string" ? info.preferred_username : null,
+    groups: Array.isArray(info.groups) ? info.groups.filter((group): group is string => typeof group === "string") : [],
   };
 }
 
@@ -143,7 +170,8 @@ export async function login(options: CdnOptions, openUrl: (url: string) => void 
   const callbackUrl = await waitForCallback(options.callbackPort, () => openUrl(authorizationUrl.toString()));
   const parameters = validateAuthResponse(server, client, callbackUrl, state);
   const response = await authorizationCodeGrantRequest(server, client, None(), parameters, redirectUri, codeVerifier);
-  await writeSession(sessionOf(options, await processAuthorizationCodeResponse(server, client, response), null));
+  const tokens = await processAuthorizationCodeResponse(server, client, response);
+  await writeSession(sessionOf(options, tokens, null, await readUser(server, client, tokens)));
 }
 
 /**
@@ -161,6 +189,25 @@ export async function logout(): Promise<void> {
  */
 export async function hasSession(options: CdnOptions): Promise<boolean> {
   return (await readSession(options)) !== null;
+}
+
+/** What the saved session tells about the developer. */
+export interface CdnSessionStatus {
+  signedIn: boolean;
+  user: CdnUser | null;
+}
+
+/**
+ * Describes the saved session: signed in while it holds a valid access token or a refresh token.
+ *
+ * @param options - The CDN options.
+ * @returns The status.
+ */
+export async function sessionStatus(options: CdnOptions): Promise<CdnSessionStatus> {
+  const session = await readSession(options);
+  const signedIn = session !== null && (session.refreshToken !== null || session.expiresAt > Date.now());
+
+  return { signedIn, user: signedIn ? (session?.user ?? null) : null };
 }
 
 /**
@@ -202,7 +249,7 @@ export async function accessToken(options: CdnOptions): Promise<string> {
       throw error;
     }
 
-    const renewed = sessionOf(options, tokens, session.refreshToken);
+    const renewed = sessionOf(options, tokens, session.refreshToken, session.user ?? null);
     await writeSession(renewed);
 
     return renewed.accessToken;

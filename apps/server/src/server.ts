@@ -1,6 +1,7 @@
 import type { RuntimeConfig } from "@appsys/devtool-shared";
 import { logger } from "@appsys/devtool-shared";
 import type { WebSocket } from "ws";
+import { DevtoolCdnSession } from "./cdn-session.js";
 import { DevtoolCommandStream } from "./command-stream.js";
 import { DevtoolConfigure } from "./configure.js";
 import { DevtoolHttp } from "./http.js";
@@ -29,6 +30,12 @@ export class DevtoolServer {
 
   private commandStreams: DevtoolCommandStream[];
 
+  private readonly cdnSession: DevtoolCdnSession;
+
+  /**
+   * @param configProvider Loads the configuration.
+   * @param version Version of the devtool.
+   */
   private constructor(configProvider: ConfigProvider, version: string) {
     this.configProvider = configProvider;
     this.version = version;
@@ -37,6 +44,7 @@ export class DevtoolServer {
     this.http = null as unknown as DevtoolHttp;
     this.lb = null as unknown as DevtoolLB;
     this.commandStreams = [];
+    this.cdnSession = new DevtoolCdnSession((payload) => this.http.sendToWsConnections("cdnSession", payload));
   }
 
   static async run(configProvider: ConfigProvider, version: string): Promise<DevtoolServer> {
@@ -48,19 +56,40 @@ export class DevtoolServer {
     return instance;
   }
 
+  /**
+   * Sends a new interface the configuration, the CDN sign-in state and the command streams.
+   * @param ws The connection of the interface.
+   */
   async onNewConnection(ws: WebSocket): Promise<void> {
     await this.http.sendToWsConnections("config", this.configWrapper.getForClient(this.version), ws);
+    await this.http.sendToWsConnections("cdnSession", await this.cdnSession.status(), ws);
     for (const stream of this.commandStreams) {
       await stream.sendUpdate(ws);
       await stream.sendOutput(null, ws);
     }
   }
 
+  /**
+   * Handles a message of an interface.
+   * @param type The type of the message.
+   * @param data Its payload.
+   * @param ws The connection of the interface.
+   */
   async onConnectionMessage(type: string, data: unknown, ws: WebSocket): Promise<void> {
     const message = { type, data } as ConnectionMessage;
 
     if (message.type === "reconfigure") {
       await this.reconfigure();
+      return;
+    }
+
+    if (message.type === "cdnLogin") {
+      void this.cdnSession.login();
+      return;
+    }
+
+    if (message.type === "cdnLogout") {
+      await this.cdnSession.logout();
       return;
     }
 
@@ -104,6 +133,7 @@ export class DevtoolServer {
       await this.lb.recreate();
     }
     await this.http.sendToWsConnections("config", this.configWrapper.getForClient(this.version));
+    await this.cdnSession.publish();
   }
 
   private async newCommandStream(data: CommandStreamCreatePayload): Promise<void> {
@@ -147,6 +177,7 @@ export class DevtoolServer {
     this.configWrapper = new DevtoolConfigure(nextConfig.raw);
     await this.configWrapper.reconfigure();
     this.config = this.configWrapper.runtimeConfig;
+    this.cdnSession.configure(nextConfig.raw.cdn);
 
     if (nextConfig.loadedPaths.length) {
       logger.info("Server", "Config", `Loaded: ${nextConfig.loadedPaths.join(", ")}`);

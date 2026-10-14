@@ -4,6 +4,13 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { localPathOf } from "./directory.js";
 import type { CdnOptions } from "./options.js";
 
+/** Identity of a signed-in developer, as the issuer describes it. */
+export interface CdnUser {
+  name: string | null;
+  username: string | null;
+  groups: string[];
+}
+
 /** Tokens of a signed-in developer, kept between runs. */
 export interface CdnSession {
   issuer: string;
@@ -12,6 +19,17 @@ export interface CdnSession {
   /** Expiry of the access token, in milliseconds since the epoch. */
   expiresAt: number;
   refreshToken: string | null;
+  /** Identity read at sign-in; missing for sessions opened before it was kept. */
+  user?: CdnUser | null;
+}
+
+/**
+ * Gives the path of the session file.
+ *
+ * @returns The absolute path.
+ */
+export function sessionPath(): string {
+  return SESSION_PATH;
 }
 
 const SESSION_PATH = localPathOf("devtool/session.json");

@@ -215,6 +215,9 @@ importers:
 
   apps/server:
     dependencies:
+      '@appsys/devtool-cdn':
+        specifier: workspace:*
+        version: link:../../packages/cdn
       '@appsys/devtool-config':
         specifier: workspace:*
         version: link:../../packages/config
