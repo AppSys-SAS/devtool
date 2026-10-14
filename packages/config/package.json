@@ -20,7 +20,7 @@
   },
   "dependencies": {
     "glob": "^13.0.6",
-    "js-yaml": "^5.2.3",
+    "js-yaml": "^5.4.3",
     "lodash.clonedeep": "^4.5.0",
     "lodash.mergewith": "^4.6.2"
   },

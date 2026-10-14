@@ -5,7 +5,7 @@ import { SearchAddon } from "@xterm/addon-search";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Terminal } from "@xterm/xterm";
-import { Eraser, Play, RotateCcw, Search, Square, Trash2 } from "lucide-vue-next";
+import { Eraser, Play, RotateCcw, Search, Square, Trash2 } from "@lucide/vue";
 import router from "@/router";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";

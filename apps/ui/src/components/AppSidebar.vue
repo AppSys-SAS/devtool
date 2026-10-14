@@ -3,7 +3,7 @@ import { computed, ref, watch } from "vue";
 import { RouterLink } from "vue-router";
 import { useColorMode } from "@vueuse/core";
 import { Icon } from "@iconify/vue";
-import { Bookmark, Circle, FolderTree, Monitor, Moon, Play, RefreshCw, RotateCcw, Square, Sun } from 'lucide-vue-next'
+import { Bookmark, Circle, FolderTree, Monitor, Moon, Play, RefreshCw, RotateCcw, Square, Sun } from '@lucide/vue'
 import SidebarStreamItem from "@/components/SidebarStreamItem.vue";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";

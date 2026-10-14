@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { Icon } from "@iconify/vue";
-import { Bookmark } from "lucide-vue-next";
+import { Bookmark } from "@lucide/vue";
 import { RouterView } from "vue-router";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";

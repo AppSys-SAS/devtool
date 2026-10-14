@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { RouterLink, type RouteLocationRaw } from 'vue-router'
 import { Icon } from '@iconify/vue'
-import { Circle, Play, RotateCcw, Square, Trash2 } from 'lucide-vue-next'
+import { Circle, Play, RotateCcw, Square, Trash2 } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import type { CommandStream } from '@/types'
