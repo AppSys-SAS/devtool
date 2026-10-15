@@ -1,9 +1,15 @@
+import { existsSync, watch } from "node:fs";
+import path from "node:path";
 import { loadMergedConfig, type RawConfig, resolveDefaultConfigPaths } from "@appsys/devtool-config";
-import { logger } from "@appsys/devtool-shared";
+import { logger, type RuntimeConfig } from "@appsys/devtool-shared";
 import pkg from "../package.json" with { type: "json" };
+import { DevtoolConfigure } from "./configure.js";
+import { DevtoolLB } from "./lb.js";
 import { DevtoolServer } from "./server.js";
 import { mergeDeep, toCommandArgsArray, toRecord, toStringArray } from "./utils.js";
-import type { ServerBootstrapOptions } from "./types.js";
+import type { ConfigProvider, LoadBalancerContext, ServerBootstrapOptions } from "./types.js";
+
+const CONFIG_CHANGE_DELAY_MS = 200;
 
 function readKillSignal(record: Record<string, unknown>): unknown {
   return record.killSignal ?? record.killsignal;
@@ -177,31 +183,108 @@ export function createRuntimeConfig(raw: RawConfig, options: Pick<ServerBootstra
 }
 
 /**
- * Starts the devtool server, reloading its configuration on every reconfiguration.
- * @param options Ports, SSL domain, UI path and configuration files of the server.
- * @returns The running server.
+ * Resolves the configuration files to load, the defaults when none are given.
+ * @param configPaths Paths of the configuration files.
+ * @returns The paths of the configuration files.
  */
-export default async function runServer({
-  serverPort,
-  loadBalancerPort,
-  ssl = null,
-  uiPath = null,
-  configPaths,
-}: ServerBootstrapOptions = {}): Promise<DevtoolServer> {
+function resolveConfigPaths(configPaths: string[] | undefined): string[] {
   const resolvedPaths = configPaths?.length ? configPaths : resolveDefaultConfigPaths();
-
   logger.info("Server", "Startup", `Config paths: ${resolvedPaths.join(", ")}`);
+  return resolvedPaths;
+}
 
-  return DevtoolServer.run(async () => {
-    const { config, loadedPaths } = await loadMergedConfig(resolvedPaths);
+/**
+ * Creates the loader of the merged configuration files, with the runtime overrides applied.
+ * @param options Ports, SSL domain and UI path overriding the configuration files.
+ * @param configPaths Paths of the configuration files.
+ * @returns The configuration loader.
+ */
+function createConfigProvider({ serverPort, loadBalancerPort, ssl, uiPath }: ServerBootstrapOptions, configPaths: string[]): ConfigProvider {
+  return async () => {
+    const { config, loadedPaths } = await loadMergedConfig(configPaths);
     return {
       raw: createRuntimeConfig(config, {
         serverPort,
         loadBalancerPort,
-        ssl,
-        uiPath,
+        ssl: ssl ?? null,
+        uiPath: uiPath ?? null,
       }),
       loadedPaths,
     };
-  }, pkg.version);
+  };
+}
+
+/**
+ * Loads the configuration and validates it into the runtime configuration.
+ * @param configProvider Loads the configuration.
+ * @returns The runtime configuration.
+ */
+async function loadRuntimeConfig(configProvider: ConfigProvider): Promise<RuntimeConfig> {
+  const configure = new DevtoolConfigure((await configProvider()).raw);
+  await configure.reconfigure();
+  return configure.runtimeConfig;
+}
+
+/**
+ * Calls a listener shortly after any of the configuration files changes, including when it is replaced.
+ * @param configPaths Paths of the configuration files.
+ * @param onChange Called once per burst of changes.
+ */
+function watchConfigFiles(configPaths: string[], onChange: () => void): void {
+  let changeTimer: ReturnType<typeof setTimeout> | null = null;
+  const absolutePaths = configPaths.map((configPath) => path.resolve(configPath));
+
+  for (const directory of new Set(absolutePaths.map((configPath) => path.dirname(configPath)))) {
+    if (!existsSync(directory)) {
+      continue;
+    }
+
+    watch(directory, (_event, changed) => {
+      if (!changed || !absolutePaths.includes(path.join(directory, changed))) {
+        return;
+      }
+
+      if (changeTimer) {
+        clearTimeout(changeTimer);
+      }
+      changeTimer = setTimeout(onChange, CONFIG_CHANGE_DELAY_MS);
+    });
+  }
+}
+
+/**
+ * Starts the devtool server, reloading its configuration on every reconfiguration.
+ * @param options Ports, SSL domain, UI path, configuration files of the server and whether it runs the load balancer.
+ * @returns The running server.
+ */
+export default async function runServer(options: ServerBootstrapOptions = {}): Promise<DevtoolServer> {
+  const configPaths = resolveConfigPaths(options.configPaths);
+  return DevtoolServer.run(createConfigProvider(options, configPaths), pkg.version, options.loadBalancer ?? true);
+}
+
+/**
+ * Starts the load balancer on its own, reloading its configuration whenever a configuration file changes.
+ * @param options Ports, SSL domain, UI path and configuration files of the load balancer.
+ * @returns The running load balancer.
+ */
+export async function runLoadBalancer(options: ServerBootstrapOptions = {}): Promise<DevtoolLB> {
+  const configPaths = resolveConfigPaths(options.configPaths);
+  const configProvider = createConfigProvider(options, configPaths);
+  const context: LoadBalancerContext = { config: await loadRuntimeConfig(configProvider) };
+  const lb = await DevtoolLB.create(context);
+  await lb.listen();
+
+  watchConfigFiles(configPaths, () => {
+    void (async () => {
+      context.config = await loadRuntimeConfig(configProvider);
+      if (await lb.reload(context.config)) {
+        await lb.recreate();
+      }
+      logger.info("LoadBalancer", "Config", "Reloaded");
+    })().catch((error: unknown) => {
+      logger.warn("LoadBalancer", "Config", `Not reloaded: ${error instanceof Error ? error.message : String(error)}`);
+    });
+  });
+
+  return lb;
 }

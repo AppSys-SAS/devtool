@@ -7,12 +7,12 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Socket } from "node:net";
 import type { RuntimeConfig } from "@appsys/devtool-shared";
 import { DevtoolProxy } from "./proxy.js";
-import type { DevtoolServer } from "./server.js";
+import type { LoadBalancerContext } from "./types.js";
 
 type AnyLbServer = http.Server | https.Server;
 
 export class DevtoolLB {
-  private readonly serverContext: DevtoolServer;
+  private readonly serverContext: LoadBalancerContext;
 
   private readonly proxy: DevtoolProxy;
 
@@ -22,7 +22,10 @@ export class DevtoolLB {
 
   private isSecure: boolean;
 
-  private constructor(serverContext: DevtoolServer) {
+  /**
+   * @param serverContext Holds the current configuration.
+   */
+  private constructor(serverContext: LoadBalancerContext) {
     this.serverContext = serverContext;
     this.proxy = new DevtoolProxy();
     this.certificates = {};
@@ -30,7 +33,12 @@ export class DevtoolLB {
     this.isSecure = false;
   }
 
-  static async create(serverContext: DevtoolServer): Promise<DevtoolLB> {
+  /**
+   * Creates the load balancer from the current configuration, without listening yet.
+   * @param serverContext Holds the current configuration.
+   * @returns The load balancer.
+   */
+  static async create(serverContext: LoadBalancerContext): Promise<DevtoolLB> {
     const instance = new DevtoolLB(serverContext);
     await instance.reload(serverContext.config);
     await instance.createServer();

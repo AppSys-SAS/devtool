@@ -1,13 +1,13 @@
 import runServer from "./index.js";
 import { logger } from "@appsys/devtool-shared";
-
-const DEFAULT_UI_DEV_URL = "http://127.0.0.1:6731";
+import { DEV_UI_PATH } from "./dev-options.js";
 
 void (async () => {
   try {
     logger.setLevel("debug");
     await runServer({
-      uiPath: process.env.DEVTOOL_UI_PATH ?? DEFAULT_UI_DEV_URL,
+      uiPath: DEV_UI_PATH,
+      loadBalancer: false,
     });
   } catch (error) {
     logger.error("Server", "Dev", error instanceof Error ? error.message : "Unknown startup error");

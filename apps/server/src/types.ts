@@ -9,6 +9,11 @@ export interface ServerBootstrapOptions {
   ssl?: string | null;
   uiPath?: string | null;
   configPaths?: string[];
+  loadBalancer?: boolean;
+}
+
+export interface LoadBalancerContext {
+  config: RuntimeConfig;
 }
 
 export type ConfigProvider = () => Promise<{ raw: RawConfig; loadedPaths: string[] }>;

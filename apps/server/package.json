@@ -17,7 +17,9 @@
     "build": "tsc -b tsconfig.json --force",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "dev": "tsx watch src/dev.ts"
+    "dev": "pnpm run \"/^dev:/\"",
+    "dev:server": "tsx watch src/dev.ts",
+    "dev:lb": "tsx src/dev-lb.ts"
   },
   "dependencies": {
     "@appsys/devtool-cdn": "workspace:*",

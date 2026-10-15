@@ -27,7 +27,7 @@ export class DevtoolServer {
 
   public http: DevtoolHttp;
 
-  private lb: DevtoolLB;
+  private lb: DevtoolLB | null;
 
   private commandStreams: DevtoolCommandStream[];
 
@@ -45,7 +45,7 @@ export class DevtoolServer {
     this.configWrapper = new DevtoolConfigure({});
     this.config = this.configWrapper.runtimeConfig;
     this.http = null as unknown as DevtoolHttp;
-    this.lb = null as unknown as DevtoolLB;
+    this.lb = null;
     this.commandStreams = [];
     this.environment = new DevtoolEnvironment((payload) => this.http.sendToWsConnections("environment", payload));
     this.cdnSession = new DevtoolCdnSession(async (payload) => {
@@ -56,11 +56,20 @@ export class DevtoolServer {
     });
   }
 
-  static async run(configProvider: ConfigProvider, version: string): Promise<DevtoolServer> {
+  /**
+   * Loads the configuration and starts the server.
+   * @param configProvider Loads the configuration.
+   * @param version Version of the devtool.
+   * @param loadBalancer Whether the load balancer runs in this process.
+   * @returns The running server.
+   */
+  static async run(configProvider: ConfigProvider, version: string, loadBalancer: boolean): Promise<DevtoolServer> {
     const instance = new DevtoolServer(configProvider, version);
     await instance.loadConfig();
     await instance.createHttp();
-    await instance.createLB();
+    if (loadBalancer) {
+      await instance.createLB();
+    }
     await instance.listen();
     instance.refreshEnvironment();
     return instance;
@@ -176,10 +185,13 @@ export class DevtoolServer {
     this.commandStreams = this.commandStreams.filter((stream) => stream.slug !== streamSlug);
   }
 
+  /**
+   * Reloads the configuration, applies it to the load balancer when it runs in this process and sends it
+   * to the interfaces.
+   */
   private async reconfigure(): Promise<void> {
     await this.loadConfig();
-    const shouldRecreateLb = await this.lb.reload(this.config);
-    if (shouldRecreateLb) {
+    if (this.lb && (await this.lb.reload(this.config))) {
       await this.lb.recreate();
     }
     await this.http.sendToWsConnections("config", this.configWrapper.getForClient(this.version));
@@ -245,8 +257,11 @@ export class DevtoolServer {
     this.lb = await DevtoolLB.create(this);
   }
 
+  /**
+   * Starts listening on the server port, and on the load balancer port when it runs in this process.
+   */
   private async listen(): Promise<void> {
     await this.http.listen();
-    await this.lb.listen();
+    await this.lb?.listen();
   }
 }
