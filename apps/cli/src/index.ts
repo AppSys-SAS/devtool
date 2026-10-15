@@ -15,7 +15,6 @@ import {
   type EnvironmentItem,
   type EnvironmentOptions,
   type EnvironmentSelection,
-  hasSession,
   listTables,
   localPathOf,
   login,
@@ -41,20 +40,11 @@ const DEFAULT_UI_PATH = path.resolve(__dirname, "../../ui/dist");
 const INSTALLATION_CONFIG_PATHS = resolveDefaultConfigPaths(path.resolve(__dirname, ".."));
 
 /**
- * Reads the CDN options of the local configuration.
- * @param configPaths Paths of the configuration files.
- * @returns The options, or null when the configuration names no CDN.
- */
-async function readConfiguredCdn(configPaths: string[]): Promise<CdnOptions | null> {
-  return readCdnOptions((await loadMergedConfig(configPaths)).config.cdn);
-}
-
-/**
  * Reads the CDN options of the configuration of the devtool installation.
  * @returns The options.
  */
 async function requireConfiguredCdn(): Promise<CdnOptions> {
-  const options = await readConfiguredCdn(INSTALLATION_CONFIG_PATHS);
+  const options = readCdnOptions((await loadMergedConfig(INSTALLATION_CONFIG_PATHS)).config.cdn);
   if (!options) {
     throw new Error("no `cdn` section (url, authelia.issuer, authelia.clientId) in the devtool configuration");
   }
@@ -91,20 +81,6 @@ async function loadEnvironment(client: CdnClient, configPaths: string[]): Promis
   }
 
   return options;
-}
-
-/**
- * Downloads the shared configuration and the configuration files of the environment, without touching databases or
- * buckets.
- * @param cdn The CDN options.
- * @param configPaths Paths of the configuration files.
- */
-async function pullConfigurations(cdn: CdnOptions, configPaths: string[]): Promise<void> {
-  const client = new CdnClient(cdn);
-  await new Environment(client, { items: [], s3: null }).pull(SHARED_CONFIG_SELECTION);
-  const options = await loadEnvironment(client, configPaths);
-  const files = options.items.filter((item) => item.kind === "file").map((item): EnvironmentSelection => ({ item, tables: null }));
-  await transfer(files, (selection) => new Environment(client, options).pull(selection));
 }
 
 /**
@@ -278,17 +254,6 @@ async function main(): Promise<void> {
       const configPaths = configurations.length
         ? configurations.map((configuration) => (path.isAbsolute(configuration) ? configuration : path.resolve(invocationCwd, configuration)))
         : resolveDefaultConfigPaths();
-      const cdn = await readConfiguredCdn(configPaths);
-      if (cdn) {
-        try {
-          if (!(await hasSession(cdn))) {
-            await signIn(cdn);
-          }
-          await pullConfigurations(cdn, configPaths);
-        } catch (error) {
-          logger.warn("CLI", "Config", `Configurations not updated from the CDN, local copies used: ${error instanceof Error ? error.message : String(error)}`);
-        }
-      }
 
       await runServer({
         serverPort: parseOptionalPort(options.serverPort, "server port"),
