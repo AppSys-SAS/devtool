@@ -13,8 +13,9 @@ class WsStore {
 
   private socket: WebSocket | null = null;
 
-  private connecting: ReturnType<typeof setTimeout> | null = null;
-
+  /**
+   * Opens the connection to the server, leaving the handshake timeout to the browser.
+   */
   connect(): void {
     if (this.socket) {
       return;
@@ -27,20 +28,6 @@ class WsStore {
 
     const protocol = `ws${window.location.protocol === "https:" ? "s" : ""}`;
     this.socket = new WebSocket(`${protocol}://${window.location.host}/ws/`);
-
-    this.connecting = setTimeout(() => {
-      if (!this.error.value) {
-        this.error.value = "The connection has timed out.";
-      }
-      this.disconnect();
-    }, 2500);
-
-    this.socket.onopen = () => {
-      if (this.connecting) {
-        clearTimeout(this.connecting);
-      }
-      this.connecting = null;
-    };
 
     this.socket.onmessage = (event) => {
       try {
