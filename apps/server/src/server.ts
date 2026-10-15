@@ -122,6 +122,11 @@ export class DevtoolServer {
       return;
     }
 
+    if (message.type === "envKeys") {
+      await this.http.sendToWsConnections("environmentKeys", await this.environment.keys(message.data.path), ws);
+      return;
+    }
+
     if (message.type === "envRun") {
       this.environment.run(message.data.direction, message.data.targets).catch((error: unknown) => {
         logger.warn("Server", "Environment", `Run failed: ${error instanceof Error ? error.message : String(error)}`);

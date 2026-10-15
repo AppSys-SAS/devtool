@@ -6,6 +6,8 @@ import { createS3Client, restoreBucket, type S3Options, snapshotBucket } from ".
 import type { CdnClient } from "./client.js";
 import { localPathOf } from "./directory.js";
 import { databaseEngine, type DatabaseEngineName, isDatabaseEngineName } from "./engines.js";
+import { readSyncJournal, type SyncRecord, writeSyncRecord } from "./sync-journal.js";
+import { countChoices, diffYaml, mergeYaml, type YamlDifference, type YamlKeyChoice } from "./yaml-merge.js";
 
 /** Path of the shared devtool configuration, always part of the environment. */
 export const SHARED_CONFIG_PATH = "devtool/config.yml";
@@ -26,6 +28,8 @@ export interface EnvironmentOptions {
 export interface EnvironmentSelection {
   item: EnvironmentItem;
   tables: string[] | null;
+  /** For a YAML file, the value to keep for each differing key; the whole file when missing. */
+  keys?: YamlKeyChoice[] | null;
 }
 
 /** Outcome of the transfer of one item. */
@@ -46,6 +50,8 @@ export interface DescribedItem {
   local: CopyInfo | null;
   /** The CDN copy, null when there is none, "unknown" when the CDN cannot list its files. */
   remote: CopyInfo | null | "unknown";
+  /** Dates of both copies when they were last made equal, null when never recorded. */
+  synced: SyncRecord | null;
 }
 
 /**
@@ -218,6 +224,7 @@ export class Environment {
     }
 
     const remoteByPath = new Map(remoteFiles?.map((file) => [file.path, { size: file.size, updatedAt: file.updatedAt }]));
+    const journal = await readSyncJournal();
     const items = await Promise.all(
       this._options.items.map(async (item) => {
         const stat = await fs.stat(localPathOf(item.path)).catch(() => null);
@@ -225,6 +232,7 @@ export class Environment {
           item,
           local: stat?.isFile() ? { size: stat.size, updatedAt: stat.mtime } : null,
           remote: remoteFiles === null ? ("unknown" as const) : (remoteByPath.get(item.path) ?? null),
+          synced: journal.get(item.path) ?? null,
         };
       }),
     );
@@ -235,17 +243,21 @@ export class Environment {
   /**
    * Replaces the local copy of an item, and the local data it holds, by the one of the CDN.
    *
-   * @param selection - The item, and the tables to restore for a database.
+   * @param selection - The item, the tables to restore for a database, or the keys to take for a YAML file.
    * @returns What was done.
    */
   async pull(selection: EnvironmentSelection): Promise<TransferResult> {
     const { item, tables } = selection;
+    if (item.kind === "file" && selection.keys) {
+      return this.pullKeys(item.path, selection.keys);
+    }
+
     if (!(await this.download(item.path))) {
       return { done: false, detail: "absent from the CDN" };
     }
 
     const localPath = localPathOf(item.path);
-    await this.dateLikeRemote(item.path);
+    await this.recordSync(item.path);
     if (item.kind === "file") {
       return { done: true, detail: localPath };
     }
@@ -289,11 +301,15 @@ export class Environment {
    * Sends the local copy of an item to the CDN, after dumping the local database or bucket it
    * holds. For some tables of a database, only their rows are replaced in the stored archive.
    *
-   * @param selection - The item, and the tables to dump for a database.
+   * @param selection - The item, the tables to dump for a database, or the keys to send for a YAML file.
    * @returns What was done.
    */
   async push(selection: EnvironmentSelection): Promise<TransferResult> {
     const { item, tables } = selection;
+    if (item.kind === "file" && selection.keys) {
+      return this.pushKeys(item.path, selection.keys);
+    }
+
     const localPath = localPathOf(item.path);
     let detail = localPath;
     if (item.kind === "database") {
@@ -305,20 +321,122 @@ export class Environment {
     }
 
     await this._client.upload(item.path, localPath, mediaTypeOf(item.path));
-    await this.dateLikeRemote(item.path);
+    await this.recordSync(item.path);
     return { done: true, detail };
   }
 
   /**
-   * Gives the local copy of an item the date of its copy on the CDN, so equal dates mean equal
-   * copies and a later local date means a local change.
+   * Lists the keys whose values differ between the local and CDN copies of a YAML file.
+   *
+   * @param item - The file item.
+   * @returns The differing keys.
+   */
+  async diffKeys(item: EnvironmentItem): Promise<YamlDifference[]> {
+    const { local, remote } = await this.readBothCopies(item.path);
+    return diffYaml(local, remote);
+  }
+
+  /**
+   * Writes in the local copy of a YAML file the CDN values chosen for its differing keys.
+   *
+   * @param filePath - The path of the file.
+   * @param keys - The value to keep for each differing key.
+   * @returns What was done.
+   */
+  private async pullKeys(filePath: string, keys: YamlKeyChoice[]): Promise<TransferResult> {
+    const { local, remote } = await this.readBothCopies(filePath);
+    const differences = diffYaml(local, remote);
+    const merged = mergeYaml(local, "local", differences, keys);
+    await this.writeText(localPathOf(filePath), merged);
+    if (diffYaml(merged, remote).length === 0) {
+      await this.recordSync(filePath);
+    }
+
+    const counts = countChoices(differences, keys, "local");
+    return { done: true, detail: `keys merged: ${counts.remote} from the CDN, ${counts.local} kept local` };
+  }
+
+  /**
+   * Sends to the CDN its copy of a YAML file with the local values chosen for its differing keys,
+   * leaving the local copy as it is.
+   *
+   * @param filePath - The path of the file.
+   * @param keys - The value to keep for each differing key.
+   * @returns What was done.
+   */
+  private async pushKeys(filePath: string, keys: YamlKeyChoice[]): Promise<TransferResult> {
+    const { local, remote } = await this.readBothCopies(filePath);
+    const differences = diffYaml(local, remote);
+    const merged = mergeYaml(remote, "remote", differences, keys);
+    const mergedPath = `${localPathOf(filePath)}.merged`;
+    try {
+      await fs.writeFile(mergedPath, merged, { mode: 0o600 });
+      await this._client.upload(filePath, mergedPath, mediaTypeOf(filePath));
+    } finally {
+      await fs.rm(mergedPath, { force: true });
+    }
+    if (diffYaml(local, merged).length === 0) {
+      await this.recordSync(filePath);
+    }
+
+    const counts = countChoices(differences, keys, "remote");
+    return { done: true, detail: `keys merged: ${counts.local} from local, ${counts.remote} kept on the CDN` };
+  }
+
+  /**
+   * Reads the local and CDN copies of a YAML file, without replacing the local one.
+   *
+   * @param filePath - The path of the file.
+   * @returns Both texts.
+   */
+  private async readBothCopies(filePath: string): Promise<{ local: string; remote: string }> {
+    if (!/\.ya?ml$/.test(filePath)) {
+      throw new Error(`${filePath} is not a YAML file`);
+    }
+
+    const remotePath = `${localPathOf(filePath)}.remote`;
+    try {
+      if (!(await this.download(filePath, remotePath))) {
+        throw new Error(`${filePath} is not on the CDN`);
+      }
+
+      const local = await fs.readFile(localPathOf(filePath), "utf-8").catch(() => {
+        throw new Error(`no local file ${localPathOf(filePath)}`);
+      });
+      return { local, remote: await fs.readFile(remotePath, "utf-8") };
+    } finally {
+      await fs.rm(remotePath, { force: true });
+    }
+  }
+
+  /**
+   * Writes a local text file readable by the current user only, replaced only once written.
+   *
+   * @param localPath - The file.
+   * @param text - Its content.
+   */
+  private async writeText(localPath: string, text: string): Promise<void> {
+    await fs.mkdir(path.dirname(localPath), { recursive: true, mode: 0o700 });
+    const partialPath = `${localPath}.part`;
+    try {
+      await fs.writeFile(partialPath, text, { mode: 0o600 });
+      await fs.rename(partialPath, localPath);
+    } finally {
+      await fs.rm(partialPath, { force: true });
+    }
+  }
+
+  /**
+   * Records in the synchronization journal the dates of both copies of an item, now equal, so a
+   * later change on either side shows; neither copy is touched.
    *
    * @param filePath - The path of the item.
    */
-  private async dateLikeRemote(filePath: string): Promise<void> {
+  private async recordSync(filePath: string): Promise<void> {
     const remote = (await this._client.list())?.find((file) => file.path === filePath);
-    if (remote) {
-      await fs.utimes(localPathOf(filePath), remote.updatedAt, remote.updatedAt);
+    const local = await fs.stat(localPathOf(filePath)).catch(() => null);
+    if (remote && local) {
+      await writeSyncRecord(filePath, { localUpdatedAt: local.mtime, remoteUpdatedAt: remote.updatedAt });
     }
   }
 

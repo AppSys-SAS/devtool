@@ -15,8 +15,9 @@ import {
   UserRound,
   X,
 } from "@lucide/vue";
-import type { EnvironmentCopyPayload, EnvironmentItemPayload, EnvironmentStepPayload } from "@appsys/devtool-shared";
+import type { EnvironmentCopyPayload, EnvironmentItemPayload, EnvironmentKeyChoicePayload, EnvironmentStepPayload } from "@appsys/devtool-shared";
 import ConfirmDialog from "@/components/ConfirmDialog.vue";
+import YamlKeyChooser from "@/components/YamlKeyChooser.vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -30,26 +31,48 @@ import wsStore from "@/stores/ws";
 
 interface SyncStatus {
   label: string;
-  tone: "remote" | "local" | "muted" | "synced";
+  tone: "remote" | "local" | "conflict" | "muted" | "synced";
+}
+
+type Side = EnvironmentKeyChoicePayload["side"];
+
+interface ItemSelection {
+  tables: string[] | null;
+  keys: Record<string, Side> | null;
 }
 
 const SAME_DATE_TOLERANCE_MS = 1000;
 const TONE_CLASSES: Record<SyncStatus["tone"], string> = {
   remote: "border-sky-500/40 text-sky-600 dark:text-sky-400",
   local: "border-amber-500/40 text-amber-600 dark:text-amber-400",
+  conflict: "border-destructive/40 text-destructive",
   muted: "text-muted-foreground",
   synced: "border-emerald-500/40 text-emerald-600 dark:text-emerald-400",
 };
 
 const state = environmentStore.state;
 const session = sessionStore.state;
-const selected = ref<Record<string, { tables: string[] | null }>>({});
+const selected = ref<Record<string, ItemSelection>>({});
 const tableFilters = ref<Record<string, string>>({});
 const confirmOpen = ref(false);
 const pullingConfig = ref(false);
+const runDismissed = ref(false);
 
 const signedIn = computed(() => session.value?.signedIn === true);
 const running = computed(() => state.value?.run?.finished === false);
+
+watch(running, (isRunning) => {
+  if (isRunning) {
+    runDismissed.value = false;
+    return;
+  }
+
+  for (const [path, selection] of Object.entries(selected.value)) {
+    if (selection.keys !== null) {
+      chooseWholeFile(path, false);
+    }
+  }
+});
 
 const groups = computed(() => {
   const byProject = new Map<string, EnvironmentItemPayload[]>();
@@ -61,8 +84,22 @@ const groups = computed(() => {
   return [...byProject.entries()].map(([project, items]) => ({ project, items }));
 });
 
-const targets = computed(() => Object.entries(selected.value).map(([path, { tables }]) => ({ path, tables })));
-const incomplete = computed(() => targets.value.some((target) => target.tables !== null && target.tables.length === 0));
+const targets = computed(() =>
+  Object.entries(selected.value).map(([path, { tables, keys }]) => {
+    const entries = keys ? environmentStore.keys.value[path]?.entries : undefined;
+    const item = state.value?.items.find((candidate) => candidate.path === path);
+    return {
+      path,
+      tables,
+      keys: entries && keys ? entries.map((entry) => ({ path: entry.path, side: keys[JSON.stringify(entry.path)] ?? (item ? defaultSideOf(item) : "remote") })) : null,
+    };
+  }),
+);
+const incomplete = computed(() =>
+  Object.entries(selected.value).some(
+    ([path, { tables, keys }]) => (tables !== null && tables.length === 0) || (keys !== null && (!environmentStore.keys.value[path] || environmentStore.keys.value[path].error !== null)),
+  ),
+);
 const canRun = computed(() => signedIn.value && !running.value && targets.value.length > 0 && !incomplete.value);
 
 const overwritten = computed(() =>
@@ -98,6 +135,20 @@ function syncStatus(item: EnvironmentItemPayload): SyncStatus | null {
     return { label: "Only on CDN", tone: "remote" };
   }
 
+  if (item.synced) {
+    const localChanged = Math.abs(new Date(item.local.updatedAt).getTime() - new Date(item.synced.localUpdatedAt).getTime()) > SAME_DATE_TOLERANCE_MS;
+    const remoteChanged = Math.abs(new Date(item.remote.updatedAt).getTime() - new Date(item.synced.remoteUpdatedAt).getTime()) > SAME_DATE_TOLERANCE_MS;
+    if (localChanged && remoteChanged) {
+      return { label: "Changed on both", tone: "conflict" };
+    }
+
+    if (localChanged || remoteChanged) {
+      return localChanged ? { label: "Newer locally", tone: "local" } : { label: "Newer on CDN", tone: "remote" };
+    }
+
+    return { label: "Up to date", tone: "synced" };
+  }
+
   const difference = new Date(item.remote.updatedAt).getTime() - new Date(item.local.updatedAt).getTime();
   if (Math.abs(difference) <= SAME_DATE_TOLERANCE_MS) {
     return { label: "Up to date", tone: "synced" };
@@ -127,7 +178,7 @@ function describeItem(item: EnvironmentItemPayload): string {
 function toggleItem(item: EnvironmentItemPayload, checked: boolean): void {
   const next = { ...selected.value };
   if (checked) {
-    next[item.path] = { tables: null };
+    next[item.path] = { tables: null, keys: null };
   } else {
     delete next[item.path];
   }
@@ -140,10 +191,50 @@ function toggleItem(item: EnvironmentItemPayload, checked: boolean): void {
  * @param whole Whether the whole database is transferred.
  */
 function chooseWhole(path: string, whole: boolean): void {
-  selected.value = { ...selected.value, [path]: { tables: whole ? null : [] } };
+  selected.value = { ...selected.value, [path]: { tables: whole ? null : [], keys: null } };
   if (!whole && !environmentStore.tables.value[path]) {
     wsStore.envTables(path);
   }
+}
+
+/**
+ * Tells whether the keys of an item can be chosen one by one: a YAML file present on both sides.
+ * @param item The item.
+ * @returns True for such a file.
+ */
+function hasKeys(item: EnvironmentItemPayload): boolean {
+  return item.kind === "file" && /\.ya?ml$/.test(item.path) && item.local !== null && item.remote !== null && item.remote !== "unknown";
+}
+
+/**
+ * Gives the copy a differing key takes until the developer chooses: the newer one.
+ * @param item The YAML file item.
+ * @returns The CDN when its copy is newer, the local copy otherwise.
+ */
+function defaultSideOf(item: EnvironmentItemPayload): Side {
+  return syncStatus(item)?.tone === "local" ? "local" : "remote";
+}
+
+/**
+ * Chooses between the whole file and some of its keys, asking the server for the differing keys.
+ * @param path The path of the YAML file item.
+ * @param whole Whether the whole file is transferred.
+ */
+function chooseWholeFile(path: string, whole: boolean): void {
+  selected.value = { ...selected.value, [path]: { tables: null, keys: whole ? null : {} } };
+  if (!whole) {
+    environmentStore.forgetKeys(path);
+    wsStore.envKeys(path);
+  }
+}
+
+/**
+ * Keeps the copies chosen for the differing keys of a YAML file.
+ * @param path The path of the YAML file item.
+ * @param keys The copy of each key.
+ */
+function setKeys(path: string, keys: Record<string, Side>): void {
+  selected.value = { ...selected.value, [path]: { tables: null, keys } };
 }
 
 /**
@@ -154,7 +245,7 @@ function chooseWhole(path: string, whole: boolean): void {
 function toggleTable(path: string, table: string): void {
   const tables = selected.value[path]?.tables ?? [];
   const next = tables.includes(table) ? tables.filter((candidate) => candidate !== table) : [...tables, table];
-  selected.value = { ...selected.value, [path]: { tables: next } };
+  selected.value = { ...selected.value, [path]: { tables: next, keys: null } };
 }
 
 /**
@@ -172,7 +263,7 @@ function visibleTables(path: string): string[] {
  */
 function selectNewerOnCdn(): void {
   selected.value = Object.fromEntries(
-    (state.value?.items ?? []).filter((item) => syncStatus(item)?.tone === "remote").map((item) => [item.path, { tables: null }]),
+    (state.value?.items ?? []).filter((item) => syncStatus(item)?.tone === "remote").map((item) => [item.path, { tables: null, keys: null }]),
   );
 }
 
@@ -421,6 +512,51 @@ onMounted(() => wsStore.envRefresh());
             </div>
 
             <div
+              v-if="hasKeys(item) && selected[item.path]"
+              class="space-y-3 px-4 pb-4 pl-[4.25rem]"
+            >
+              <div class="inline-flex rounded-md border p-0.5 text-xs">
+                <button
+                  type="button"
+                  :class="cn('rounded px-2.5 py-1 transition-colors', selected[item.path].keys === null ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground')"
+                  @click="chooseWholeFile(item.path, true)"
+                >
+                  Whole file
+                </button>
+                <button
+                  type="button"
+                  :class="cn('rounded px-2.5 py-1 transition-colors', selected[item.path].keys !== null ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground')"
+                  @click="chooseWholeFile(item.path, false)"
+                >
+                  Some keys
+                </button>
+              </div>
+
+              <template v-if="selected[item.path].keys !== null">
+                <div
+                  v-if="!environmentStore.keys.value[item.path]"
+                  class="flex items-center gap-2 text-xs text-muted-foreground"
+                >
+                  <Loader2 class="size-3.5 animate-spin" />
+                  Comparing the local and CDN copies…
+                </div>
+                <div
+                  v-else-if="environmentStore.keys.value[item.path].error"
+                  class="text-xs text-destructive"
+                >
+                  {{ environmentStore.keys.value[item.path].error }}
+                </div>
+                <YamlKeyChooser
+                  v-else
+                  :model-value="selected[item.path].keys!"
+                  :entries="environmentStore.keys.value[item.path].entries"
+                  :default-side="defaultSideOf(item)"
+                  @update:model-value="(keys) => setKeys(item.path, keys)"
+                />
+              </template>
+            </div>
+
+            <div
               v-if="item.kind === 'database' && selected[item.path]"
               class="space-y-3 px-4 pb-4 pl-[4.25rem]"
             >
@@ -492,17 +628,29 @@ onMounted(() => wsStore.envRefresh());
     </div>
 
     <div
-      v-if="state?.run"
+      v-if="state?.run && !runDismissed"
       class="max-h-64 shrink-0 overflow-auto border-t bg-card px-6 py-3"
     >
       <div class="mx-auto max-w-5xl space-y-2">
-        <div class="flex items-center justify-between">
+        <div class="flex items-center justify-between gap-2">
           <span class="text-sm font-medium">
             {{ state.run.direction === "pull" ? "Pull" : "Push" }} {{ state.run.finished ? "finished" : "in progress" }}
           </span>
-          <span class="text-xs text-muted-foreground">
-            {{ state.run.steps.filter((step) => step.status === "done").length }} / {{ state.run.steps.length }} done
-          </span>
+          <div class="flex items-center gap-2">
+            <span class="text-xs text-muted-foreground">
+              {{ state.run.steps.filter((step) => step.status === "done").length }} / {{ state.run.steps.length }} done
+            </span>
+            <Button
+              v-if="state.run.finished"
+              size="icon"
+              variant="ghost"
+              class="size-6"
+              title="Close"
+              @click="runDismissed = true"
+            >
+              <X class="size-4" />
+            </Button>
+          </div>
         </div>
         <div
           v-for="step in state.run.steps"

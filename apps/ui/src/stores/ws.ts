@@ -1,4 +1,5 @@
 import { ref } from "vue";
+import type { EnvironmentKeyChoicePayload } from "@appsys/devtool-shared";
 import configStore from "./config";
 import environmentStore from "./environment";
 import sessionStore from "./session";
@@ -57,6 +58,9 @@ class WsStore {
             break;
           case "environment":
             environmentStore.load(payload.data as never);
+            break;
+          case "environmentKeys":
+            environmentStore.loadKeys(payload.data as never);
             break;
           case "environmentTables":
             environmentStore.loadTables(payload.data as never);
@@ -187,11 +191,19 @@ class WsStore {
   }
 
   /**
+   * Asks the server for the keys differing between the local and CDN copies of a YAML item.
+   * @param path The path of the item.
+   */
+  envKeys(path: string): void {
+    this.send("envKeys", { path });
+  }
+
+  /**
    * Asks the server to pull or push environment items.
    * @param direction Whether the CDN copies replace the local ones, or the reverse.
-   * @param targets The items, and the tables of the databases (null for the whole database).
+   * @param targets The items, with the tables of the databases and the keys of the YAML files (null for the whole item).
    */
-  envRun(direction: "pull" | "push", targets: { path: string; tables: string[] | null }[]): void {
+  envRun(direction: "pull" | "push", targets: { path: string; tables: string[] | null; keys: EnvironmentKeyChoicePayload[] | null }[]): void {
     this.send("envRun", { direction, targets });
   }
 

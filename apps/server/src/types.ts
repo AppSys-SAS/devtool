@@ -1,6 +1,7 @@
 import type { RawConfig } from "@appsys/devtool-config";
 import type { RuntimeConfig } from "@appsys/devtool-shared";
 import type { WebSocket } from "ws";
+import type { EnvironmentTarget } from "./environment.js";
 
 export interface ServerBootstrapOptions {
   serverPort?: number;
@@ -73,8 +74,12 @@ export type ConnectionMessage =
       data: { path: string };
     }
   | {
+      type: "envKeys";
+      data: { path: string };
+    }
+  | {
       type: "envRun";
-      data: { direction: "pull" | "push"; targets: { path: string; tables: string[] | null }[] };
+      data: { direction: "pull" | "push"; targets: EnvironmentTarget[] };
     }
   | {
       type: "newCommandStream";

@@ -17,3 +17,5 @@ export {
 } from "./environment.js";
 export { type CdnOptions, readCdnOptions } from "./options.js";
 export { type CdnUser, sessionPath } from "./session.js";
+export type { SyncRecord } from "./sync-journal.js";
+export { diffYaml, mergeYaml, type YamlDifference, type YamlKeyChoice, type YamlSide } from "./yaml-merge.js";

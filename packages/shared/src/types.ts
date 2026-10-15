@@ -136,6 +136,34 @@ export interface EnvironmentItemPayload {
   local: EnvironmentCopyPayload | null;
   /** The CDN copy, null when there is none, "unknown" when the CDN copies could not be listed. */
   remote: EnvironmentCopyPayload | null | "unknown";
+  /** Dates of both copies, in ISO format, when a pull or a push last made them equal. */
+  synced: { localUpdatedAt: string; remoteUpdatedAt: string } | null;
+}
+
+/** A value of a YAML key in one copy of a file. */
+export interface EnvironmentKeyValuePayload {
+  present: boolean;
+  value: unknown;
+}
+
+/** A key whose value differs between the local and CDN copies of a YAML file. */
+export interface EnvironmentKeyPayload {
+  path: string[];
+  local: EnvironmentKeyValuePayload;
+  remote: EnvironmentKeyValuePayload;
+}
+
+/** Keys differing between the local and CDN copies of a YAML item. */
+export interface EnvironmentKeysPayload {
+  path: string;
+  entries: EnvironmentKeyPayload[];
+  error: string | null;
+}
+
+/** The copy whose value a YAML key takes. */
+export interface EnvironmentKeyChoicePayload {
+  path: string[];
+  side: "local" | "remote";
 }
 
 /** Progress of one item of a pull or a push. */
@@ -174,6 +202,7 @@ export interface WsPayloadMap {
   cdnSession: CdnSessionPayload;
   environment: EnvironmentPayload;
   environmentTables: EnvironmentTablesPayload;
+  environmentKeys: EnvironmentKeysPayload;
   streamUpdate: StreamUpdatePayload;
   streamOutput: {
     slug: string;
