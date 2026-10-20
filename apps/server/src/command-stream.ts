@@ -11,6 +11,7 @@ import type { CommandStreamCreatePayload } from "./types.js";
 import type { DevtoolServer } from "./server.js";
 
 const MAX_OUTPUT = 2048;
+const STOP_TIMEOUT_MS = 10_000;
 const ANSI_RESET = "\u001b[0m";
 const ANSI_INFO_PREFIX = "\u001b[38;5;195m\u001b[48;5;27m";
 
@@ -181,6 +182,8 @@ export class DevtoolCommandStream {
 
   private proc: IPty | null;
 
+  private exited: Promise<void> | null;
+
   private readonly defaultEnv: Record<string, string>;
 
   private cols: number;
@@ -207,6 +210,7 @@ export class DevtoolCommandStream {
     this.exitCode = null;
     this.output = [];
     this.proc = null;
+    this.exited = null;
     this.defaultEnv = {
       APPSYS_DEVTOOL: "true",
       FORCE_COLOR: "3",
@@ -418,6 +422,13 @@ export class DevtoolCommandStream {
     child.unref();
   }
 
+  /**
+   * Starts the process in a terminal and follows its output and exit.
+   * @param options What to start.
+   * @param options.withUpdate Whether the new state is sent to the interfaces once started.
+   * @param options.args The arguments of the command.
+   * @param options.notifications Whether the interfaces notify the end of the process.
+   */
   private async start({
     withUpdate = true,
     args = this.args,
@@ -495,22 +506,27 @@ export class DevtoolCommandStream {
       void this.addOutput("stdout", data);
     });
 
-    this.proc.onExit(({ exitCode }) => {
-      this.exitCode = exitCode;
-      if (this.stoppedDate) {
-        this.exitCode = 0;
-        void this.addOutput("info", "Process killed");
-      } else if (exitCode) {
-        void this.addOutput("info", `Process exited with code ${exitCode}`);
-      } else {
-        void this.addOutput("info", "Process exited successfully");
-      }
+    const proc = this.proc;
+    this.exited = new Promise<void>((resolve) => {
+      proc.onExit(({ exitCode }) => {
+        this.exitCode = exitCode;
+        if (this.stoppedDate) {
+          this.exitCode = 0;
+          void this.addOutput("info", "Process killed");
+        } else if (exitCode) {
+          void this.addOutput("info", `Process exited with code ${exitCode}`);
+        } else {
+          void this.addOutput("info", "Process exited successfully");
+        }
 
-      this.stoppedDate = Date.now();
-      this.proc = null;
-      this.runningArgs = null;
+        this.stoppedDate = Date.now();
+        this.proc = null;
+        this.exited = null;
+        this.runningArgs = null;
 
-      void this.sendUpdate();
+        void this.sendUpdate();
+        resolve();
+      });
     });
 
     if (withUpdate) {
@@ -612,8 +628,11 @@ export class DevtoolCommandStream {
     return normalizeShell(directory.shell);
   }
 
+  /**
+   * Stops the process and waits for it to exit, killing it when it outlives the stop timeout.
+   */
   private async stop(): Promise<void> {
-    if (!this.proc) {
+    if (!this.proc || !this.exited) {
       return;
     }
 
@@ -622,8 +641,31 @@ export class DevtoolCommandStream {
 
     await this.addOutput("info", `Killing the process (${signal})...`);
     this.stoppedDate = Date.now();
-    const pid = this.proc.pid;
+    const exited = this.exited;
+    await this.killTree(this.proc.pid, signal);
 
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timedOut = await Promise.race([
+      exited.then(() => false),
+      new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(true), STOP_TIMEOUT_MS);
+      }),
+    ]);
+    clearTimeout(timer);
+
+    if (timedOut && this.proc) {
+      await this.addOutput("info", `Still running after ${STOP_TIMEOUT_MS / 1000}s, killing the process (SIGKILL)...`);
+      await this.killTree(this.proc.pid, "SIGKILL");
+      await exited;
+    }
+  }
+
+  /**
+   * Sends a signal to a process and its descendants, falling back to the process alone.
+   * @param pid The process.
+   * @param signal The signal.
+   */
+  private async killTree(pid: number, signal: string): Promise<void> {
     await new Promise<void>((resolve, reject) => {
       treeKill(pid, signal, (error) => {
         if (error) {
@@ -632,16 +674,18 @@ export class DevtoolCommandStream {
         }
         resolve();
       });
-    }).catch(async (error) => {
+    }).catch(async (error: unknown) => {
       await this.addOutput("stderr", error instanceof Error ? error.message : "Unable to kill process");
-      this.proc?.kill();
+      this.proc?.kill(signal);
     });
   }
 
+  /**
+   * Stops the process, waits for it to exit, then starts it again with the same arguments.
+   */
   private async restart(): Promise<void> {
     const args = this.runningArgs ?? this.args;
     await this.stop();
-    await new Promise((resolve) => setTimeout(resolve, 150));
     await this.addOutput("info", "Restarting process...");
     await this.start({ args });
   }
