@@ -194,6 +194,13 @@ class WsStore {
     this.send("envRun", { direction, targets });
   }
 
+  /**
+   * Asks the server to forget the last finished pull or push.
+   */
+  envDismissRun(): void {
+    this.send("envDismissRun", {});
+  }
+
   disconnect(alreadyClosed = false): void {
     if (!alreadyClosed && this.socket) {
       this.socket.close();

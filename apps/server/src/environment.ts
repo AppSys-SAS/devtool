@@ -191,6 +191,18 @@ export class DevtoolEnvironment {
   }
 
   /**
+   * Forgets the last run once it is finished and publishes the state.
+   */
+  async dismissRun(): Promise<void> {
+    if (!this._run?.finished) {
+      return;
+    }
+
+    this._run = null;
+    await this._publish(this.state());
+  }
+
+  /**
    * Pulls or pushes items one after the other, publishing the progress of each, then describes the
    * items again. A request while a run is in progress does nothing.
    *

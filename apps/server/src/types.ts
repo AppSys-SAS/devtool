@@ -87,6 +87,10 @@ export type ConnectionMessage =
       data: { direction: "pull" | "push"; targets: EnvironmentTarget[] };
     }
   | {
+      type: "envDismissRun";
+      data: Record<string, never>;
+    }
+  | {
       type: "newCommandStream";
       data: CommandStreamCreatePayload;
     }

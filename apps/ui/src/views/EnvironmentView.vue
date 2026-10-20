@@ -57,14 +57,12 @@ const selected = ref<Record<string, ItemSelection>>({});
 const tableFilters = ref<Record<string, string>>({});
 const confirmOpen = ref(false);
 const pullingConfig = ref(false);
-const runDismissed = ref(false);
 
 const signedIn = computed(() => session.value?.signedIn === true);
 const running = computed(() => state.value?.run?.finished === false);
 
 watch(running, (isRunning) => {
   if (isRunning) {
-    runDismissed.value = false;
     return;
   }
 
@@ -642,7 +640,7 @@ onMounted(() => wsStore.envRefresh());
     </div>
 
     <div
-      v-if="state?.run && !runDismissed"
+      v-if="state?.run"
       class="max-h-64 shrink-0 overflow-auto border-t bg-card px-6 py-3"
     >
       <div class="mx-auto max-w-5xl space-y-2">
@@ -660,7 +658,7 @@ onMounted(() => wsStore.envRefresh());
               variant="ghost"
               class="size-6"
               title="Close"
-              @click="runDismissed = true"
+              @click="wsStore.envDismissRun()"
             >
               <X class="size-4" />
             </Button>

@@ -143,6 +143,11 @@ export class DevtoolServer {
       return;
     }
 
+    if (message.type === "envDismissRun") {
+      await this.environment.dismissRun();
+      return;
+    }
+
     if (message.type === "newCommandStream") {
       await this.newCommandStream(message.data);
       return;
