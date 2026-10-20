@@ -8,6 +8,7 @@ import {
   Database,
   FileText,
   Loader2,
+  MemoryStick,
   Package,
   RefreshCw,
   SkipForward,
@@ -111,6 +112,10 @@ const overwritten = computed(() =>
         return `${item.path}: bucket ${item.bucket} emptied and reloaded`;
       }
 
+      if (item?.kind === "redis") {
+        return `${item.path}: Redis database ${item.redis} emptied and reloaded`;
+      }
+
       return target.tables
         ? `${target.path}: tables ${target.tables.join(", ")} emptied and reloaded`
         : `${target.path}: database of container ${item?.container} dropped and recreated`;
@@ -163,11 +168,16 @@ function syncStatus(item: EnvironmentItemPayload): SyncStatus | null {
  * @returns A short description.
  */
 function describeItem(item: EnvironmentItemPayload): string {
-  if (item.kind === "database") {
-    return `${item.engine} · container ${item.container}`;
+  switch (item.kind) {
+    case "database":
+      return `${item.engine} · container ${item.container}`;
+    case "bucket":
+      return `bucket ${item.bucket}`;
+    case "redis":
+      return `redis · ${item.redis}`;
+    default:
+      return "file";
   }
-
-  return item.kind === "bucket" ? `bucket ${item.bucket}` : "file";
 }
 
 /**
@@ -341,7 +351,7 @@ onMounted(() => wsStore.envRefresh());
               Environment
             </h1>
             <p class="text-sm text-muted-foreground">
-              Configurations, databases and buckets shared by the developers: <code>~/.config/appsys</code> ⇄ CDN.
+              Configurations, databases, buckets and Redis databases shared by the developers: <code>~/.config/appsys</code> ⇄ CDN.
             </p>
           </div>
           <div class="flex items-center gap-2">
@@ -407,7 +417,7 @@ onMounted(() => wsStore.envRefresh());
               v-if="session?.configured"
               class="text-sm text-muted-foreground"
             >
-              The shared devtool configuration declares it: pull it from the CDN to list the configurations, databases and buckets.
+              The shared devtool configuration declares it: pull it from the CDN to list the configurations, databases, buckets and Redis databases.
             </p>
             <p
               v-else
@@ -469,6 +479,10 @@ onMounted(() => wsStore.envRefresh());
                 />
                 <Package
                   v-else-if="item.kind === 'bucket'"
+                  class="size-4"
+                />
+                <MemoryStick
+                  v-else-if="item.kind === 'redis'"
                   class="size-4"
                 />
                 <FileText

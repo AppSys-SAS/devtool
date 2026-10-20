@@ -24,6 +24,7 @@ import {
   parseTargets,
   readCdnOptions,
   readEnvironmentOptions,
+  redisDatabaseName,
   SHARED_CONFIG_PATH,
   type TransferResult,
 } from "@appsys/devtool-cdn";
@@ -89,11 +90,16 @@ async function loadEnvironment(client: CdnClient, configPaths: string[]): Promis
  * @returns Its path and what it holds.
  */
 function describeItem(item: EnvironmentItem): string {
-  if (item.kind === "database") {
-    return `${item.path} (${item.engine} database of container ${item.container})`;
+  switch (item.kind) {
+    case "database":
+      return `${item.path} (${item.engine} database of container ${item.container})`;
+    case "bucket":
+      return `${item.path} (bucket ${item.bucket})`;
+    case "redis":
+      return `${item.path} (Redis ${redisDatabaseName(item.url)})`;
+    default:
+      return `${item.path} (file)`;
   }
-
-  return item.kind === "bucket" ? `${item.path} (bucket ${item.bucket})` : `${item.path} (file)`;
 }
 
 /**
@@ -339,21 +345,21 @@ async function main(): Promise<void> {
 
   const env = program
     .command("env")
-    .description(`Development environment in ${localPathOf("")}, mirrored on the CDN: configurations, databases, buckets`)
+    .description(`Development environment in ${localPathOf("")}, mirrored on the CDN: configurations, databases, buckets, Redis databases`)
     .addHelpText("after", "\nTargets: <path> for an item, <path>:<table>,<table> for tables of a database; every item without target.");
 
   env
     .command("pull [targets...]")
-    .description("Replace local items, and the local databases and buckets they hold, by the CDN copies")
+    .description("Replace local items, and the local data they hold, by the CDN copies")
     .option("-i, --interactive", "choose items and tables")
-    .option("-y, --yes", "replace local databases and buckets without asking")
+    .option("-y, --yes", "replace local data without asking")
     .action(async (targets: string[], flags: { interactive?: boolean; yes?: boolean }) => {
       await syncEnvironment("pull", targets, flags);
     });
 
   env
     .command("push [targets...]")
-    .description("Dump local databases and buckets, and send local items to the CDN (write group only)")
+    .description("Dump the local data of the items and send them to the CDN (write group only)")
     .option("-i, --interactive", "choose items and tables")
     .action(async (targets: string[], flags: { interactive?: boolean }) => {
       await syncEnvironment("push", targets, flags);

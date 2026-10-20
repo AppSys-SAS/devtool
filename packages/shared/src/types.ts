@@ -129,10 +129,12 @@ export interface EnvironmentCopyPayload {
 /** An item of the development environment with its local copy and its copy on the CDN. */
 export interface EnvironmentItemPayload {
   path: string;
-  kind: "file" | "database" | "bucket";
+  kind: "file" | "database" | "bucket" | "redis";
   engine: string | null;
   container: string | null;
   bucket: string | null;
+  /** The Redis server and database number, without credentials. */
+  redis: string | null;
   local: EnvironmentCopyPayload | null;
   /** The CDN copy, null when there is none, "unknown" when the CDN copies could not be listed. */
   remote: EnvironmentCopyPayload | null | "unknown";

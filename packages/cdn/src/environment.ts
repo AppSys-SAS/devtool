@@ -6,17 +6,19 @@ import { createS3Client, restoreBucket, type S3Options, snapshotBucket } from ".
 import type { CdnClient } from "./client.js";
 import { localPathOf } from "./directory.js";
 import { databaseEngine, type DatabaseEngineName, isDatabaseEngineName } from "./engines.js";
+import { redisDatabaseName, restoreRedis, snapshotRedis } from "./redis.js";
 import { readSyncJournal, type SyncRecord, writeSyncRecord } from "./sync-journal.js";
 import { countChoices, diffYaml, mergeYaml, type YamlDifference, type YamlKeyChoice } from "./yaml-merge.js";
 
 /** Path of the shared devtool configuration, always part of the environment. */
 export const SHARED_CONFIG_PATH = "devtool/config.yml";
 
-/** A file of the environment: a configuration, a database archive or a bucket snapshot. */
+/** A file of the environment: a configuration, a database archive, a bucket or a Redis database snapshot. */
 export type EnvironmentItem =
   | { kind: "file"; path: string }
   | { kind: "database"; path: string; engine: DatabaseEngineName; container: string }
-  | { kind: "bucket"; path: string; bucket: string };
+  | { kind: "bucket"; path: string; bucket: string }
+  | { kind: "redis"; path: string; url: string };
 
 /** What the environment is made of, as declared in the `environment` section of the configuration. */
 export interface EnvironmentOptions {
@@ -103,6 +105,12 @@ export function readEnvironmentOptions(section: unknown): EnvironmentOptions | n
       throw new Error(`invalid bucket in the environment: ${JSON.stringify(bucket)}`);
     }
     items.push({ kind: "bucket", path: bucket.path, bucket: bucket.bucket });
+  }
+  for (const redis of recordsOf(record.redis)) {
+    if (typeof redis.path !== "string" || typeof redis.url !== "string") {
+      throw new Error(`invalid Redis database in the environment: ${JSON.stringify({ path: redis.path })}`);
+    }
+    items.push({ kind: "redis", path: redis.path, url: redis.url });
   }
 
   const s3 = recordOf(record.s3);
@@ -267,6 +275,11 @@ export class Environment {
       return { done: true, detail: `${count} objects restored in ${item.bucket}` };
     }
 
+    if (item.kind === "redis") {
+      const count = await restoreRedis(item.url, readArchive(localPath));
+      return { done: true, detail: `${count} keys restored in Redis ${redisDatabaseName(item.url)}` };
+    }
+
     const engine = databaseEngine(item.engine);
     const records = readArchive(localPath);
     const first = await records.next();
@@ -298,8 +311,7 @@ export class Environment {
   }
 
   /**
-   * Sends the local copy of an item to the CDN, after dumping the local database or bucket it
-   * holds. For some tables of a database, only their rows are replaced in the stored archive.
+   * Sends the local copy of an item to the CDN, after dumping the local data it holds. For some tables of a database, only their rows are replaced in the stored archive.
    *
    * @param selection - The item, the tables to dump for a database, or the keys to send for a YAML file.
    * @returns What was done.
@@ -316,6 +328,8 @@ export class Environment {
       detail = await this.writeLocal(localPath, (archive) => this.dumpDatabase(item, tables, archive));
     } else if (item.kind === "bucket") {
       detail = await this.writeLocal(localPath, async (archive) => `${await snapshotBucket(this.s3(), item.bucket, archive)} objects of ${item.bucket}`);
+    } else if (item.kind === "redis") {
+      detail = await this.writeLocal(localPath, async (archive) => `${await snapshotRedis(item.url, archive)} keys of Redis ${redisDatabaseName(item.url)}`);
     } else if (!(await fs.stat(localPath).then((stat) => stat.isFile(), () => false))) {
       return { done: false, detail: `no local file ${localPath}` };
     }

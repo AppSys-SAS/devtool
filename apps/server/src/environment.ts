@@ -8,6 +8,7 @@ import {
   listTables,
   readCdnOptions,
   readEnvironmentOptions,
+  redisDatabaseName,
   SHARED_CONFIG_PATH,
 } from "@appsys/devtool-cdn";
 import type { RawConfig } from "@appsys/devtool-config";
@@ -107,6 +108,7 @@ export class DevtoolEnvironment {
         engine: item.kind === "database" ? item.engine : null,
         container: item.kind === "database" ? item.container : null,
         bucket: item.kind === "bucket" ? item.bucket : null,
+        redis: item.kind === "redis" ? redisDatabaseName(item.url) : null,
         local: local ? copyPayload(local) : null,
         remote: remote === "unknown" || remote === null ? remote : copyPayload(remote),
         synced: synced ? { localUpdatedAt: synced.localUpdatedAt.toISOString(), remoteUpdatedAt: synced.remoteUpdatedAt.toISOString() } : null,
