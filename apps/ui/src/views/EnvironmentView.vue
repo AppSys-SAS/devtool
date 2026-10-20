@@ -111,7 +111,9 @@ const overwritten = computed(() =>
       }
 
       if (item?.kind === "redis") {
-        return `${item.path}: Redis database ${item.redis} emptied and reloaded`;
+        return target.tables
+          ? `${target.path}: key groups ${target.tables.join(", ")} emptied and reloaded`
+          : `${item.path}: Redis database ${item.redis} emptied and reloaded`;
       }
 
       return target.tables
@@ -194,8 +196,17 @@ function toggleItem(item: EnvironmentItemPayload, checked: boolean): void {
 }
 
 /**
- * Chooses between the whole database and some of its tables.
- * @param path The path of the database item.
+ * Names the parts of a database item that can be transferred on their own.
+ * @param item The database or Redis item.
+ * @returns "key groups" for a Redis database, "tables" otherwise.
+ */
+function partsOf(item: EnvironmentItemPayload): string {
+  return item.kind === "redis" ? "key groups" : "tables";
+}
+
+/**
+ * Chooses between the whole database and some of its tables or key groups.
+ * @param path The path of the database or Redis item.
  * @param whole Whether the whole database is transferred.
  */
 function chooseWhole(path: string, whole: boolean): void {
@@ -569,7 +580,7 @@ onMounted(() => wsStore.envRefresh());
             </div>
 
             <div
-              v-if="item.kind === 'database' && selected[item.path]"
+              v-if="(item.kind === 'database' || item.kind === 'redis') && selected[item.path]"
               class="space-y-3 px-4 pb-4 pl-[4.25rem]"
             >
               <div class="inline-flex rounded-md border p-0.5 text-xs">
@@ -585,7 +596,7 @@ onMounted(() => wsStore.envRefresh());
                   :class="cn('rounded px-2.5 py-1 transition-colors', selected[item.path].tables !== null ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground')"
                   @click="chooseWhole(item.path, false)"
                 >
-                  Some tables
+                  Some {{ partsOf(item) }}
                 </button>
               </div>
 
@@ -598,7 +609,7 @@ onMounted(() => wsStore.envRefresh());
                   class="flex items-center gap-2 text-xs text-muted-foreground"
                 >
                   <Loader2 class="size-3.5 animate-spin" />
-                  Loading the tables of {{ item.container }}…
+                  Loading the {{ partsOf(item) }} of {{ item.container ?? item.redis }}…
                 </div>
                 <div
                   v-else-if="environmentStore.tables.value[item.path].error"
@@ -610,7 +621,7 @@ onMounted(() => wsStore.envRefresh());
                   <div class="flex items-center gap-2">
                     <Input
                       v-model="tableFilters[item.path]"
-                      placeholder="Filter tables"
+                      :placeholder="`Filter ${partsOf(item)}`"
                       class="h-8 max-w-64 text-xs"
                     />
                     <span class="text-xs text-muted-foreground">
@@ -687,7 +698,7 @@ onMounted(() => wsStore.envRefresh());
       <div class="mx-auto flex max-w-5xl items-center justify-between gap-3">
         <span class="text-sm text-muted-foreground">
           <template v-if="targets.length === 0">Select items to transfer.</template>
-          <template v-else-if="incomplete">Choose at least one table for each database restricted to tables.</template>
+          <template v-else-if="incomplete">Choose at least one table or key group for each database restricted to some.</template>
           <template v-else>{{ targets.length }} {{ targets.length > 1 ? "items" : "item" }} selected</template>
         </span>
         <div class="flex items-center gap-2">

@@ -112,7 +112,7 @@ function targetOf(selection: EnvironmentSelection): string {
 }
 
 /**
- * Asks which items, and which tables of the databases, to transfer.
+ * Asks which items, and which tables of the databases or key groups of the Redis databases, to transfer.
  * @param options The environment.
  * @param verb What is done with them.
  * @returns The selections.
@@ -127,21 +127,22 @@ async function chooseSelections(options: EnvironmentOptions, verb: string): Prom
 
   const selections: EnvironmentSelection[] = [];
   for (const item of items) {
-    if (item.kind !== "database") {
+    if (item.kind !== "database" && item.kind !== "redis") {
       selections.push({ item, tables: null });
       continue;
     }
 
+    const parts = item.kind === "redis" ? "key groups" : "tables";
     const whole = await select({
-      message: `${item.path}: whole database or some tables?`,
+      message: `${item.path}: whole database or some ${parts}?`,
       choices: [
         { name: "Whole database", value: true },
-        { name: "Some tables", value: false },
+        { name: `Some ${parts}`, value: false },
       ],
     });
     const tables = whole
       ? null
-      : await checkbox({ message: `Tables of ${item.path}`, choices: (await listTables(item)).map((table) => ({ name: table, value: table })), required: true, pageSize: 20 });
+      : await checkbox({ message: `The ${parts} of ${item.path}`, choices: (await listTables(item)).map((table) => ({ name: table, value: table })), required: true, pageSize: 20 });
     selections.push({ item, tables });
   }
 
@@ -346,12 +347,12 @@ async function main(): Promise<void> {
   const env = program
     .command("env")
     .description(`Development environment in ${localPathOf("")}, mirrored on the CDN: configurations, databases, buckets, Redis databases`)
-    .addHelpText("after", "\nTargets: <path> for an item, <path>:<table>,<table> for tables of a database; every item without target.");
+    .addHelpText("after", "\nTargets: <path> for an item, <path>:<table>,<table> for tables of a database, <path>:<group>,<group> for key groups of a Redis database (such as account/redis.gz:session:*); every item without target.");
 
   env
     .command("pull [targets...]")
     .description("Replace local items, and the local data they hold, by the CDN copies")
-    .option("-i, --interactive", "choose items and tables")
+    .option("-i, --interactive", "choose items, tables and key groups")
     .option("-y, --yes", "replace local data without asking")
     .action(async (targets: string[], flags: { interactive?: boolean; yes?: boolean }) => {
       await syncEnvironment("pull", targets, flags);
@@ -360,7 +361,7 @@ async function main(): Promise<void> {
   env
     .command("push [targets...]")
     .description("Dump the local data of the items and send them to the CDN (write group only)")
-    .option("-i, --interactive", "choose items and tables")
+    .option("-i, --interactive", "choose items, tables and key groups")
     .action(async (targets: string[], flags: { interactive?: boolean }) => {
       await syncEnvironment("push", targets, flags);
     });

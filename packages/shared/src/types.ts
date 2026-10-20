@@ -192,7 +192,7 @@ export interface EnvironmentPayload {
   run: EnvironmentRunPayload | null;
 }
 
-/** Tables of the local database of an environment item. */
+/** Tables of the local database of an environment item, or key groups of its local Redis database. */
 export interface EnvironmentTablesPayload {
   path: string;
   tables: string[];

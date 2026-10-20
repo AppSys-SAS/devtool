@@ -143,14 +143,14 @@ export class DevtoolEnvironment {
   }
 
   /**
-   * Lists the tables of the local database of an item.
+   * Lists the tables of the local database of an item, or the key groups of its local Redis database.
    *
    * @param path - The path of the item.
-   * @returns The tables, or why they could not be listed.
+   * @returns The tables or key groups, or why they could not be listed.
    */
   async tables(path: string): Promise<EnvironmentTablesPayload> {
     const item = this._options?.items.find((candidate) => candidate.path === path);
-    if (!item || item.kind !== "database") {
+    if (!item || (item.kind !== "database" && item.kind !== "redis")) {
       return { path, tables: [], error: `${path} is not a database of the environment` };
     }
 
@@ -231,7 +231,7 @@ export class DevtoolEnvironment {
 
         const selection: EnvironmentSelection = {
           item,
-          tables: item.kind === "database" && target.tables?.length ? target.tables : null,
+          tables: (item.kind === "database" || item.kind === "redis") && target.tables?.length ? target.tables : null,
           keys: item.kind === "file" && target.keys ? target.keys : null,
         };
         const result = await (direction === "pull" ? environment.pull(selection) : environment.push(selection));

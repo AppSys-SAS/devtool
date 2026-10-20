@@ -1,12 +1,12 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { S3Client } from "@aws-sdk/client-s3";
-import { ArchiveWriter, readArchive } from "./archive.js";
+import { ArchiveWriter, readArchive, type RecordHeader } from "./archive.js";
 import { createS3Client, restoreBucket, type S3Options, snapshotBucket } from "./buckets.js";
 import type { CdnClient } from "./client.js";
 import { localPathOf } from "./directory.js";
 import { databaseEngine, type DatabaseEngineName, isDatabaseEngineName } from "./engines.js";
-import { redisDatabaseName, restoreRedis, snapshotRedis } from "./redis.js";
+import { listRedisGroups, redisDatabaseName, redisRecordGroup, restoreRedis, snapshotRedis } from "./redis.js";
 import { readSyncJournal, type SyncRecord, writeSyncRecord } from "./sync-journal.js";
 import { countChoices, diffYaml, mergeYaml, type YamlDifference, type YamlKeyChoice } from "./yaml-merge.js";
 
@@ -26,7 +26,7 @@ export interface EnvironmentOptions {
   s3: S3Options | null;
 }
 
-/** An item to transfer, whole or, for a database, restricted to some tables. */
+/** An item to transfer, whole or restricted to some tables of a database or key groups of a Redis database. */
 export interface EnvironmentSelection {
   item: EnvironmentItem;
   tables: string[] | null;
@@ -124,7 +124,7 @@ export function readEnvironmentOptions(section: unknown): EnvironmentOptions | n
 }
 
 /**
- * Reads targets given as `<path>` or `<path>:<table>,<table>`.
+ * Reads targets given as `<path>`, `<path>:<table>,<table>` or `<path>:<key group>,<key group>`.
  *
  * @param options - The environment.
  * @param targets - The targets.
@@ -147,8 +147,8 @@ export function parseTargets(options: EnvironmentOptions, targets: string[]): En
       return { item, tables: null };
     }
 
-    if (item.kind !== "database") {
-      throw new Error(`${itemPath} has no tables`);
+    if (item.kind !== "database" && item.kind !== "redis") {
+      throw new Error(`${itemPath} has no tables or key groups`);
     }
 
     const tables = target.slice(separator + 1).split(",").map((table) => table.trim()).filter((table) => table !== "");
@@ -157,13 +157,13 @@ export function parseTargets(options: EnvironmentOptions, targets: string[]): En
 }
 
 /**
- * Lists the tables of the local database of an item.
+ * Lists the tables of the local database of an item, or the key groups of its local Redis database.
  *
- * @param item - The database item.
- * @returns The tables.
+ * @param item - The database or Redis item.
+ * @returns The tables or key groups.
  */
-export async function listTables(item: Extract<EnvironmentItem, { kind: "database" }>): Promise<string[]> {
-  return databaseEngine(item.engine).listTables(item.container);
+export async function listTables(item: Extract<EnvironmentItem, { kind: "database" | "redis" }>): Promise<string[]> {
+  return item.kind === "redis" ? listRedisGroups(item.url) : databaseEngine(item.engine).listTables(item.container);
 }
 
 /**
@@ -187,17 +187,18 @@ function mediaTypeOf(filePath: string): string {
 }
 
 /**
- * Checks that every requested table exists.
+ * Checks that every requested table or key group exists.
  *
- * @param tables - The requested tables.
- * @param known - The tables found.
+ * @param tables - The requested tables or key groups.
+ * @param known - The tables or key groups found.
  * @param where - Where they were looked for.
+ * @param parts - What is checked, for the error message.
  */
-function assertKnownTables(tables: string[], known: Iterable<string>, where: string): void {
+function assertKnownTables(tables: string[], known: Iterable<string>, where: string, parts = "tables"): void {
   const knownTables = new Set(known);
   const unknown = tables.filter((table) => !knownTables.has(table));
   if (unknown.length > 0) {
-    throw new Error(`unknown tables in ${where}: ${unknown.join(", ")}`);
+    throw new Error(`unknown ${parts} in ${where}: ${unknown.join(", ")}`);
   }
 }
 
@@ -251,7 +252,7 @@ export class Environment {
   /**
    * Replaces the local copy of an item, and the local data it holds, by the one of the CDN.
    *
-   * @param selection - The item, the tables to restore for a database, or the keys to take for a YAML file.
+   * @param selection - The item, the tables or key groups to restore, or the keys to take for a YAML file.
    * @returns What was done.
    */
   async pull(selection: EnvironmentSelection): Promise<TransferResult> {
@@ -276,8 +277,20 @@ export class Environment {
     }
 
     if (item.kind === "redis") {
-      const count = await restoreRedis(item.url, readArchive(localPath));
-      return { done: true, detail: `${count} keys restored in Redis ${redisDatabaseName(item.url)}` };
+      const records = readArchive(localPath);
+      const first = await records.next();
+      if (first.done || first.value.header.type !== "redis") {
+        throw new Error(`${item.path} is not a Redis archive`);
+      }
+
+      const restored = await restoreRedis(item.url, records, tables);
+      if (tables !== null) {
+        assertKnownTables(tables, restored.groups, item.path, "key groups");
+      }
+      return {
+        done: true,
+        detail: tables === null ? `${restored.count} keys restored in Redis ${redisDatabaseName(item.url)}` : `key groups restored: ${tables.join(", ")} (${restored.count} keys)`,
+      };
     }
 
     const engine = databaseEngine(item.engine);
@@ -313,7 +326,7 @@ export class Environment {
   /**
    * Sends the local copy of an item to the CDN, after dumping the local data it holds. For some tables of a database, only their rows are replaced in the stored archive.
    *
-   * @param selection - The item, the tables to dump for a database, or the keys to send for a YAML file.
+   * @param selection - The item, the tables or key groups to dump, or the keys to send for a YAML file.
    * @returns What was done.
    */
   async push(selection: EnvironmentSelection): Promise<TransferResult> {
@@ -329,7 +342,7 @@ export class Environment {
     } else if (item.kind === "bucket") {
       detail = await this.writeLocal(localPath, async (archive) => `${await snapshotBucket(this.s3(), item.bucket, archive)} objects of ${item.bucket}`);
     } else if (item.kind === "redis") {
-      detail = await this.writeLocal(localPath, async (archive) => `${await snapshotRedis(item.url, archive)} keys of Redis ${redisDatabaseName(item.url)}`);
+      detail = await this.writeLocal(localPath, (archive) => this.dumpRedis(item, tables, archive));
     } else if (!(await fs.stat(localPath).then((stat) => stat.isFile(), () => false))) {
       return { done: false, detail: `no local file ${localPath}` };
     }
@@ -476,25 +489,61 @@ export class Environment {
     }
 
     assertKnownTables(tables, localTables, item.container);
-    const basePath = `${localPathOf(item.path)}.base`;
+    await this.copyBase(item.path, archive, (header) => header.type !== "table" || typeof header.name !== "string" || !tables.includes(header.name));
+    for (const table of tables) {
+      await archive.add({ type: "table", name: table }, engine.dumpTable(item.container, table));
+    }
+
+    return `tables dumped: ${tables.join(", ")}`;
+  }
+
+  /**
+   * Writes an archive of a local Redis database: every key, or the stored archive with the keys of
+   * some groups replaced.
+   *
+   * @param item - The Redis item.
+   * @param groups - The key groups to dump, or null for the whole database.
+   * @param archive - The archive being written.
+   * @returns What was dumped.
+   */
+  private async dumpRedis(item: Extract<EnvironmentItem, { kind: "redis" }>, groups: string[] | null, archive: ArchiveWriter): Promise<string> {
+    if (groups === null) {
+      await archive.add({ type: "redis" });
+      return `${await snapshotRedis(item.url, archive, null)} keys of Redis ${redisDatabaseName(item.url)}`;
+    }
+
+    assertKnownTables(groups, await listRedisGroups(item.url), redisDatabaseName(item.url), "key groups");
+    await this.copyBase(item.path, archive, (header) => {
+      const group = redisRecordGroup(header);
+      return group === null || !groups.includes(group);
+    });
+    const count = await snapshotRedis(item.url, archive, groups);
+
+    return `key groups dumped: ${groups.join(", ")} (${count} keys)`;
+  }
+
+  /**
+   * Copies to an archive the records of the CDN copy of an item that are kept.
+   *
+   * @param itemPath - The path of the item.
+   * @param archive - The archive being written.
+   * @param keep - Tells whether a record of the CDN copy is kept.
+   */
+  private async copyBase(itemPath: string, archive: ArchiveWriter, keep: (header: RecordHeader) => boolean): Promise<void> {
+    const basePath = `${localPathOf(itemPath)}.base`;
     try {
-      if (!(await this.download(item.path, basePath))) {
-        throw new Error(`${item.path} is not on the CDN yet: push the whole database first`);
+      if (!(await this.download(itemPath, basePath))) {
+        throw new Error(`${itemPath} is not on the CDN yet: push the whole item first`);
       }
 
       for await (const { header, body } of readArchive(basePath)) {
-        if (header.type !== "table" || typeof header.name !== "string" || !tables.includes(header.name)) {
+        if (keep(header)) {
           await archive.add(header, body);
         }
-      }
-      for (const table of tables) {
-        await archive.add({ type: "table", name: table }, engine.dumpTable(item.container, table));
       }
     } finally {
       await fs.rm(basePath, { force: true });
     }
-
-    return `tables dumped: ${tables.join(", ")}`;
   }
 
   /**
