@@ -22,7 +22,7 @@
     "@appsys/devtool-proxy": "workspace:*",
     "@appsys/devtool-server": "workspace:*",
     "@appsys/devtool-shared": "workspace:*",
-    "@inquirer/prompts": "^8.7.3",
+    "@inquirer/prompts": "^8.7.4",
     "commander": "^15.0.0"
   },
   "devDependencies": {

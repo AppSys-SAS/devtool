@@ -12,8 +12,8 @@
   },
   "dependencies": {
     "@appsys/devtool-shared": "workspace:*",
-    "@iconify/vue": "^5.0.3",
-    "@lucide/vue": "^1.55.0",
+    "@iconify/vue": "^5.0.4",
+    "@lucide/vue": "^1.60.0",
     "@vueuse/core": "^15.0.0",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-search": "^0.16.0",
@@ -25,7 +25,7 @@
     "clsx": "^2.1.1",
     "reka-ui": "^2.11.0",
     "tailwind-merge": "^3.7.0",
-    "vue": "^3.5.43",
+    "vue": "^3.5.44",
     "vue-router": "^5.4.0"
   },
   "devDependencies": {
