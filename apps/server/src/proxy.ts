@@ -1,8 +1,13 @@
+import http from "node:http";
+import https from "node:https";
 import httpProxy from "http-proxy";
 import { logger } from "@appsys/devtool-shared";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Socket } from "node:net";
 import type { RuntimeConfig } from "@appsys/devtool-shared";
+
+const httpAgent = new http.Agent({ keepAlive: true });
+const httpsAgent = new https.Agent({ keepAlive: true });
 
 interface ServerCandidate {
   slug: string;
@@ -116,6 +121,12 @@ export class DevtoolProxy {
     this.serversAvailable = nextServers;
   }
 
+  /**
+   * Proxies an HTTP request to the server matching its host and path, reusing upstream connections.
+   * @param req Incoming request.
+   * @param res Response to write to.
+   * @returns True when a server matched and the request was proxied.
+   */
   proxyRequest(req: IncomingMessage, res: ServerResponse): boolean {
     const host = this.getHost(req);
     const url = req.url ?? "/";
@@ -132,6 +143,7 @@ export class DevtoolProxy {
     this.proxy.web(req, res, {
       target: target.url,
       changeOrigin: !server.preserveHost,
+      agent: target.url.startsWith("https:") ? httpsAgent : httpAgent,
     });
 
     return true;
