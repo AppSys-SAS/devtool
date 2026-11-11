@@ -30,7 +30,7 @@ import {
 } from "@appsys/devtool-cdn";
 import { loadMergedConfig, resolveDefaultConfigPaths } from "@appsys/devtool-config";
 import runProxy from "@appsys/devtool-proxy";
-import runServer from "@appsys/devtool-server";
+import runServer, { relaunchUnderApp } from "@appsys/devtool-server";
 import { logger, type LogLevel } from "@appsys/devtool-shared";
 import pkg from "../package.json" with { type: "json" };
 
@@ -255,6 +255,9 @@ async function main(): Promise<void> {
     .option("--ui-path <path>", "path to static UI files", DEFAULT_UI_PATH)
     .option("--log-level <level>", "set log level (error|warn|info|debug)", "info")
     .action(async (configurations: string[], options: Record<string, string | undefined>) => {
+      if (await relaunchUnderApp()) {
+        return;
+      }
       logger.setLevel((options.logLevel ?? "info") as LogLevel);
 
       const invocationCwd = process.env.INIT_CWD && process.env.INIT_CWD.length ? process.env.INIT_CWD : process.cwd();

@@ -9,6 +9,8 @@ import { DevtoolServer } from "./server.js";
 import { mergeDeep, toCommandArgsArray, toRecord, toStringArray } from "./utils.js";
 import type { ConfigProvider, LoadBalancerContext, ServerBootstrapOptions } from "./types.js";
 
+export { relaunchUnderApp } from "./app-launcher.js";
+
 const CONFIG_CHANGE_DELAY_MS = 200;
 
 function readKillSignal(record: Record<string, unknown>): unknown {

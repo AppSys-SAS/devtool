@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import net from "node:net";
 import type { ClientConfigPayload, DirectoryDefinition, DirectoryFiles, DirectoryScripts, ScriptArgument, ScriptSettings, AdtDefinition, DnsDefinition, DnsRecord, HostAccess, LoadBalancerCertificate, PassthroughRule, ProjectDefinition, ProjectRestore, RuntimeConfig } from "@appsys/devtool-shared";
 import { logger } from "@appsys/devtool-shared";
-import type { CommandAnswer, CommandAutomation } from "./command-automation.js";
+import { type CommandAnswer, type CommandAutomation, findInvalidValueBlocks } from "./command-automation.js";
 import { isObject, toCommandArgsArray, toIntegerArray, toRecord, toStringArray, toStringRecord } from "./utils.js";
 
 const SLUG_REGEXP = /^[a-zA-Z0-9\-\/_.]+$/i;
@@ -424,7 +424,7 @@ export class DevtoolConfigure {
 
       const extraName = this.checkString(`${slug}.extras[${extraSlug}].name`, extra.name) ? (extra.name as string) : extraSlug;
       const extraEnv = toStringRecord(extra.env) ?? {};
-      const automation = this.readAutomation(`${slug}.extras[${extraSlug}]`, extra);
+      const automation = this.readAutomation(`${slug}.extras[${extraSlug}]`, extra, extraArgs, extraEnv);
       if (automation) {
         this.automations[`${projectDefinition.slug}/${directorySlug}/${extraSlug}`] = automation;
       }
@@ -565,14 +565,28 @@ export class DevtoolConfigure {
 
   /**
    * Reads what the server does on its own around a command: `unless`, a command whose success skips
-   * it, and `answers`, `{ match, value }` typed when the output asks `match`, values and arguments
-   * possibly being 1Password references read from `opAccount`.
+   * it, `answers`, `{ match, value }` typed when the output asks `match`, and the value blocks of its
+   * arguments, environment and answers, `{{ op://… }}` read from `opAccount` or `{{ $(…) }}`.
    * @param slug Names the command in warnings.
    * @param command The raw command.
+   * @param args The arguments of the command.
+   * @param env The environment of the command.
    * @returns The automation, null when the command declares none.
    */
-  private readAutomation(slug: string, command: Record<string, unknown>): CommandAutomation | null {
-    if (command.unless === undefined && command.answers === undefined && command.opAccount === undefined) {
+  private readAutomation(slug: string, command: Record<string, unknown>, args: string[], env: Record<string, string>): CommandAutomation | null {
+    const values = [
+      ...args.map((arg, index) => ({ slug: `${slug}.args[${index}]`, text: arg })),
+      ...Object.entries(env).map(([key, value]) => ({ slug: `${slug}.env.${key}`, text: value })),
+      ...(Array.isArray(command.answers) ? command.answers : []).map((raw, index) => ({ slug: `${slug}.answers[${index}].value`, text: String(toRecord(raw).value ?? "") })),
+    ];
+    for (const value of values) {
+      for (const block of findInvalidValueBlocks(value.text)) {
+        this.addWarning(value.slug, `unknown value block ${block}, expected {{ op://… }} or {{ $(…) }}`);
+      }
+    }
+
+    const hasBlocks = values.some((value) => value.text.includes("{{"));
+    if (!hasBlocks && command.unless === undefined && command.answers === undefined && command.opAccount === undefined) {
       return null;
     }
 

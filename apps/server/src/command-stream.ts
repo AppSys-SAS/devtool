@@ -7,7 +7,7 @@ import treeKill from "tree-kill";
 import type { StreamOutputLine, StreamUpdatePayload } from "@appsys/devtool-shared";
 import { logger } from "@appsys/devtool-shared";
 import type { WebSocket } from "ws";
-import { AnswerMatcher, type CommandAutomation, resolveCommand, type ResolvedCommand, scrub } from "./command-automation.js";
+import { AnswerMatcher, type CommandAutomation, CommandSecrets } from "./command-automation.js";
 import type { CommandStreamCreatePayload } from "./types.js";
 import type { DevtoolServer } from "./server.js";
 
@@ -306,6 +306,13 @@ export class DevtoolCommandStream {
     logger.info("Command", `${this.projectSlug ?? "global"}/${this.directorySlug ?? "-"}`, this.args.join(" "));
   }
 
+  /**
+   * Starts, stops, restarts or closes the command.
+   * @param update The update.
+   * @param update.action What to do.
+   * @param update.options.args The arguments to start with, ignored for a command automated by the
+   * configuration, which keeps its own.
+   */
   async update({
     action,
     options = {},
@@ -318,7 +325,7 @@ export class DevtoolCommandStream {
     logger.info("Command", `${this.projectSlug ?? "global"}/${this.directorySlug ?? "-"}`, `${action}: ${this.args.join(" ")}`);
 
     if (action === "start") {
-      await this.start({ args: options.args ?? this.args });
+      await this.start({ args: this.automation ? this.args : (options.args ?? this.args) });
       return;
     }
 
@@ -477,7 +484,9 @@ export class DevtoolCommandStream {
       throw new Error("Command already running");
     }
 
-    let resolved: ResolvedCommand | null = null;
+    const secrets = new CommandSecrets(this.automation?.opAccount ?? null, (command) => this.runInShell(command));
+    let resolvedArgs = finalArgs;
+    let resolvedEnv = this.env;
     if (this.automation) {
       if (this.automation.unless && (await this.alreadyDone(this.automation.unless))) {
         await this.sendUpdate();
@@ -485,8 +494,16 @@ export class DevtoolCommandStream {
       }
 
       try {
-        resolved = await resolveCommand(this.automation, finalArgs, this.env);
+        resolvedArgs = [];
+        for (const arg of finalArgs) {
+          resolvedArgs.push(await secrets.resolve(arg));
+        }
+        resolvedEnv = {};
+        for (const [key, value] of Object.entries(this.env)) {
+          resolvedEnv[key] = await secrets.resolve(value);
+        }
       } catch (error) {
+        secrets.close();
         await this.handleStartFailure(error);
         await this.sendUpdate();
         return;
@@ -498,7 +515,7 @@ export class DevtoolCommandStream {
 
     const spawnOptions = {
       cwd: this.cwd,
-      env: { ...this.defaultEnv, ...process.env, ...(resolved?.env ?? this.env) },
+      env: { ...this.defaultEnv, ...process.env, ...resolvedEnv },
       cols: this.cols,
       rows: this.rows,
       name: "xterm-256color",
@@ -509,6 +526,7 @@ export class DevtoolCommandStream {
 
     if (!this.proc) {
       if (process.platform === "win32") {
+        secrets.close();
         await this.handleStartFailure(
           new Error(
             `Unable to start command: ${finalArgs.join(" ")}${spawnErrors.length ? ` | attempts: ${spawnErrors.join(" || ")}` : ""}`,
@@ -518,7 +536,7 @@ export class DevtoolCommandStream {
         return;
       }
 
-      const command = (resolved?.args ?? finalArgs).map(shellEscapePosix).join(" ");
+      const command = resolvedArgs.map(shellEscapePosix).join(" ");
       for (const shell of getShellCandidates(preferredShell)) {
         if (!canAttemptShell(shell)) {
           spawnErrors.push(`shell ${shell}: not found`);
@@ -535,6 +553,7 @@ export class DevtoolCommandStream {
       }
 
       if (!this.proc) {
+        secrets.close();
         await this.handleStartFailure(
           new Error(
             `Unable to start command: ${finalArgs.join(" ")}${spawnErrors.length ? ` | attempts: ${spawnErrors.join(" || ")}` : ""}`,
@@ -551,19 +570,19 @@ export class DevtoolCommandStream {
     this.stoppedDate = null;
     this.exitCode = null;
 
-    const answers = new AnswerMatcher(resolved?.answers ?? []);
-    const secrets = resolved?.secrets ?? [];
+    const answers = new AnswerMatcher(this.automation?.answers ?? []);
     const proc = this.proc;
     proc.onData((data) => {
       const answer = answers.feed(data);
       if (answer !== null) {
-        proc.write(`${answer}\r`);
+        void this.typeAnswer(proc, secrets, answer);
       }
-      void this.addOutput("stdout", scrub(data, secrets));
+      void this.addOutput("stdout", secrets.scrub(data));
     });
 
     this.exited = new Promise<void>((resolve) => {
       proc.onExit(({ exitCode }) => {
+        secrets.close();
         this.exitCode = exitCode;
         if (this.stoppedDate) {
           this.exitCode = 0;
@@ -596,31 +615,72 @@ export class DevtoolCommandStream {
    * @returns True when the check succeeded.
    */
   private async alreadyDone(unless: string[]): Promise<boolean> {
-    const shell = getShellCandidates(normalizeShell(this.shell)).find(canAttemptShell);
-    if (!shell) {
-      return false;
-    }
-
-    const command = this.convertArgs(unless).map(shellEscapePosix).join(" ");
-    const result = await new Promise<{ code: number | null; output: string }>((resolve) => {
-      const child = spawnDetached(shell, getShellArgs(shell, command), { cwd: this.cwd, env: { ...this.defaultEnv, ...process.env, ...this.env } });
-      let output = "";
-      child.stdout.on("data", (chunk: Buffer) => (output += chunk.toString()));
-      child.stderr.on("data", (chunk: Buffer) => (output += chunk.toString()));
-      child.on("error", () => resolve({ code: null, output }));
-      child.on("close", (code) => resolve({ code, output }));
-    });
+    const result = await this.execInShell(this.convertArgs(unless).map(shellEscapePosix).join(" "));
     if (result.code !== 0) {
       return false;
     }
 
     this.runningDate = Date.now();
-    await this.addOutput("stdout", result.output.replace(/\r?\n/g, "\r\n"));
+    await this.addOutput("stdout", `${result.stdout}${result.stderr}`.replace(/\r?\n/g, "\r\n"));
     await this.addOutput("info", `Skipped: ${unless.join(" ")} succeeded\n`);
     this.exitCode = 0;
     this.stoppedDate = Date.now();
     this.runningArgs = null;
     return true;
+  }
+
+  /**
+   * Runs a shell command in the shell, folder and environment of the command, without terminal.
+   * @param command The shell command.
+   * @returns Its exit code, null when it could not run, and its outputs.
+   */
+  private execInShell(command: string): Promise<{ code: number | null; stdout: string; stderr: string }> {
+    const shell = getShellCandidates(normalizeShell(this.shell)).find(canAttemptShell);
+    if (!shell) {
+      return Promise.resolve({ code: null, stdout: "", stderr: "No shell found" });
+    }
+
+    return new Promise((resolve) => {
+      const child = spawnDetached(shell, getShellArgs(shell, command), { cwd: this.cwd, env: { ...this.defaultEnv, ...process.env, ...this.env } });
+      let stdout = "";
+      let stderr = "";
+      child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
+      child.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
+      child.on("error", (error) => resolve({ code: null, stdout, stderr: error.message }));
+      child.on("close", (code) => resolve({ code, stdout, stderr }));
+    });
+  }
+
+  /**
+   * Runs a shell command in the shell of the command and gives its standard output.
+   * @param command The shell command.
+   * @returns Its standard output.
+   */
+  private async runInShell(command: string): Promise<string> {
+    const result = await this.execInShell(command);
+    if (result.code !== 0) {
+      const reason = result.stderr.trim().split("\n").at(-1);
+      throw new Error(`$(${command}) failed${reason ? `: ${reason}` : ` with code ${result.code}`}`);
+    }
+    return result.stdout;
+  }
+
+  /**
+   * Types an answer into a running command once its value blocks are read, showing why when they
+   * cannot be.
+   * @param proc The process of the command.
+   * @param secrets Reads the value blocks.
+   * @param answer The answer.
+   */
+  private async typeAnswer(proc: IPty, secrets: CommandSecrets, answer: string): Promise<void> {
+    try {
+      const value = await secrets.resolve(answer);
+      if (this.proc === proc) {
+        proc.write(`${value}\r`);
+      }
+    } catch (error) {
+      await this.addOutput("info", `${error instanceof Error ? error.message : String(error)}\n`);
+    }
   }
 
   /**

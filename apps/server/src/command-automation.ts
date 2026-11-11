@@ -1,10 +1,8 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { OpTerminal } from "./op-terminal.js";
 
-const execFileAsync = promisify(execFile);
-
-const SECRET_REFERENCE = /^op:\/\//;
-const OP_READ_TIMEOUT_MS = 120_000;
+const VALUE_BLOCK = /\{\{\s*(.*?)\s*\}\}/gs;
+const SECRET_REFERENCE = /^op:\/\/\S+$/;
+const SHELL_SUBSTITUTION = /^\$\((.+)\)$/s;
 const ANSI_SEQUENCE = /\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]/g;
 const MAX_OUTPUT_LENGTH = 8192;
 const MIN_SCRUBBED_LENGTH = 4;
@@ -13,7 +11,7 @@ const SCRUBBED = "••••";
 /** An answer the server types when the output of a command asks its question. */
 export interface CommandAnswer {
   pattern: RegExp;
-  /** The answer, or a 1Password reference read when the command starts. */
+  /** The answer, its value blocks read when its question shows. */
   value: string;
 }
 
@@ -26,74 +24,108 @@ export interface CommandAutomation {
   answers: CommandAnswer[];
 }
 
-/** A command ready to start: its references replaced by the values they point to. */
-export interface ResolvedCommand {
-  args: string[];
-  env: Record<string, string>;
-  answers: CommandAnswer[];
-  /** Every value read, never to be shown. */
-  secrets: string[];
+/** Runs a shell command and gives its standard output, failing when the command fails. */
+export type ShellRunner = (command: string) => Promise<string>;
+
+/**
+ * Lists the value blocks of a text that are neither a 1Password reference nor a shell substitution.
+ * @param text The text.
+ * @returns Each invalid block, as written.
+ */
+export function findInvalidValueBlocks(text: string): string[] {
+  return [...text.matchAll(VALUE_BLOCK)].filter(([, expression]) => !SECRET_REFERENCE.test(expression) && !SHELL_SUBSTITUTION.test(expression)).map(([block]) => block);
 }
 
 /**
- * Reads the value of a 1Password reference.
- * @param reference The reference, `op://<vault>/<item>/<field>`.
- * @param account The 1Password account, null for the default one.
- * @returns The value.
+ * Reads the value blocks of the texts of a command, `{{ op://<vault>/<item>/<field> }}` from
+ * 1Password in a terminal of its own and `{{ $(<command>) }}` from the output of a shell command,
+ * each expression once, and hides every value read from the output.
  */
-async function readReference(reference: string, account: string | null): Promise<string> {
-  try {
-    const { stdout } = await execFileAsync("op", ["read", "--no-newline", ...(account ? ["--account", account] : []), reference], { timeout: OP_READ_TIMEOUT_MS });
-    return stdout;
-  } catch (error) {
-    const stderr = (error as { stderr?: string }).stderr?.trim().split("\n")[0];
-    throw new Error(`op read ${reference} failed${stderr ? `: ${stderr}` : ""}`);
-  }
-}
+export class CommandSecrets {
+  private readonly _values = new Map<string, string>();
 
-/**
- * Replaces the 1Password references of a command, its environment and its answers by their values.
- * @param automation What the server does around the command.
- * @param args The arguments of the command.
- * @param env Its environment.
- * @returns The command with the values read.
- */
-export async function resolveCommand(automation: CommandAutomation, args: string[], env: Record<string, string>): Promise<ResolvedCommand> {
-  const values = new Map<string, string>();
-  const resolve = async (value: string): Promise<string> => {
-    if (!SECRET_REFERENCE.test(value)) {
-      return value;
+  private _terminal: OpTerminal | null = null;
+
+  /**
+   * @param _account The 1Password account the references are read from, null for the default one.
+   * @param _runShell Runs the shell commands of the substitutions.
+   */
+  constructor(
+    private readonly _account: string | null,
+    private readonly _runShell: ShellRunner,
+  ) {}
+
+  /**
+   * Replaces the value blocks of a text by their values.
+   * @param text The text.
+   * @returns The text with the values read.
+   */
+  async resolve(text: string): Promise<string> {
+    let resolved = "";
+    let end = 0;
+    for (const match of text.matchAll(VALUE_BLOCK)) {
+      resolved += text.slice(end, match.index) + (await this.read(match[1]));
+      end = match.index + match[0].length;
     }
-    if (!values.has(value)) {
-      values.set(value, await readReference(value, automation.opAccount));
+
+    return resolved + text.slice(end);
+  }
+
+  /**
+   * Closes the 1Password terminal, the next run of the command asking 1Password again.
+   */
+  close(): void {
+    this._terminal?.close();
+    this._terminal = null;
+  }
+
+  /**
+   * Hides the values read in output.
+   * @param text The output.
+   * @returns The output, each value replaced by a mask.
+   */
+  scrub(text: string): string {
+    let scrubbed = text;
+    for (const value of this._values.values()) {
+      if (value.length >= MIN_SCRUBBED_LENGTH) {
+        scrubbed = scrubbed.replaceAll(value, SCRUBBED);
+      }
     }
-    return values.get(value)!;
-  };
-
-  const resolvedArgs: string[] = [];
-  for (const arg of args) {
-    resolvedArgs.push(await resolve(arg));
-  }
-  const resolvedEnv: Record<string, string> = {};
-  for (const [key, value] of Object.entries(env)) {
-    resolvedEnv[key] = await resolve(value);
-  }
-  const answers: CommandAnswer[] = [];
-  for (const answer of automation.answers) {
-    answers.push({ pattern: answer.pattern, value: await resolve(answer.value) });
+    return scrubbed;
   }
 
-  return { args: resolvedArgs, env: resolvedEnv, answers, secrets: [...values.values()].filter((value) => value.length >= MIN_SCRUBBED_LENGTH) };
-}
+  /**
+   * Gives the value of the expression of a block, read on its first use.
+   * @param expression The expression, between the braces.
+   * @returns Its value.
+   */
+  private async read(expression: string): Promise<string> {
+    let value = this._values.get(expression);
+    if (value === undefined) {
+      value = await this.readOnce(expression);
+      this._values.set(expression, value);
+    }
+    return value;
+  }
 
-/**
- * Hides values in output.
- * @param text The output.
- * @param secrets The values to hide.
- * @returns The output, each value replaced by a mask.
- */
-export function scrub(text: string, secrets: string[]): string {
-  return secrets.reduce((current, secret) => current.replaceAll(secret, SCRUBBED), text);
+  /**
+   * Reads the value of the expression of a block.
+   * @param expression The expression, between the braces.
+   * @returns Its value.
+   */
+  private async readOnce(expression: string): Promise<string> {
+    if (SECRET_REFERENCE.test(expression)) {
+      this._terminal ??= OpTerminal.open(this._account);
+      return this._terminal.read(expression);
+    }
+
+    const substitution = SHELL_SUBSTITUTION.exec(expression);
+    if (substitution) {
+      return (await this._runShell(substitution[1])).replace(/[\r\n]+$/, "");
+    }
+
+    throw new Error(`Unknown value block {{ ${expression} }}`);
+  }
 }
 
 /**
@@ -115,7 +147,7 @@ export class AnswerMatcher {
   /**
    * Takes output of the command.
    * @param data The output.
-   * @returns The answer to type, null when the output asks nothing declared.
+   * @returns The answer to type, its value blocks not read yet, null when the output asks nothing declared.
    */
   feed(data: string): string | null {
     if (!this._pending.length) {
