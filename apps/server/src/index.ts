@@ -19,6 +19,12 @@ function readShell(record: Record<string, unknown>): unknown {
   return record.shell;
 }
 
+/**
+ * Turns the sections and projects of the shared configuration into projects of directories, each
+ * project becoming a directory of its section with its default command, if any, and its other commands.
+ * @param config The raw configuration.
+ * @returns The configuration with projects of directories.
+ */
 function normalizeProjectsShape(config: RawConfig): RawConfig {
   const sections = toRecord(config.sections);
   const projects = toRecord(config.projects);
@@ -49,7 +55,7 @@ function normalizeProjectsShape(config: RawConfig): RawConfig {
       section.path = ".";
     }
 
-    let args = ["pnpm", "run", "start"];
+    let args: string[] | null = null;
     let env: unknown = project.env;
     let shell: unknown = readShell(project);
     let killSignal: unknown = readKillSignal(project);

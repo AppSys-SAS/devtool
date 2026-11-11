@@ -28,6 +28,22 @@ function isMap(value: unknown): value is Record<string, unknown> {
 }
 
 /**
+ * Reads a YAML file.
+ *
+ * @param text - The YAML text.
+ * @param label - Names the file in errors.
+ * @returns Its value.
+ */
+export function readYaml(text: string, label: string): unknown {
+  const document = parseDocument(text);
+  if (document.errors.length > 0) {
+    throw new Error(`${label} is not valid YAML: ${document.errors[0].message}`);
+  }
+
+  return document.toJS();
+}
+
+/**
  * Reads a YAML file whose root is a map.
  *
  * @param text - The YAML text.
@@ -35,12 +51,7 @@ function isMap(value: unknown): value is Record<string, unknown> {
  * @returns The map, empty for an empty file.
  */
 export function readMap(text: string, label: string): Record<string, unknown> {
-  const document = parseDocument(text);
-  if (document.errors.length > 0) {
-    throw new Error(`${label} is not valid YAML: ${document.errors[0].message}`);
-  }
-
-  const value: unknown = document.toJS();
+  const value = readYaml(text, label);
   if (value === null || value === undefined) {
     return {};
   }

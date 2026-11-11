@@ -16,7 +16,8 @@ const router = createRouter({
     {
       name: "configs",
       path: "/configs",
-      component: () => import("@/views/ConfigView.vue"),
+      component: () => import("@/views/FileSpaceView.vue"),
+      props: { space: "configs", name: "Configs" },
     },
     {
       name: "stream",
@@ -56,6 +57,12 @@ const router = createRouter({
               name: "directory-stream",
               path: "s/:streamSlug",
               component: () => import("@/views/DirectoryStreamView.vue"),
+              props: true,
+            },
+            {
+              name: "directory-files",
+              path: "files/:fileSpace",
+              component: () => import("@/views/DirectoryFilesView.vue"),
               props: true,
             },
           ],

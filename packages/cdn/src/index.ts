@@ -19,4 +19,4 @@ export { type CdnOptions, readCdnOptions } from "./options.js";
 export { redisDatabaseName } from "./redis.js";
 export { type CdnUser, sessionPath } from "./session.js";
 export type { SyncRecord } from "./sync-journal.js";
-export { diffYaml, mergeYaml, readMap as readYamlMap, type YamlDifference, type YamlKeyChoice, type YamlSide } from "./yaml-merge.js";
+export { diffYaml, mergeYaml, readMap as readYamlMap, readYaml, type YamlDifference, type YamlKeyChoice, type YamlSide } from "./yaml-merge.js";

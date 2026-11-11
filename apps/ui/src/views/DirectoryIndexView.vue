@@ -1,20 +1,25 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, provide } from "vue";
 import { Icon } from "@iconify/vue";
-import { Bookmark } from "@lucide/vue";
-import { RouterView } from "vue-router";
+import { Bookmark, FolderTree } from "@lucide/vue";
+import { RouterLink, RouterView } from "vue-router";
+import type { DirectoryExtra } from "@appsys/devtool-shared";
+import ScriptList from "@/components/ScriptList.vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { commandName, iconFromMeta, runDirectoryCommand } from "@/lib/directory-commands";
 import bookmarkStore from "@/stores/bookmark";
 import configStore from "@/stores/config";
-import wsStore from "@/stores/ws";
+import layoutStore, { rightSidebarKey } from "@/stores/layout";
 
 const props = defineProps<{
   projectSlug: string;
   directorySlug: string;
 }>();
+
+provide(rightSidebarKey, true);
 
 type DirectoryCommand =
   | {
@@ -25,36 +30,14 @@ type DirectoryCommand =
     }
   | {
       type: "command";
-      slug: string;
       name: string;
       icon: string;
-      env: Record<string, string>;
-      args: string[];
-      killSignal: string | null;
-      detached: boolean;
-      notifications: boolean;
       description: string;
+      command: DirectoryExtra;
     };
 
-function resolveIconFromMeta(meta: unknown, fallback = "ph:terminal"): string {
-  if (typeof meta !== "object" || meta === null) {
-    return fallback;
-  }
-
-  const maybeIcon = "icon" in meta ? (meta as { icon?: unknown }).icon : null;
-  if (typeof maybeIcon !== "string" || maybeIcon.trim().length === 0) {
-    return fallback;
-  }
-
-  const icon = maybeIcon.trim();
-  if (icon.includes(":")) {
-    return icon;
-  }
-
-  return `lucide:${icon}`;
-}
-
 const directoryDefinition = computed(() => configStore.getDirectory(props.projectSlug, props.directorySlug));
+const directory = computed(() => directoryDefinition.value?.directory ?? null);
 const projectName = computed(() => directoryDefinition.value?.project.name ?? props.projectSlug);
 const directoryName = computed(() => directoryDefinition.value?.directory.name ?? props.directorySlug);
 const directoryDescription = computed(() => directoryDefinition.value?.directory.description ?? null);
@@ -82,18 +65,13 @@ const commands = computed<DirectoryCommand[]>(() => {
     });
   }
 
-  for (const [slug, command] of Object.entries(directory.extras)) {
+  for (const command of Object.values(directory.extras)) {
     nextCommands.push({
       type: "command",
-      slug,
-      name: command.name || (slug === "main" ? command.args.join(" ") : slug),
-      icon: resolveIconFromMeta(command.meta),
-      env: command.env,
-      args: command.args,
-      killSignal: command.killSignal,
-      detached: command.detached,
-      notifications: command.notifications,
+      name: commandName(command),
+      icon: iconFromMeta(command.meta),
       description: command.args.join(" "),
+      command,
     });
   }
 
@@ -112,30 +90,15 @@ const handleOpenLinkInNewTab = (href: string) => {
   window.open(href, '_blank')
 }
 
-function runCommand(command: Extract<DirectoryCommand, { type: "command" }>): void {
-  if (command.detached) {
-    wsStore.newCommandDetached(props.projectSlug, props.directorySlug, command.args, command.env);
-    return;
-  }
-
-  wsStore.newCommandStream(
-    props.projectSlug,
-    props.directorySlug,
-    false,
-    command.args,
-    command.env,
-    command.killSignal,
-    command.notifications,
-    command.name,
-    { redirect: true },
-  );
-}
 </script>
 
 <template>
   <div class="flex h-full min-h-0">
     <RouterView class="min-w-0 flex-1" />
-    <aside class="flex w-80 shrink-0 flex-col border-l bg-card">
+    <aside
+      v-show="layoutStore.isVisible('right')"
+      class="flex w-80 shrink-0 flex-col border-l bg-card"
+    >
       <ScrollArea class="min-h-0 flex-1 p-3">
         <Card>
           <CardHeader class="pb-3">
@@ -185,7 +148,7 @@ function runCommand(command: Extract<DirectoryCommand, { type: "command" }>): vo
                 v-else
                 type="button"
                 class="flex w-full items-start gap-2 rounded-md border px-3 py-2 text-left text-sm transition-colors hover:bg-accent/60"
-                @click="runCommand(command)"
+                @click="runDirectoryCommand(projectSlug, directorySlug, command.command)"
               >
                 <Icon
                   :icon="command.icon"
@@ -197,6 +160,48 @@ function runCommand(command: Extract<DirectoryCommand, { type: "command" }>): vo
                 </span>
               </button>
             </template>
+          </CardContent>
+        </Card>
+
+        <Card
+          v-if="directory && Object.keys(directory.files).length"
+          class="mt-3"
+        >
+          <CardHeader class="pb-3">
+            <CardTitle class="text-sm">
+              Files
+            </CardTitle>
+          </CardHeader>
+          <CardContent class="space-y-2">
+            <RouterLink
+              v-for="files in directory.files"
+              :key="files.slug"
+              :to="{ name: 'directory-files', params: { projectSlug, directorySlug, fileSpace: files.slug } }"
+              class="flex w-full items-start gap-2 rounded-md border px-3 py-2 text-left text-sm transition-colors hover:bg-accent/60"
+            >
+              <FolderTree class="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+              <span class="min-w-0 flex-1">
+                <strong class="block truncate">{{ files.name }}</strong>
+                <span class="block truncate text-xs text-muted-foreground">{{ files.path }}</span>
+              </span>
+            </RouterLink>
+          </CardContent>
+        </Card>
+
+        <Card
+          v-if="directory?.scripts.length"
+          class="mt-3"
+        >
+          <CardHeader class="pb-3">
+            <CardTitle class="text-sm">
+              Scripts
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ScriptList
+              :project-slug="projectSlug"
+              :directory="directory"
+            />
           </CardContent>
         </Card>
       </ScrollArea>

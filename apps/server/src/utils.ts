@@ -1,3 +1,6 @@
+/** Address the server listens on, so only this machine reaches it. */
+export const LISTEN_ADDRESS = "127.0.0.1";
+
 export function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }

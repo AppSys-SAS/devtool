@@ -6,6 +6,13 @@ export interface ProxyOptions {
   proxyPort?: number;
 }
 
+/**
+ * Forwards the TCP connections of this machine on a port to the secure port of the devtool.
+ * @param options The ports.
+ * @param options.adtSecurePort Port the connections are forwarded to.
+ * @param options.proxyPort Port listened on, reachable from this machine only.
+ * @returns The listening server.
+ */
 export default function runProxy({ adtSecurePort = 6731, proxyPort = 443 }: ProxyOptions = {}): net.Server {
   const server = net.createServer((client) => {
     client.once("data", (buffer) => {
@@ -29,7 +36,7 @@ export default function runProxy({ adtSecurePort = 6731, proxyPort = 443 }: Prox
     logger.error("Proxy", "Server", error.message);
   });
 
-  server.listen(proxyPort, () => {
+  server.listen(proxyPort, "127.0.0.1", () => {
     logger.info("Proxy", "Server", `Started on port ${proxyPort}`);
   });
 

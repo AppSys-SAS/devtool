@@ -1,13 +1,15 @@
-import type { RuntimeConfig } from "@appsys/devtool-shared";
+import type { FilePayload, FileTreePayload, RuntimeConfig, ScriptsPayload } from "@appsys/devtool-shared";
 import { logger } from "@appsys/devtool-shared";
 import type { WebSocket } from "ws";
 import { DevtoolCdnSession } from "./cdn-session.js";
+import type { CommandAutomation } from "./command-automation.js";
 import { DevtoolCommandStream } from "./command-stream.js";
-import { DevtoolConfigFiles } from "./config-files.js";
 import { DevtoolConfigure } from "./configure.js";
 import { DevtoolEnvironment } from "./environment.js";
+import { DevtoolFileSpaces, type FileSpace, isDevtoolConfig } from "./file-spaces.js";
 import { DevtoolHttp } from "./http.js";
 import { DevtoolLB } from "./lb.js";
+import { listScripts } from "./scripts.js";
 import type {
   CommandStreamCreatePayload,
   CommandStreamInputPayload,
@@ -16,6 +18,16 @@ import type {
   ConfigProvider,
   ConnectionMessage,
 } from "./types.js";
+
+/**
+ * Describes a file asked for in a file space that does not exist.
+ * @param spaceId The identifier of the space.
+ * @param filePath The path of the file.
+ * @returns The file, with the error.
+ */
+function unknownSpaceFile(spaceId: string, filePath: string): FilePayload {
+  return { space: spaceId, path: filePath, content: null, binary: false, updatedAt: null, saved: false, conflict: false, error: `${spaceId} is not a file space` };
+}
 
 export class DevtoolServer {
   private readonly configProvider: ConfigProvider;
@@ -36,7 +48,7 @@ export class DevtoolServer {
 
   private readonly environment: DevtoolEnvironment;
 
-  private readonly configFiles = new DevtoolConfigFiles();
+  private readonly fileSpaces = new DevtoolFileSpaces();
 
   /**
    * @param configProvider Loads the configuration.
@@ -85,7 +97,6 @@ export class DevtoolServer {
    */
   async onNewConnection(ws: WebSocket): Promise<void> {
     await this.http.sendToWsConnections("config", this.configWrapper.getForClient(this.version), ws);
-    await this.http.sendToWsConnections("configFiles", this.configFiles.list(), ws);
     await this.http.sendToWsConnections("cdnSession", await this.cdnSession.status(), ws);
     await this.http.sendToWsConnections("environment", this.environment.state(), ws);
     for (const stream of this.commandStreams) {
@@ -152,13 +163,42 @@ export class DevtoolServer {
       return;
     }
 
-    if (message.type === "configRead") {
-      await this.http.sendToWsConnections("configFile", await this.configFiles.read(message.data.path), ws);
+    if (message.type === "filesList") {
+      await this.sendFileTree(message.data.space, ws);
       return;
     }
 
-    if (message.type === "configWrite") {
-      await this.writeConfigFile(message.data.path, message.data.content, message.data.baseUpdatedAt, ws);
+    if (message.type === "fileRead") {
+      const space = this.fileSpaces.get(message.data.space);
+      await this.http.sendToWsConnections("file", space ? await space.read(message.data.path) : unknownSpaceFile(message.data.space, message.data.path), ws);
+      return;
+    }
+
+    if (message.type === "fileWrite") {
+      await this.writeFile(message.data.space, message.data.path, message.data.content, message.data.baseUpdatedAt, ws);
+      return;
+    }
+
+    if (message.type === "fileCreate") {
+      const { path, kind } = message.data;
+      await this.changeFiles(message.data.space, ws, (space) => space.create(path, kind));
+      return;
+    }
+
+    if (message.type === "fileRemove") {
+      const { path } = message.data;
+      await this.changeFiles(message.data.space, ws, (space) => space.remove(path));
+      return;
+    }
+
+    if (message.type === "fileRename") {
+      const { from, to } = message.data;
+      await this.changeFiles(message.data.space, ws, (space) => space.rename(from, to));
+      return;
+    }
+
+    if (message.type === "scriptsList") {
+      await this.http.sendToWsConnections("scripts", await this.scripts(message.data.projectSlug, message.data.directorySlug), ws);
       return;
     }
 
@@ -201,24 +241,104 @@ export class DevtoolServer {
   }
 
   /**
-   * Writes a configuration file, sends its new state to the interface that asked, then reloads the
-   * configuration when the file belongs to the devtool one and describes the environment again.
-   * @param path The path of the file.
+   * Sends the files of a space to one interface, or to every interface.
+   * @param spaceId The identifier of the space.
+   * @param ws The connection of the interface, every connection when omitted.
+   * @param error Why a change of the files was refused, if it was.
+   */
+  private async sendFileTree(spaceId: string, ws?: WebSocket, error: string | null = null): Promise<void> {
+    const space = this.fileSpaces.get(spaceId);
+    const tree: FileTreePayload = space
+      ? await space.tree()
+      : { space: spaceId, root: "", exists: false, editable: false, entries: [], error: `${spaceId} is not a file space` };
+    await this.http.sendToWsConnections("fileTree", error ? { ...tree, error } : tree, ws);
+  }
+
+  /**
+   * Writes a file, sends its new state to the interface that asked, then, once written, the files of
+   * its space to every interface before running what the space does after a write.
+   * @param spaceId The identifier of the space.
+   * @param filePath The path of the file.
    * @param content Its new content.
-   * @param baseUpdatedAt Last change of the copy the content was edited from.
+   * @param baseUpdatedAt Last change of the file the content was edited from.
    * @param ws The connection of the interface.
    */
-  private async writeConfigFile(path: string, content: string, baseUpdatedAt: string | null, ws: WebSocket): Promise<void> {
-    const file = await this.configFiles.write(path, content, baseUpdatedAt);
-    await this.http.sendToWsConnections("configFile", file, ws);
-    if (!file.saved) {
+  private async writeFile(spaceId: string, filePath: string, content: string, baseUpdatedAt: string | null, ws: WebSocket): Promise<void> {
+    const space = this.fileSpaces.get(spaceId);
+    const file = space ? await space.write(filePath, content, baseUpdatedAt) : unknownSpaceFile(spaceId, filePath);
+    await this.http.sendToWsConnections("file", file, ws);
+    if (!space || !file.saved) {
       return;
     }
 
-    if (this.configFiles.isDevtoolConfig(path)) {
+    await this.sendFileTree(spaceId);
+    await space.afterWrite?.(filePath);
+  }
+
+  /**
+   * Changes the files and folders of a space, then sends its files to every interface, or why the
+   * change was refused to the interface that asked.
+   * @param spaceId The identifier of the space.
+   * @param ws The connection of the interface.
+   * @param change Changes the files of the space.
+   */
+  private async changeFiles(spaceId: string, ws: WebSocket, change: (space: FileSpace) => Promise<void>): Promise<void> {
+    const space = this.fileSpaces.get(spaceId);
+    if (!space) {
+      await this.sendFileTree(spaceId, ws);
+      return;
+    }
+
+    try {
+      await change(space);
+    } catch (error) {
+      await this.sendFileTree(spaceId, ws, error instanceof Error ? error.message : String(error));
+      return;
+    }
+    await this.sendFileTree(spaceId);
+  }
+
+  /**
+   * Lists the scripts of a directory.
+   * @param projectSlug The project of the directory.
+   * @param directorySlug The directory.
+   * @returns The scripts, or why they could not be listed.
+   */
+  private async scripts(projectSlug: string, directorySlug: string): Promise<ScriptsPayload> {
+    const payload: ScriptsPayload = { projectSlug, directorySlug, scripts: [], error: null };
+    const directory = this.config.projects[projectSlug]?.directories[directorySlug];
+    if (!directory) {
+      return { ...payload, error: `${projectSlug}/${directorySlug} is not a directory` };
+    }
+
+    try {
+      return { ...payload, scripts: await listScripts(directory) };
+    } catch (error) {
+      return { ...payload, error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
+  /**
+   * Reloads the configuration when a written configuration file belongs to the devtool one, then
+   * describes the environment again.
+   * @param filePath The path of the file in the configuration files space.
+   */
+  private async afterConfigWrite(filePath: string): Promise<void> {
+    if (isDevtoolConfig(filePath)) {
       await this.reconfigure();
     }
     this.refreshEnvironment();
+  }
+
+  /**
+   * Finds what the server does on its own around a command of the configuration.
+   * @param projectSlug The project of the command.
+   * @param directorySlug Its directory.
+   * @param commandSlug The command.
+   * @returns The automation, null when the command declares none.
+   */
+  commandAutomation(projectSlug: string, directorySlug: string, commandSlug: string): CommandAutomation | null {
+    return this.configWrapper.automations[`${projectSlug}/${directorySlug}/${commandSlug}`] ?? null;
   }
 
   async removeCommandStream(streamSlug: string): Promise<void> {
@@ -235,7 +355,6 @@ export class DevtoolServer {
       await this.lb.recreate();
     }
     await this.http.sendToWsConnections("config", this.configWrapper.getForClient(this.version));
-    await this.http.sendToWsConnections("configFiles", this.configFiles.list());
     await this.cdnSession.publish();
   }
 
@@ -282,7 +401,7 @@ export class DevtoolServer {
     this.config = this.configWrapper.runtimeConfig;
     this.cdnSession.configure(nextConfig.raw.cdn);
     this.environment.configure(nextConfig.raw);
-    this.configFiles.configure(nextConfig.raw);
+    this.fileSpaces.configure(nextConfig.raw, this.config.projects, (filePath) => this.afterConfigWrite(filePath));
 
     if (nextConfig.loadedPaths.length) {
       logger.info("Server", "Config", `Loaded: ${nextConfig.loadedPaths.join(", ")}`);

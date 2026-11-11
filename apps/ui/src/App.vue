@@ -2,6 +2,9 @@
 import { onMounted } from "vue";
 import { RouterView } from "vue-router";
 import AppSidebar from "@/components/AppSidebar.vue";
+import CommandDialog from "@/components/CommandDialog.vue";
+import commandRunsStore from "@/stores/command-runs";
+import layoutStore from "@/stores/layout";
 import wsStore from "@/stores/ws";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -39,9 +42,20 @@ onMounted(() => {
     v-else
     class="flex h-full w-full overflow-hidden"
   >
-    <AppSidebar class="h-full w-80 shrink-0 border-r" />
+    <AppSidebar
+      v-show="layoutStore.isVisible('left')"
+      class="h-full w-80 shrink-0 border-r"
+    />
     <main class="min-w-0 flex-1 overflow-hidden">
       <RouterView />
     </main>
+    <CommandDialog
+      v-if="commandRunsStore.current.value"
+      :key="commandRunsStore.current.value.tag"
+      :tag="commandRunsStore.current.value.tag"
+      :title="commandRunsStore.current.value.title"
+      @finished="commandRunsStore.current.value.onFinished?.()"
+      @closed="commandRunsStore.close()"
+    />
   </div>
 </template>

@@ -7,6 +7,7 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Terminal } from "@xterm/xterm";
 import { Eraser, Play, RotateCcw, Search, Square, Trash2 } from "@lucide/vue";
 import router from "@/router";
+import SidebarToggle from "@/components/SidebarToggle.vue";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
@@ -388,6 +389,10 @@ watch(
     </section>
 
     <footer class="mx-3 mb-3 mt-2 flex flex-wrap items-center gap-1 rounded-md border bg-card p-2">
+      <SidebarToggle
+        side="left"
+        class="size-8"
+      />
       <Button
         v-if="stream.stoppedDate"
         size="sm"
@@ -448,6 +453,10 @@ watch(
       >
         {{ withInformation ? "Hide Details" : "Details" }}
       </Button>
+      <SidebarToggle
+        side="right"
+        class="size-8"
+      />
     </footer>
   </section>
 </template>

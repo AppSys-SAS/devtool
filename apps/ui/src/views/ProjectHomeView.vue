@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Icon } from "@iconify/vue";
+import DirectorySummaryCard from "@/components/project/DirectorySummaryCard.vue";
+import { iconFromMeta } from "@/lib/directory-commands";
 import configStore from "@/stores/config";
 
 const props = defineProps<{
@@ -8,24 +10,48 @@ const props = defineProps<{
 }>();
 
 const project = computed(() => configStore.getProject(props.projectSlug));
-const projectName = computed(() => project.value?.name ?? props.projectSlug);
-const projectDescription = computed(() => project.value?.description ?? null);
+const directories = computed(() => Object.values(project.value?.directories ?? {}));
+const running = computed(
+  () => configStore.commandStreams.value.filter((stream) => stream.projectSlug === props.projectSlug && stream.status === "RUNNING").length,
+);
 </script>
 
 <template>
-  <div class="h-full overflow-auto p-6">
-    <Card class="max-w-3xl">
-      <CardHeader>
-        <CardTitle>{{ projectName }}</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <p
-          v-if="projectDescription"
-          class="text-sm text-muted-foreground"
-        >
-          {{ projectDescription }}
-        </p>
-      </CardContent>
-    </Card>
+  <div
+    v-if="project"
+    class="h-full overflow-auto p-6"
+  >
+    <header class="mb-6 space-y-1">
+      <div class="flex items-center gap-2">
+        <Icon
+          :icon="iconFromMeta(project.meta, 'lucide:folder-tree')"
+          class="size-5 text-muted-foreground"
+        />
+        <h1 class="text-xl font-semibold">
+          {{ project.name }}
+        </h1>
+        <span class="ml-2 text-sm text-muted-foreground">
+          {{ directories.length }} sub-project{{ directories.length > 1 ? "s" : "" }}<template v-if="running"> · {{ running }} running</template>
+        </span>
+      </div>
+      <p
+        v-if="project.description"
+        class="text-sm text-muted-foreground"
+      >
+        {{ project.description }}
+      </p>
+      <p class="font-mono text-xs break-all text-muted-foreground/70">
+        {{ project.path }}
+      </p>
+    </header>
+
+    <div class="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
+      <DirectorySummaryCard
+        v-for="directory in directories"
+        :key="directory.slug"
+        :project-slug="projectSlug"
+        :directory="directory"
+      />
+    </div>
   </div>
 </template>

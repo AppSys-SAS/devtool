@@ -1,5 +1,5 @@
 import type { RawConfig } from "@appsys/devtool-config";
-import type { RuntimeConfig } from "@appsys/devtool-shared";
+import type { FileEntryPayload, RuntimeConfig } from "@appsys/devtool-shared";
 import type { WebSocket } from "ws";
 import type { EnvironmentTarget } from "./environment.js";
 
@@ -31,6 +31,11 @@ export interface CommandStreamCreatePayload {
   options?: {
     cwd?: string;
     redirect?: boolean;
+    tag?: string;
+    /** A command of the directory in the configuration, whose arguments and automation are used. */
+    command?: string;
+    /** Runs the command of the configuration bringing back the folder of a missing project. */
+    restore?: boolean;
   };
 }
 
@@ -91,12 +96,32 @@ export type ConnectionMessage =
       data: Record<string, never>;
     }
   | {
-      type: "configRead";
-      data: { path: string };
+      type: "filesList";
+      data: { space: string };
     }
   | {
-      type: "configWrite";
-      data: { path: string; content: string; baseUpdatedAt: string | null };
+      type: "fileRead";
+      data: { space: string; path: string };
+    }
+  | {
+      type: "fileWrite";
+      data: { space: string; path: string; content: string; baseUpdatedAt: string | null };
+    }
+  | {
+      type: "fileCreate";
+      data: { space: string; path: string; kind: FileEntryPayload["kind"] };
+    }
+  | {
+      type: "fileRemove";
+      data: { space: string; path: string };
+    }
+  | {
+      type: "fileRename";
+      data: { space: string; from: string; to: string };
+    }
+  | {
+      type: "scriptsList";
+      data: { projectSlug: string; directorySlug: string };
     }
   | {
       type: "newCommandStream";

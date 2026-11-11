@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import { RouterLink } from "vue-router";
+import { FolderOpen } from "@lucide/vue";
 import StreamView from "@/views/StreamView.vue";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import configStore from "@/stores/config";
-import wsStore from "@/stores/ws";
+import { startDefaultCommand } from "@/lib/directory-commands";
 
 const props = defineProps<{
   projectSlug: string;
@@ -15,26 +17,10 @@ const directoryDefinition = computed(() => configStore.getDirectory(props.projec
 const directory = computed(() => directoryDefinition.value?.directory ?? null);
 const directoryName = computed(() => directory.value?.name ?? props.directorySlug);
 const directoryDescription = computed(() => directory.value?.description ?? null);
-const directoryArgs = computed(() => directory.value?.args ?? ["N/A"]);
-const directoryShell = computed(() => directory.value?.shell ?? ["N/A"]);
+const directoryArgs = computed(() => directory.value?.args ?? null);
+const directoryShell = computed(() => directory.value?.shell ?? "N/A");
+const defaultFiles = computed(() => (directory.value?.defaultFiles ? (directory.value.files[directory.value.defaultFiles] ?? null) : null));
 const streamSlug = computed(() => configStore.getDirectoryStreamPrimary(props.projectSlug, props.directorySlug));
-
-function runCommand(): void {
-  if (!directory.value) {
-    return;
-  }
-
-  wsStore.newCommandStream(
-    props.projectSlug,
-    props.directorySlug,
-    true,
-    directory.value.args,
-    directory.value.env,
-    directory.value.killSignal,
-    directory.value.notifications,
-    directory.value.name,
-  );
-}
 </script>
 
 <template>
@@ -61,10 +47,22 @@ function runCommand(): void {
           {{ directoryDescription }}
         </p>
         <Button
+          v-if="directoryArgs"
           class="h-auto w-full justify-start whitespace-normal break-all px-3 py-2 text-left font-mono text-xs leading-5"
-          @click="runCommand"
+          @click="directory && startDefaultCommand(projectSlug, directory)"
         >
           {{ directoryArgs.join(" ") || directoryShell }}
+        </Button>
+        <Button
+          v-if="defaultFiles"
+          as-child
+          variant="outline"
+          class="w-full justify-start"
+        >
+          <RouterLink :to="{ name: 'directory-files', params: { projectSlug, directorySlug, fileSpace: defaultFiles.slug } }">
+            <FolderOpen class="size-4" />
+            {{ defaultFiles.name }}
+          </RouterLink>
         </Button>
       </CardContent>
     </Card>

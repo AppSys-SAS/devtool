@@ -5,6 +5,7 @@ import mime from "mime-types";
 import { WebSocketServer, type WebSocket } from "ws";
 import { logger } from "@appsys/devtool-shared";
 import type { ServerContextLike } from "./types.js";
+import { LISTEN_ADDRESS } from "./utils.js";
 
 interface WsConnection extends WebSocket {
   isAlive?: boolean;
@@ -59,7 +60,7 @@ export class DevtoolHttp {
   async listen(): Promise<void> {
     const port = this.context.config.adt.ports.server;
     await new Promise<void>((resolve) => {
-      this.server.listen(port, "0.0.0.0", () => resolve());
+      this.server.listen(port, LISTEN_ADDRESS, () => resolve());
     });
     logger.info("Server", "HTTP", `Started on port ${port}`);
   }

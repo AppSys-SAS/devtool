@@ -1,28 +1,29 @@
 import { computed, type MaybeRefOrGetter, shallowRef, toValue, watch } from "vue";
-import configFilesStore from "@/stores/config-files";
+import filesStore, { fileKey } from "@/stores/files";
 import wsStore from "@/stores/ws";
 
 /**
- * Edits the local copy of a configuration file through a draft kept apart from the copy the server
- * last sent. A new copy replaces the draft unless the draft was changed from the previous one.
+ * Edits a file of a file space through a draft kept apart from the copy the server last sent. A new
+ * copy replaces the draft unless the draft was changed from the previous one.
+ * @param space The identifier of the file space.
  * @param path The path of the file, null while none is chosen.
  * @returns The file as the server sent it, the draft, whether the draft differs from the file, whether
  * a save is in progress, and the actions saving the draft or reverting it to the file on disk.
  */
-export function useConfigFile(path: MaybeRefOrGetter<string | null>) {
+export function useEditedFile(space: MaybeRefOrGetter<string>, path: MaybeRefOrGetter<string | null>) {
   const draft = shallowRef("");
   const saving = shallowRef(false);
   const file = computed(() => {
     const current = toValue(path);
-    return current ? (configFilesStore.files.value[current] ?? null) : null;
+    return current ? (filesStore.files.value[fileKey(toValue(space), current)] ?? null) : null;
   });
-  const dirty = computed(() => file.value !== null && draft.value !== (file.value.content ?? ""));
+  const dirty = computed(() => file.value !== null && !file.value.binary && draft.value !== (file.value.content ?? ""));
 
   watch(
-    [() => toValue(path), wsStore.connected],
-    ([current, connected]) => {
+    [() => toValue(space), () => toValue(path), wsStore.connected],
+    ([currentSpace, current, connected]) => {
       if (current && connected) {
-        wsStore.configRead(current);
+        wsStore.fileRead(currentSpace, current);
       }
     },
     { immediate: true },
@@ -32,7 +33,7 @@ export function useConfigFile(path: MaybeRefOrGetter<string | null>) {
     file,
     (next, previous) => {
       saving.value = false;
-      if (!next || next.saved || previous?.path !== next.path || draft.value === (previous.content ?? "")) {
+      if (!next || next.saved || previous?.space !== next.space || previous.path !== next.path || draft.value === (previous.content ?? "")) {
         draft.value = next?.content ?? "";
       }
     },
@@ -40,7 +41,7 @@ export function useConfigFile(path: MaybeRefOrGetter<string | null>) {
   );
 
   /**
-   * Asks the server to replace the local copy by the draft.
+   * Asks the server to replace the file by the draft.
    */
   function save(): void {
     const current = toValue(path);
@@ -49,17 +50,17 @@ export function useConfigFile(path: MaybeRefOrGetter<string | null>) {
     }
 
     saving.value = true;
-    wsStore.configWrite(current, draft.value, file.value?.updatedAt ?? null);
+    wsStore.fileWrite(toValue(space), current, draft.value, file.value?.updatedAt ?? null);
   }
 
   /**
-   * Drops the draft and reads the local copy again.
+   * Drops the draft and reads the file again.
    */
   function revert(): void {
     const current = toValue(path);
     draft.value = file.value?.content ?? "";
     if (current) {
-      wsStore.configRead(current);
+      wsStore.fileRead(toValue(space), current);
     }
   }
 

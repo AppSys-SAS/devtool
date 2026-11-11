@@ -1,7 +1,7 @@
 import { ref } from "vue";
-import type { EnvironmentKeyChoicePayload } from "@appsys/devtool-shared";
+import type { EnvironmentKeyChoicePayload, FileEntryPayload } from "@appsys/devtool-shared";
 import configStore from "./config";
-import configFilesStore from "./config-files";
+import filesStore from "./files";
 import environmentStore from "./environment";
 import sessionStore from "./session";
 
@@ -41,11 +41,14 @@ class WsStore {
             }
             configStore.loadConfig(payload.data as never);
             break;
-          case "configFiles":
-            configFilesStore.loadPaths(payload.data as never);
+          case "fileTree":
+            filesStore.loadTree(payload.data as never);
             break;
-          case "configFile":
-            configFilesStore.loadFile(payload.data as never);
+          case "file":
+            filesStore.loadFile(payload.data as never);
+            break;
+          case "scripts":
+            filesStore.loadScripts(payload.data as never);
             break;
           case "cdnSession":
             sessionStore.load(payload.data as never);
@@ -209,21 +212,69 @@ class WsStore {
   }
 
   /**
-   * Asks the server for the local copy of a configuration file.
-   * @param path The path of the file.
+   * Asks the server for the files of a file space.
+   * @param space The identifier of the space.
    */
-  configRead(path: string): void {
-    this.send("configRead", { path });
+  filesList(space: string): void {
+    this.send("filesList", { space });
   }
 
   /**
-   * Asks the server to replace the local copy of a configuration file.
+   * Asks the server for a file of a file space.
+   * @param space The identifier of the space.
+   * @param path The path of the file.
+   */
+  fileRead(space: string, path: string): void {
+    this.send("fileRead", { space, path });
+  }
+
+  /**
+   * Asks the server to replace a file of a file space.
+   * @param space The identifier of the space.
    * @param path The path of the file.
    * @param content The new content.
-   * @param baseUpdatedAt Last change of the copy the content was edited from, null when there was none.
+   * @param baseUpdatedAt Last change of the file the content was edited from, null when it did not exist.
    */
-  configWrite(path: string, content: string, baseUpdatedAt: string | null): void {
-    this.send("configWrite", { path, content, baseUpdatedAt });
+  fileWrite(space: string, path: string, content: string, baseUpdatedAt: string | null): void {
+    this.send("fileWrite", { space, path, content, baseUpdatedAt });
+  }
+
+  /**
+   * Asks the server to create an empty file, or a folder, in a file space.
+   * @param space The identifier of the space.
+   * @param path The path of the file or folder.
+   * @param kind Whether a file or a folder is created.
+   */
+  fileCreate(space: string, path: string, kind: FileEntryPayload["kind"]): void {
+    this.send("fileCreate", { space, path, kind });
+  }
+
+  /**
+   * Asks the server to remove a file, or a folder with everything it holds, from a file space.
+   * @param space The identifier of the space.
+   * @param path The path of the file or folder.
+   */
+  fileRemove(space: string, path: string): void {
+    this.send("fileRemove", { space, path });
+  }
+
+  /**
+   * Asks the server to rename or move a file or folder inside a file space.
+   * @param space The identifier of the space.
+   * @param from Its current path.
+   * @param to Its new path.
+   */
+  fileRename(space: string, from: string, to: string): void {
+    this.send("fileRename", { space, from, to });
+  }
+
+  /**
+   * Asks the server for the scripts of a directory.
+   * @param projectSlug The project of the directory.
+   * @param directorySlug The directory.
+   */
+  scriptsList(projectSlug: string, directorySlug: string): void {
+    this.send("scriptsList", { projectSlug, directorySlug });
   }
 
   disconnect(alreadyClosed = false): void {
@@ -236,7 +287,6 @@ class WsStore {
     configStore.reset();
     sessionStore.load(null);
     environmentStore.load(null);
-    configFilesStore.loadPaths(null);
   }
 }
 

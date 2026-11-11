@@ -4,7 +4,8 @@ import httpProxy from "http-proxy";
 import { logger } from "@appsys/devtool-shared";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Socket } from "node:net";
-import type { RuntimeConfig } from "@appsys/devtool-shared";
+import type { HostAccess, RuntimeConfig } from "@appsys/devtool-shared";
+import { allows, clientAddressOf } from "./access.js";
 
 const httpAgent = new http.Agent({ keepAlive: true });
 const httpsAgent = new https.Agent({ keepAlive: true });
@@ -20,6 +21,7 @@ interface ServerCandidate {
   prefix: string | null;
   pathNot: string | null;
   preserveHost: boolean;
+  access: HostAccess;
   roundRobinTargetIndex: number;
 }
 
@@ -74,6 +76,11 @@ export class DevtoolProxy {
     });
   }
 
+  /**
+   * Builds the routes of the configuration: the services of the directories and the interface of the
+   * devtool, each with who may reach it.
+   * @param config The configuration.
+   */
   reload(config: RuntimeConfig): void {
     const nextServers: ServerCandidate[] = [];
 
@@ -97,6 +104,7 @@ export class DevtoolProxy {
             prefix: server.prefix,
             pathNot: server.pathNot,
             preserveHost: server.preserveHost,
+            access: server.access,
             roundRobinTargetIndex: targets.length - 1,
           });
         }
@@ -114,6 +122,7 @@ export class DevtoolProxy {
         prefix: null,
         pathNot: null,
         preserveHost: false,
+        access: config.adt.access,
         roundRobinTargetIndex: targets.length - 1,
       });
     }
@@ -122,10 +131,25 @@ export class DevtoolProxy {
   }
 
   /**
-   * Proxies an HTTP request to the server matching its host and path, reusing upstream connections.
+   * Tells who reaches a host, whatever the path asked for.
+   * @param host The host name, lower case.
+   * @returns `network` when some server of the host is reachable from the network, `local` when none
+   * is, null when no server serves the host.
+   */
+  accessOf(host: string): HostAccess | null {
+    const servers = this.serversAvailable.filter((candidate) => candidate.hosts.includes(host));
+    if (!servers.length) {
+      return null;
+    }
+    return servers.some((server) => server.access === "network") ? "network" : "local";
+  }
+
+  /**
+   * Proxies an HTTP request to the server matching its host and path, reusing upstream connections,
+   * or answers 403 when the client may not reach that server.
    * @param req Incoming request.
    * @param res Response to write to.
-   * @returns True when a server matched and the request was proxied.
+   * @returns True when a server matched, the request being proxied or refused.
    */
   proxyRequest(req: IncomingMessage, res: ServerResponse): boolean {
     const host = this.getHost(req);
@@ -133,6 +157,14 @@ export class DevtoolProxy {
     const server = this.getMatchServer(host, url);
     if (!server) {
       return false;
+    }
+
+    const client = clientAddressOf(req.socket);
+    if (!allows(server.access, client)) {
+      logger.warn("Proxy", server.slug, `Refused for ${client}`);
+      res.writeHead(403);
+      res.end("403 Forbidden");
+      return true;
     }
 
     const target = this.nextTarget(server);
@@ -149,12 +181,27 @@ export class DevtoolProxy {
     return true;
   }
 
+  /**
+   * Proxies a WebSocket upgrade to the server matching its host and path, or closes the connection
+   * when the client may not reach that server.
+   * @param req Incoming upgrade request.
+   * @param socket Connection of the client.
+   * @param head First bytes of the upgraded stream.
+   * @returns True when a server matched, the upgrade being proxied or refused.
+   */
   proxyUpgrade(req: IncomingMessage, socket: Socket, head: Buffer): boolean {
     const host = this.getHost(req);
     const url = req.url ?? "/";
     const server = this.getMatchServer(host, url);
     if (!server) {
       return false;
+    }
+
+    const client = clientAddressOf(socket);
+    if (!allows(server.access, client)) {
+      logger.warn("Proxy", server.slug, `Refused for ${client}`);
+      socket.destroy();
+      return true;
     }
 
     const target = this.nextTarget(server);
@@ -212,7 +259,12 @@ export class DevtoolProxy {
 
     request.headers["x-forwarded-proto"] = target.tls ? "https" : "http";
     request.headers["x-forwarded-port"] = forwardedPort;
-    request.headers["x-forwarded-for"] = request.headers['x-forwarded-for'] || request.socket.remoteAddress
+    const client = clientAddressOf(request.socket);
+    if (client) {
+      request.headers["x-forwarded-for"] = client;
+    } else {
+      delete request.headers["x-forwarded-for"];
+    }
     request.headers["x-forwarded-ssl"] = target.tls ? "on" : "off";
   }
 

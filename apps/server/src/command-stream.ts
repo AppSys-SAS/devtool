@@ -7,6 +7,7 @@ import treeKill from "tree-kill";
 import type { StreamOutputLine, StreamUpdatePayload } from "@appsys/devtool-shared";
 import { logger } from "@appsys/devtool-shared";
 import type { WebSocket } from "ws";
+import { AnswerMatcher, type CommandAutomation, resolveCommand, type ResolvedCommand, scrub } from "./command-automation.js";
 import type { CommandStreamCreatePayload } from "./types.js";
 import type { DevtoolServer } from "./server.js";
 
@@ -89,8 +90,14 @@ function getShellArgs(shell: string, command: string): string[] {
   return [flag, command];
 }
 
-function areArgsEqual(left: string[], right: string[]): boolean {
-  if (left.length !== right.length) {
+/**
+ * Compares the arguments of two commands.
+ * @param left The arguments of the first command, null when there is no command.
+ * @param right The arguments of the second command.
+ * @returns True when both commands exist with the same arguments.
+ */
+function areArgsEqual(left: string[] | null, right: string[]): boolean {
+  if (!left || left.length !== right.length) {
     return false;
   }
 
@@ -158,6 +165,11 @@ export class DevtoolCommandStream {
 
   public name: string;
 
+  /** Identifies the stream for the interface that started it. */
+  public tag: string | null;
+
+  private automation: CommandAutomation | null;
+
   public args: string[];
 
   public cwd: string;
@@ -198,6 +210,8 @@ export class DevtoolCommandStream {
     this.directorySlug = null;
     this.primary = false;
     this.name = "N/A";
+    this.tag = null;
+    this.automation = null;
     this.args = [];
     this.cwd = process.cwd();
     this.env = {};
@@ -238,6 +252,11 @@ export class DevtoolCommandStream {
     return instance;
   }
 
+  /**
+   * Describes the command of the stream; a command of the configuration brings its own arguments,
+   * environment and automation, and the restore of a missing project runs in the parent of its folder.
+   * @param data The command asked for by the interface.
+   */
   async create({
     projectSlug,
     directorySlug,
@@ -263,13 +282,22 @@ export class DevtoolCommandStream {
       }
     }
 
+    const command = projectSlug && directorySlug && typeof options.command === "string" ? this.server.config.projects[projectSlug]?.directories[directorySlug]?.extras[options.command] : undefined;
+    const missingProject = projectSlug && options.restore === true ? this.server.config.projects[projectSlug] : undefined;
+    const restoreArgs = missingProject?.missing && missingProject.restore ? missingProject.restore.args.map((arg) => arg.replaceAll("%{ADT:PATH}", missingProject.path)) : null;
+    if (restoreArgs && missingProject) {
+      cwd = path.dirname(missingProject.path);
+    }
+
     this.projectSlug = projectSlug ?? null;
     this.directorySlug = directorySlug ?? null;
     this.primary = primary;
-    this.args = args;
-    this.name = name ?? args.join(" ");
+    this.args = restoreArgs ?? command?.args ?? args;
+    this.name = name ?? this.args.join(" ");
+    this.tag = typeof options.tag === "string" ? options.tag : null;
+    this.automation = command && projectSlug && directorySlug ? this.server.commandAutomation(projectSlug, directorySlug, command.slug) : null;
     this.cwd = cwd;
-    this.env = env ?? {};
+    this.env = command?.env ?? env ?? {};
     this.shell = normalizeShell(shell) ?? this.resolveShellFromConfig() ?? normalizeShell(this.server.config.adt.shell);
     this.killSignal = normalizeKillSignal(killSignal) ?? this.resolveKillSignalFromConfig();
     this.notifications = notifications;
@@ -331,6 +359,10 @@ export class DevtoolCommandStream {
     this.proc.resize(cols, rows);
   }
 
+  /**
+   * Sends the state of the stream to one interface, or to every interface.
+   * @param wsInstance The connection of the interface, every connection when null.
+   */
   async sendUpdate(wsInstance: WebSocket | null = null): Promise<void> {
     const payload: StreamUpdatePayload = {
       slug: this.slug,
@@ -338,6 +370,7 @@ export class DevtoolCommandStream {
       directorySlug: this.directorySlug,
       primary: this.primary,
       name: this.name,
+      tag: this.tag,
       args: this.args,
       env: this.env,
       shell: this.shell,
@@ -444,12 +477,28 @@ export class DevtoolCommandStream {
       throw new Error("Command already running");
     }
 
+    let resolved: ResolvedCommand | null = null;
+    if (this.automation) {
+      if (this.automation.unless && (await this.alreadyDone(this.automation.unless))) {
+        await this.sendUpdate();
+        return;
+      }
+
+      try {
+        resolved = await resolveCommand(this.automation, finalArgs, this.env);
+      } catch (error) {
+        await this.handleStartFailure(error);
+        await this.sendUpdate();
+        return;
+      }
+    }
+
     await this.addOutput("info", finalArgs.length ? `Execute Command: ${finalArgs.join(" ")}\n` : "Execute Shell\n");
     // await this.addOutput("info", this.cwd);
 
     const spawnOptions = {
       cwd: this.cwd,
-      env: { ...this.defaultEnv, ...process.env, ...this.env },
+      env: { ...this.defaultEnv, ...process.env, ...(resolved?.env ?? this.env) },
       cols: this.cols,
       rows: this.rows,
       name: "xterm-256color",
@@ -469,7 +518,7 @@ export class DevtoolCommandStream {
         return;
       }
 
-      const command = finalArgs.map(shellEscapePosix).join(" ");
+      const command = (resolved?.args ?? finalArgs).map(shellEscapePosix).join(" ");
       for (const shell of getShellCandidates(preferredShell)) {
         if (!canAttemptShell(shell)) {
           spawnErrors.push(`shell ${shell}: not found`);
@@ -502,11 +551,17 @@ export class DevtoolCommandStream {
     this.stoppedDate = null;
     this.exitCode = null;
 
-    this.proc.onData((data) => {
-      void this.addOutput("stdout", data);
+    const answers = new AnswerMatcher(resolved?.answers ?? []);
+    const secrets = resolved?.secrets ?? [];
+    const proc = this.proc;
+    proc.onData((data) => {
+      const answer = answers.feed(data);
+      if (answer !== null) {
+        proc.write(`${answer}\r`);
+      }
+      void this.addOutput("stdout", scrub(data, secrets));
     });
 
-    const proc = this.proc;
     this.exited = new Promise<void>((resolve) => {
       proc.onExit(({ exitCode }) => {
         this.exitCode = exitCode;
@@ -534,6 +589,44 @@ export class DevtoolCommandStream {
     }
   }
 
+  /**
+   * Runs the command whose success makes the command needless, in the same shell, and when it
+   * succeeds, shows its output and marks the command as done without starting it.
+   * @param unless The arguments of the check.
+   * @returns True when the check succeeded.
+   */
+  private async alreadyDone(unless: string[]): Promise<boolean> {
+    const shell = getShellCandidates(normalizeShell(this.shell)).find(canAttemptShell);
+    if (!shell) {
+      return false;
+    }
+
+    const command = this.convertArgs(unless).map(shellEscapePosix).join(" ");
+    const result = await new Promise<{ code: number | null; output: string }>((resolve) => {
+      const child = spawnDetached(shell, getShellArgs(shell, command), { cwd: this.cwd, env: { ...this.defaultEnv, ...process.env, ...this.env } });
+      let output = "";
+      child.stdout.on("data", (chunk: Buffer) => (output += chunk.toString()));
+      child.stderr.on("data", (chunk: Buffer) => (output += chunk.toString()));
+      child.on("error", () => resolve({ code: null, output }));
+      child.on("close", (code) => resolve({ code, output }));
+    });
+    if (result.code !== 0) {
+      return false;
+    }
+
+    this.runningDate = Date.now();
+    await this.addOutput("stdout", result.output.replace(/\r?\n/g, "\r\n"));
+    await this.addOutput("info", `Skipped: ${unless.join(" ")} succeeded\n`);
+    this.exitCode = 0;
+    this.stoppedDate = Date.now();
+    this.runningArgs = null;
+    return true;
+  }
+
+  /**
+   * Marks the command as failed before it could start, showing why.
+   * @param error Why it could not start.
+   */
   private async handleStartFailure(error: unknown): Promise<void> {
     this.exitCode = 127;
     this.runningArgs = null;
@@ -542,7 +635,7 @@ export class DevtoolCommandStream {
     this.proc = null;
 
     const message = error instanceof Error ? error.message : "Unable to start process";
-    await this.addOutput("stderr", message);
+    await this.addOutput("stderr", `${message}\r\n`);
     await this.addOutput("info", "Process failed to start");
   }
 

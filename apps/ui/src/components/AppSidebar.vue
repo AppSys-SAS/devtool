@@ -1,15 +1,18 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { RouterLink } from "vue-router";
+import { RouterLink, useRouter } from "vue-router";
 import { useColorMode } from "@vueuse/core";
 import { Icon } from "@iconify/vue";
-import { ArrowDownUp, Bookmark, Circle, FileCog, FolderTree, Monitor, Moon, Play, RefreshCw, RotateCcw, Square, Sun } from '@lucide/vue'
+import { ArrowDownUp, Bookmark, Circle, Download, FileCog, FolderOpen, FolderTree, FolderX, Monitor, Moon, Play, RefreshCw, RotateCcw, Square, Sun } from '@lucide/vue'
 import CdnSession from "@/components/CdnSession.vue";
 import SidebarStreamItem from "@/components/SidebarStreamItem.vue";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
+import type { ProjectRestore } from "@appsys/devtool-shared";
+import { iconFromMeta, startDefaultCommand } from "@/lib/directory-commands";
 import bookmarkStore from "@/stores/bookmark";
+import commandRunsStore from "@/stores/command-runs";
 import configStore from "@/stores/config";
 import wsStore from "@/stores/ws";
 import type { CommandStream } from "@/types";
@@ -18,7 +21,8 @@ interface SidebarDirectory {
   slug: string;
   projectSlug: string;
   name: string;
-  args: string[];
+  args: string[] | null;
+  defaultFiles: { slug: string; name: string } | null;
   env: Record<string, string>;
   extras: Record<string, { name: string; args: string[]; killSignal: string | null; meta?: unknown }>;
   killSignal: string | null;
@@ -31,11 +35,14 @@ interface SidebarDirectory {
 interface SidebarProject {
   slug: string;
   name: string;
+  missing: boolean;
+  restore: ProjectRestore | null;
   directories: SidebarDirectory[];
   streams: CommandStream[];
   meta?: unknown;
 }
 
+const router = useRouter();
 const bookmarkedOnly = ref(false);
 const appVersion = window.devtool?.version ?? "0.0.0";
 const colorMode = useColorMode({
@@ -93,6 +100,7 @@ const sidebarData = computed(() => {
           projectSlug,
           name: directory.name || directorySlug,
           args: directory.args,
+          defaultFiles: directory.defaultFiles ? { slug: directory.defaultFiles, name: directory.files[directory.defaultFiles]?.name ?? directory.defaultFiles } : null,
           env: directory.env,
           killSignal: directory.killSignal,
           extras: directory.extras,
@@ -119,6 +127,8 @@ const sidebarData = computed(() => {
       const projectItem: SidebarProject = {
         slug: projectSlug,
         name: project.name || projectSlug,
+        missing: project.missing,
+        restore: project.restore,
         directories,
         streams: [],
         meta: project.meta,
@@ -179,27 +189,37 @@ function streamUpdate(streamSlug: string, action: "start" | "stop" | "restart" |
   wsStore.updateCommandStream(streamSlug, action);
 }
 
-function startDirectoryCommand(directory: SidebarDirectory): void {
-  if (directory.stream) {
-    streamUpdate(directory.stream.slug, "start");
+/**
+ * Brings back the missing folder of a project in the background, its questions in a dialog, then
+ * reloads the configuration so the project shows.
+ * @param project The missing project.
+ */
+function restoreProject(project: SidebarProject): void {
+  if (!project.restore) {
     return;
   }
-  wsStore.newCommandStream(directory.projectSlug, directory.slug, true, directory.args, directory.env, directory.killSignal, directory.notifications);
+
+  commandRunsStore.start({
+    projectSlug: project.slug,
+    directorySlug: null,
+    args: project.restore.args,
+    env: {},
+    killSignal: null,
+    notifications: true,
+    name: `${project.restore.name} ${project.name}`,
+    restore: true,
+    onFinished: () => wsStore.reconfigure(),
+  });
 }
 
-function resolveIconFromMeta(meta: unknown, fallback = "ph:terminal"): string {
-  if (typeof meta !== "object" || meta === null) {
-    return fallback;
+/**
+ * Opens the folder of files a directory opens by default.
+ * @param directory The directory.
+ */
+function openDefaultFiles(directory: SidebarDirectory): void {
+  if (directory.defaultFiles) {
+    void router.push({ name: "directory-files", params: { projectSlug: directory.projectSlug, directorySlug: directory.slug, fileSpace: directory.defaultFiles.slug } });
   }
-  const maybeIcon = "icon" in meta ? (meta as { icon?: unknown }).icon : null;
-  if (typeof maybeIcon !== "string" || maybeIcon.trim().length === 0) {
-    return fallback;
-  }
-  const icon = maybeIcon.trim();
-  if (icon.includes(":")) {
-    return icon;
-  }
-  return `lucide:${icon}`;
 }
 
 function areArgsEqual(left: string[], right: string[]): boolean {
@@ -220,23 +240,23 @@ function resolveStreamIcon(directory: SidebarDirectory, stream: CommandStream): 
   const extras = Object.values(directory.extras);
   for (const extra of extras) {
     if (extra.name === stream.name && areArgsEqual(extra.args, stream.args)) {
-      return resolveIconFromMeta(extra.meta);
+      return iconFromMeta(extra.meta);
     }
   }
 
   for (const extra of extras) {
     if (areArgsEqual(extra.args, stream.args)) {
-      return resolveIconFromMeta(extra.meta);
+      return iconFromMeta(extra.meta);
     }
   }
 
   for (const extra of extras) {
     if (extra.name === stream.name) {
-      return resolveIconFromMeta(extra.meta);
+      return iconFromMeta(extra.meta);
     }
   }
 
-  return resolveIconFromMeta(directory.meta);
+  return iconFromMeta(directory.meta);
 }
 </script>
 
@@ -306,7 +326,26 @@ function resolveStreamIcon(directory: SidebarDirectory, stream: CommandStream): 
           :key="`project/${project.slug}`"
           class="space-y-2"
         >
+          <div
+            v-if="project.missing"
+            class="flex items-center gap-2 rounded-md px-2 py-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground/60"
+            title="Missing on this machine"
+          >
+            <FolderX class="size-3.5" />
+            <span class="min-w-0 flex-1 truncate">{{ project.name }}</span>
+            <Button
+              v-if="project.restore"
+              size="sm"
+              variant="outline"
+              class="h-6 gap-1 px-2 text-[11px] normal-case tracking-normal"
+              @click="restoreProject(project)"
+            >
+              <Download class="size-3" />
+              {{ project.restore.name }}
+            </Button>
+          </div>
           <RouterLink
+            v-else
             :to="{ name: 'project', params: { projectSlug: project.slug } }"
             class="flex items-center gap-2 rounded-md px-2 py-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground transition-colors hover:bg-accent/50"
           >
@@ -351,17 +390,27 @@ function resolveStreamIcon(directory: SidebarDirectory, stream: CommandStream): 
                   </span>
                 </span>
                 <Icon
-                  :icon="resolveIconFromMeta(directory.meta, 'lucide:folder-tree')"
+                  :icon="iconFromMeta(directory.meta, 'lucide:folder-tree')"
                   class="size-3.5 shrink-0 text-muted-foreground"
                 />
                 <span class="min-w-0 flex-1 truncate">{{ directory.name }}</span>
                 <div class="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
                   <Button
-                    v-if="!directory.stream || directory.stream.status !== 'RUNNING'"
+                    v-if="directory.defaultFiles"
                     size="icon"
                     variant="ghost"
                     class="size-6"
-                    @click.prevent.stop="startDirectoryCommand(directory)"
+                    :title="directory.defaultFiles.name"
+                    @click.prevent.stop="openDefaultFiles(directory)"
+                  >
+                    <FolderOpen class="size-3.5" />
+                  </Button>
+                  <Button
+                    v-if="(directory.args || directory.stream) && directory.stream?.status !== 'RUNNING'"
+                    size="icon"
+                    variant="ghost"
+                    class="size-6"
+                    @click.prevent.stop="startDefaultCommand(directory.projectSlug, directory)"
                   >
                     <Play class="size-3.5" />
                   </Button>

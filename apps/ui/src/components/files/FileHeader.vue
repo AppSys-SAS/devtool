@@ -1,14 +1,15 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { Loader2, Save, TriangleAlert, Undo2 } from "@lucide/vue";
-import type { ConfigFilePayload } from "@appsys/devtool-shared";
+import type { FilePayload } from "@appsys/devtool-shared";
+import SidebarToggle from "@/components/SidebarToggle.vue";
 import { Button } from "@/components/ui/button";
 import { formatRelativeDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 const props = defineProps<{
-  path: string;
-  file: ConfigFilePayload | null;
+  root: string;
+  file: FilePayload;
   dirty: boolean;
   saving: boolean;
 }>();
@@ -18,13 +19,19 @@ const emit = defineEmits<{
   revert: [];
 }>();
 
+const location = computed(() => `${props.root.replace(/^\/(Users|home)\/[^/]+/, "~")}/${props.file.path}`);
+
 const status = computed(() => {
   if (props.dirty) {
     return "Unsaved changes";
   }
 
-  if (!props.file || props.file.error) {
+  if (props.file.error) {
     return "";
+  }
+
+  if (props.file.binary) {
+    return "Binary file, not editable";
   }
 
   return props.file.updatedAt ? `Changed ${formatRelativeDate(props.file.updatedAt)}` : "Not created yet";
@@ -34,7 +41,7 @@ const status = computed(() => {
 <template>
   <div class="border-b">
     <div class="flex items-center gap-3 px-4 py-2">
-      <span class="min-w-0 flex-1 truncate font-mono text-sm">~/.config/appsys/{{ path }}</span>
+      <span class="min-w-0 flex-1 truncate font-mono text-sm">{{ location }}</span>
       <span
         :class="cn('shrink-0 text-xs', dirty ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground')"
       >{{ status }}</span>
@@ -62,9 +69,10 @@ const status = computed(() => {
         />
         Save
       </Button>
+      <SidebarToggle side="right" />
     </div>
     <div
-      v-if="file?.error"
+      v-if="file.error"
       class="mx-4 mb-2 flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-2 text-sm text-destructive"
     >
       <TriangleAlert class="mt-0.5 size-4 shrink-0" />

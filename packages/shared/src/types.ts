@@ -1,3 +1,6 @@
+/** Who reaches a host through the load balancer: clients of this machine only, or any client. */
+export type HostAccess = "local" | "network";
+
 export interface AdtDefinition {
   host: string | null;
   uiPath?: string;
@@ -9,6 +12,33 @@ export interface AdtDefinition {
   secure: boolean;
   notifications: boolean;
   hosts: string[];
+  /** Who reaches the interface of the devtool. */
+  access: HostAccess;
+}
+
+/** Names the local DNS answers itself. */
+export interface DnsRecord {
+  /** Exact host names, or `*.<domain>` for its subdomains. */
+  names: string[];
+  /** An IPv4 address, or `auto` for the current network address of this machine. */
+  address: string;
+}
+
+/** The local DNS: its own names, every other name being resolved by the system. */
+export interface DnsDefinition {
+  port: number;
+  /** Who may query it. */
+  access: HostAccess;
+  records: DnsRecord[];
+}
+
+/** Hosts whose TLS connections the load balancer forwards untouched, chosen by their server name. */
+export interface PassthroughRule {
+  /** Exact host names, or `*.<domain>` for its subdomains. */
+  hosts: string[];
+  host: string;
+  port: number;
+  access: HostAccess;
 }
 
 export interface LoadBalancerCertificate {
@@ -26,6 +56,7 @@ export interface DirectoryLoadBalancerRule {
   prefix: string | null;
   pathNot: string | null;
   preserveHost: boolean;
+  access: HostAccess;
 }
 
 export interface DirectoryExtra {
@@ -33,11 +64,57 @@ export interface DirectoryExtra {
   name: string;
   args: string[];
   detached: boolean;
+  /** Whether the command runs in the background, its questions answered in a dialog. */
+  prompt: boolean;
+  /** Whether the server skips it or answers its questions on its own, as the configuration declares. */
+  automated: boolean;
   notifications: boolean;
   env: Record<string, string>;
   shell: string | null;
   killSignal: string | null;
   meta?: unknown;
+}
+
+/** An argument of a script: one value among choices, a flag, or free text split like a shell does. */
+export interface ScriptArgument {
+  name: string;
+  kind: "choice" | "flag" | "text";
+  /** The values of a choice. */
+  choices: string[];
+  /** Whether a choice may be left out. */
+  optional: boolean;
+}
+
+/** What the configuration declares about one script. */
+export interface ScriptSettings {
+  /** Whether the script runs in the background, null to follow its folder. */
+  prompt: boolean | null;
+  /** Its arguments, null to type them freely. */
+  args: ScriptArgument[] | null;
+}
+
+/** A folder whose executables a directory offers as scripts. */
+export interface DirectoryScripts {
+  /** Absolute path of the folder. */
+  path: string;
+  /** Whether its scripts run in the background, their questions answered in a dialog. */
+  prompt: boolean;
+  /** Glob patterns of the file names offered, null for every executable. */
+  only: string[] | null;
+  /** Settings of some scripts, by file name. */
+  scripts: Record<string, ScriptSettings>;
+}
+
+/** A folder of editable files declared by a directory. */
+export interface DirectoryFiles {
+  slug: string;
+  name: string;
+  /** Absolute path of the folder. */
+  path: string;
+  /** Extras of the directory offered next to the files. */
+  commands: string[];
+  /** The extra of the directory bringing the folder back when it is missing, null when there is none. */
+  restore: string | null;
 }
 
 export interface DirectoryDefinition {
@@ -46,13 +123,26 @@ export interface DirectoryDefinition {
   description?: string | null;
   path: string;
   loadBalancer: Record<string, DirectoryLoadBalancerRule>;
-  args: string[];
+  /** Arguments of the default command, null when the directory has none. */
+  args: string[] | null;
   extras: Record<string, DirectoryExtra>;
+  /** The folders whose executables are offered as scripts. */
+  scripts: DirectoryScripts[];
+  files: Record<string, DirectoryFiles>;
+  /** Slug of the folder of files opened by default, null when there is none. */
+  defaultFiles: string | null;
   notifications: boolean;
   env: Record<string, string>;
   shell: string | null;
   killSignal: string | null;
   meta?: unknown;
+}
+
+/** The command bringing back the folder of a project when it is missing, such as a clone of its repository. */
+export interface ProjectRestore {
+  name: string;
+  /** Its arguments, `%{ADT:PATH}` standing for the missing folder. */
+  args: string[];
 }
 
 export interface ProjectDefinition {
@@ -62,12 +152,18 @@ export interface ProjectDefinition {
   path: string;
   directories: Record<string, DirectoryDefinition>;
   notifications: boolean;
+  /** Whether the folder of the project is missing, the project then having no directory. */
+  missing: boolean;
+  restore: ProjectRestore | null;
   meta?: unknown;
 }
 
 export interface RuntimeConfig {
   adt: AdtDefinition;
   loadBalancers: Record<string, LoadBalancerCertificate>;
+  passthrough: PassthroughRule[];
+  /** The local DNS, null when no record is declared. */
+  dns: DnsDefinition | null;
   projects: Record<string, ProjectDefinition>;
   warnings: string[];
 }
@@ -91,6 +187,8 @@ export interface StreamUpdatePayload {
   directorySlug: string | null;
   primary: boolean;
   name: string;
+  /** Identifies the stream for the interface that started it. */
+  tag: string | null;
   args: string[];
   env: Record<string, string>;
   shell: string | null;
@@ -199,30 +297,72 @@ export interface EnvironmentTablesPayload {
   error: string | null;
 }
 
-/** Configuration files of the development environment that can be edited. */
-export interface ConfigFilesPayload {
-  paths: string[];
+/** A file or folder of a file space, its path relative to the root. */
+export interface FileEntryPayload {
+  path: string;
+  kind: "file" | "directory";
 }
 
-/** A configuration file of the development environment, as its local copy stands. */
-export interface ConfigFilePayload {
+/** The files of a file space. */
+export interface FileTreePayload {
+  space: string;
+  /** Absolute path of the root of the space. */
+  root: string;
+  /** Whether the root exists. */
+  exists: boolean;
+  /** Whether files and folders can be created, renamed and removed. */
+  editable: boolean;
+  entries: FileEntryPayload[];
+  /** Why the files could not be listed or changed. */
+  error: string | null;
+}
+
+/** A file of a file space, as it stands on disk. */
+export interface FilePayload {
+  space: string;
   path: string;
-  /** Content of the local copy, null when there is none. */
+  /** Text content, null when the file does not exist or is binary. */
   content: string | null;
-  /** Last change of the local copy, in ISO format, null when there is none. */
+  /** Whether the file holds binary data, never sent. */
+  binary: boolean;
+  /** Last change of the file, in ISO format, null when it does not exist. */
   updatedAt: string | null;
-  /** Whether the local copy was just replaced by a write. */
+  /** Whether the file was just replaced by a write. */
   saved: boolean;
-  /** Whether a write was refused because the local copy changed since it was read. */
+  /** Whether a write was refused because the file changed since it was read. */
   conflict: boolean;
   /** Why the file could not be read or written. */
   error: string | null;
 }
 
+/** An executable script offered by a directory. */
+export interface ScriptPayload {
+  /** Path of the script relative to the directory. */
+  path: string;
+  name: string;
+  /** First paragraph of the comment heading the script. */
+  summary: string | null;
+  /** Usage lines of the comment heading the script. */
+  usage: string | null;
+  /** Whether the script runs in the background, its questions answered in a dialog. */
+  prompt: boolean;
+  /** Its declared arguments, null to type them freely. */
+  args: ScriptArgument[] | null;
+}
+
+/** The scripts of a directory. */
+export interface ScriptsPayload {
+  projectSlug: string;
+  directorySlug: string;
+  scripts: ScriptPayload[];
+  error: string | null;
+}
+
 export interface WsPayloadMap {
   config: ClientConfigPayload;
-  configFiles: ConfigFilesPayload;
-  configFile: ConfigFilePayload;
+  fileTree: FileTreePayload;
+  file: FilePayload;
+  scripts: ScriptsPayload;
   cdnSession: CdnSessionPayload;
   environment: EnvironmentPayload;
   environmentTables: EnvironmentTablesPayload;

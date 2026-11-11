@@ -11,11 +11,11 @@ export default defineConfig({
     },
   },
   server: {
-    host: "0.0.0.0",
+    host: "127.0.0.1",
     port: 6731,
     proxy: {
       "/ws/": {
-        target: "http://localhost:6730",
+        target: "http://127.0.0.1:6730",
         ws: true,
       },
     },
