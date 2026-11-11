@@ -4,7 +4,7 @@ import type { S3Client } from "@aws-sdk/client-s3";
 import { ArchiveWriter, readArchive, type RecordHeader } from "./archive.js";
 import { createS3Client, restoreBucket, type S3Options, snapshotBucket } from "./buckets.js";
 import type { CdnClient } from "./client.js";
-import { localPathOf } from "./directory.js";
+import { localPathOf, writeLocalFile } from "./directory.js";
 import { databaseEngine, type DatabaseEngineName, isDatabaseEngineName } from "./engines.js";
 import { listRedisGroups, redisDatabaseName, redisRecordGroup, restoreRedis, snapshotRedis } from "./redis.js";
 import { readSyncJournal, type SyncRecord, writeSyncRecord } from "./sync-journal.js";
@@ -374,7 +374,7 @@ export class Environment {
     const { local, remote } = await this.readBothCopies(filePath);
     const differences = diffYaml(local, remote);
     const merged = mergeYaml(local, "local", differences, keys);
-    await this.writeText(localPathOf(filePath), merged);
+    await writeLocalFile(localPathOf(filePath), merged);
     if (diffYaml(merged, remote).length === 0) {
       await this.recordSync(filePath);
     }
@@ -433,23 +433,6 @@ export class Environment {
       return { local, remote: await fs.readFile(remotePath, "utf-8") };
     } finally {
       await fs.rm(remotePath, { force: true });
-    }
-  }
-
-  /**
-   * Writes a local text file readable by the current user only, replaced only once written.
-   *
-   * @param localPath - The file.
-   * @param text - Its content.
-   */
-  private async writeText(localPath: string, text: string): Promise<void> {
-    await fs.mkdir(path.dirname(localPath), { recursive: true, mode: 0o700 });
-    const partialPath = `${localPath}.part`;
-    try {
-      await fs.writeFile(partialPath, text, { mode: 0o600 });
-      await fs.rename(partialPath, localPath);
-    } finally {
-      await fs.rm(partialPath, { force: true });
     }
   }
 
@@ -583,14 +566,7 @@ export class Environment {
       return false;
     }
 
-    await fs.mkdir(path.dirname(localPath), { recursive: true, mode: 0o700 });
-    const partialPath = `${localPath}.part`;
-    try {
-      await fs.writeFile(partialPath, content, { mode: 0o600 });
-      await fs.rename(partialPath, localPath);
-    } finally {
-      await fs.rm(partialPath, { force: true });
-    }
+    await writeLocalFile(localPath, content);
     return true;
   }
 

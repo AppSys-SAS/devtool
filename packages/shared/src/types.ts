@@ -199,8 +199,30 @@ export interface EnvironmentTablesPayload {
   error: string | null;
 }
 
+/** Configuration files of the development environment that can be edited. */
+export interface ConfigFilesPayload {
+  paths: string[];
+}
+
+/** A configuration file of the development environment, as its local copy stands. */
+export interface ConfigFilePayload {
+  path: string;
+  /** Content of the local copy, null when there is none. */
+  content: string | null;
+  /** Last change of the local copy, in ISO format, null when there is none. */
+  updatedAt: string | null;
+  /** Whether the local copy was just replaced by a write. */
+  saved: boolean;
+  /** Whether a write was refused because the local copy changed since it was read. */
+  conflict: boolean;
+  /** Why the file could not be read or written. */
+  error: string | null;
+}
+
 export interface WsPayloadMap {
   config: ClientConfigPayload;
+  configFiles: ConfigFilesPayload;
+  configFile: ConfigFilePayload;
   cdnSession: CdnSessionPayload;
   environment: EnvironmentPayload;
   environmentTables: EnvironmentTablesPayload;

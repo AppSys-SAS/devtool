@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
+import { RouterLink } from "vue-router";
 import {
   ArrowDownToLine,
   ArrowUpFromLine,
@@ -10,6 +11,7 @@ import {
   Loader2,
   MemoryStick,
   Package,
+  Pencil,
   RefreshCw,
   SkipForward,
   TriangleAlert,
@@ -500,8 +502,17 @@ onMounted(() => wsStore.envRefresh());
                 />
               </div>
               <div class="min-w-0">
-                <div class="truncate font-mono text-sm">
-                  {{ item.path }}
+                <div class="flex items-center gap-1.5">
+                  <span class="truncate font-mono text-sm">{{ item.path }}</span>
+                  <RouterLink
+                    v-if="item.kind === 'file'"
+                    :to="{ name: 'configs', query: { path: item.path } }"
+                    title="Edit the local copy"
+                    class="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                    @click.stop
+                  >
+                    <Pencil class="size-3.5" />
+                  </RouterLink>
                 </div>
                 <div class="truncate text-xs text-muted-foreground">
                   {{ describeItem(item) }}

@@ -1,6 +1,7 @@
 import { ref } from "vue";
 import type { EnvironmentKeyChoicePayload } from "@appsys/devtool-shared";
 import configStore from "./config";
+import configFilesStore from "./config-files";
 import environmentStore from "./environment";
 import sessionStore from "./session";
 
@@ -39,6 +40,12 @@ class WsStore {
               this.connected.value = true;
             }
             configStore.loadConfig(payload.data as never);
+            break;
+          case "configFiles":
+            configFilesStore.loadPaths(payload.data as never);
+            break;
+          case "configFile":
+            configFilesStore.loadFile(payload.data as never);
             break;
           case "cdnSession":
             sessionStore.load(payload.data as never);
@@ -201,6 +208,24 @@ class WsStore {
     this.send("envDismissRun", {});
   }
 
+  /**
+   * Asks the server for the local copy of a configuration file.
+   * @param path The path of the file.
+   */
+  configRead(path: string): void {
+    this.send("configRead", { path });
+  }
+
+  /**
+   * Asks the server to replace the local copy of a configuration file.
+   * @param path The path of the file.
+   * @param content The new content.
+   * @param baseUpdatedAt Last change of the copy the content was edited from, null when there was none.
+   */
+  configWrite(path: string, content: string, baseUpdatedAt: string | null): void {
+    this.send("configWrite", { path, content, baseUpdatedAt });
+  }
+
   disconnect(alreadyClosed = false): void {
     if (!alreadyClosed && this.socket) {
       this.socket.close();
@@ -211,6 +236,7 @@ class WsStore {
     configStore.reset();
     sessionStore.load(null);
     environmentStore.load(null);
+    configFilesStore.loadPaths(null);
   }
 }
 

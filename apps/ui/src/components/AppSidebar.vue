@@ -3,7 +3,7 @@ import { computed, ref, watch } from "vue";
 import { RouterLink } from "vue-router";
 import { useColorMode } from "@vueuse/core";
 import { Icon } from "@iconify/vue";
-import { ArrowDownUp, Bookmark, Circle, FolderTree, Monitor, Moon, Play, RefreshCw, RotateCcw, Square, Sun } from '@lucide/vue'
+import { ArrowDownUp, Bookmark, Circle, FileCog, FolderTree, Monitor, Moon, Play, RefreshCw, RotateCcw, Square, Sun } from '@lucide/vue'
 import CdnSession from "@/components/CdnSession.vue";
 import SidebarStreamItem from "@/components/SidebarStreamItem.vue";
 import { Button } from "@/components/ui/button";
@@ -254,15 +254,6 @@ function resolveStreamIcon(directory: SidebarDirectory, stream: CommandStream): 
 
         <div class="flex items-center gap-1 rounded-md p-1">
           <Button
-            size="sm"
-            variant="ghost"
-            class="h-8 flex-1 justify-start gap-2"
-            @click="bookmarkedOnly = !bookmarkedOnly"
-          >
-            <Bookmark class="size-4" :class="{ 'fill-current': bookmarkedOnly }" />
-            Bookmarks
-          </Button>
-          <Button
             as-child
             size="sm"
             variant="ghost"
@@ -271,6 +262,17 @@ function resolveStreamIcon(directory: SidebarDirectory, stream: CommandStream): 
             <RouterLink :to="{ name: 'environment' }">
               <ArrowDownUp class="size-4" />
               Environment
+            </RouterLink>
+          </Button>
+          <Button
+            as-child
+            size="sm"
+            variant="ghost"
+            class="h-8 flex-1 justify-start gap-2"
+          >
+            <RouterLink :to="{ name: 'configs' }">
+              <FileCog class="size-4" />
+              Configs
             </RouterLink>
           </Button>
         </div>
@@ -416,6 +418,18 @@ function resolveStreamIcon(directory: SidebarDirectory, stream: CommandStream): 
         AppSys Devtool <sup>{{ appVersion }}</sup>
       </RouterLink>
 
+      <Button
+        size="icon"
+        variant="ghost"
+        class="ml-auto size-8 shrink-0"
+        title="Bookmarks only"
+        @click="bookmarkedOnly = !bookmarkedOnly"
+      >
+        <Bookmark
+          class="size-3.5"
+          :class="{ 'fill-current': bookmarkedOnly }"
+        />
+      </Button>
       <Button
         size="icon"
         variant="ghost"

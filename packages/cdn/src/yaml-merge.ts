@@ -34,7 +34,7 @@ function isMap(value: unknown): value is Record<string, unknown> {
  * @param label - Names the file in errors.
  * @returns The map, empty for an empty file.
  */
-function readMap(text: string, label: string): Record<string, unknown> {
+export function readMap(text: string, label: string): Record<string, unknown> {
   const document = parseDocument(text);
   if (document.errors.length > 0) {
     throw new Error(`${label} is not valid YAML: ${document.errors[0].message}`);

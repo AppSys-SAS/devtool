@@ -1,0 +1,76 @@
+<script setup lang="ts">
+import { computed } from "vue";
+import { Loader2, Save, TriangleAlert, Undo2 } from "@lucide/vue";
+import type { ConfigFilePayload } from "@appsys/devtool-shared";
+import { Button } from "@/components/ui/button";
+import { formatRelativeDate } from "@/lib/format";
+import { cn } from "@/lib/utils";
+
+const props = defineProps<{
+  path: string;
+  file: ConfigFilePayload | null;
+  dirty: boolean;
+  saving: boolean;
+}>();
+
+const emit = defineEmits<{
+  save: [];
+  revert: [];
+}>();
+
+const status = computed(() => {
+  if (props.dirty) {
+    return "Unsaved changes";
+  }
+
+  if (!props.file || props.file.error) {
+    return "";
+  }
+
+  return props.file.updatedAt ? `Changed ${formatRelativeDate(props.file.updatedAt)}` : "Not created yet";
+});
+</script>
+
+<template>
+  <div class="border-b">
+    <div class="flex items-center gap-3 px-4 py-2">
+      <span class="min-w-0 flex-1 truncate font-mono text-sm">~/.config/appsys/{{ path }}</span>
+      <span
+        :class="cn('shrink-0 text-xs', dirty ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground')"
+      >{{ status }}</span>
+      <Button
+        variant="outline"
+        size="sm"
+        :disabled="!dirty || saving"
+        @click="emit('revert')"
+      >
+        <Undo2 class="size-4" />
+        Revert
+      </Button>
+      <Button
+        size="sm"
+        :disabled="!dirty || saving"
+        @click="emit('save')"
+      >
+        <Loader2
+          v-if="saving"
+          class="size-4 animate-spin"
+        />
+        <Save
+          v-else
+          class="size-4"
+        />
+        Save
+      </Button>
+    </div>
+    <div
+      v-if="file?.error"
+      class="mx-4 mb-2 flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-2 text-sm text-destructive"
+    >
+      <TriangleAlert class="mt-0.5 size-4 shrink-0" />
+      <span class="whitespace-pre-wrap">
+        {{ file.error }}<template v-if="file.conflict">: save again to overwrite it, or revert to load it.</template>
+      </span>
+    </div>
+  </div>
+</template>

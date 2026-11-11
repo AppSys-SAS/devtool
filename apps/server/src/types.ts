@@ -91,6 +91,14 @@ export type ConnectionMessage =
       data: Record<string, never>;
     }
   | {
+      type: "configRead";
+      data: { path: string };
+    }
+  | {
+      type: "configWrite";
+      data: { path: string; content: string; baseUpdatedAt: string | null };
+    }
+  | {
       type: "newCommandStream";
       data: CommandStreamCreatePayload;
     }

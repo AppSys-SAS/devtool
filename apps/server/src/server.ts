@@ -3,6 +3,7 @@ import { logger } from "@appsys/devtool-shared";
 import type { WebSocket } from "ws";
 import { DevtoolCdnSession } from "./cdn-session.js";
 import { DevtoolCommandStream } from "./command-stream.js";
+import { DevtoolConfigFiles } from "./config-files.js";
 import { DevtoolConfigure } from "./configure.js";
 import { DevtoolEnvironment } from "./environment.js";
 import { DevtoolHttp } from "./http.js";
@@ -34,6 +35,8 @@ export class DevtoolServer {
   private readonly cdnSession: DevtoolCdnSession;
 
   private readonly environment: DevtoolEnvironment;
+
+  private readonly configFiles = new DevtoolConfigFiles();
 
   /**
    * @param configProvider Loads the configuration.
@@ -82,6 +85,7 @@ export class DevtoolServer {
    */
   async onNewConnection(ws: WebSocket): Promise<void> {
     await this.http.sendToWsConnections("config", this.configWrapper.getForClient(this.version), ws);
+    await this.http.sendToWsConnections("configFiles", this.configFiles.list(), ws);
     await this.http.sendToWsConnections("cdnSession", await this.cdnSession.status(), ws);
     await this.http.sendToWsConnections("environment", this.environment.state(), ws);
     for (const stream of this.commandStreams) {
@@ -148,6 +152,16 @@ export class DevtoolServer {
       return;
     }
 
+    if (message.type === "configRead") {
+      await this.http.sendToWsConnections("configFile", await this.configFiles.read(message.data.path), ws);
+      return;
+    }
+
+    if (message.type === "configWrite") {
+      await this.writeConfigFile(message.data.path, message.data.content, message.data.baseUpdatedAt, ws);
+      return;
+    }
+
     if (message.type === "newCommandStream") {
       await this.newCommandStream(message.data);
       return;
@@ -186,6 +200,27 @@ export class DevtoolServer {
     });
   }
 
+  /**
+   * Writes a configuration file, sends its new state to the interface that asked, then reloads the
+   * configuration when the file belongs to the devtool one and describes the environment again.
+   * @param path The path of the file.
+   * @param content Its new content.
+   * @param baseUpdatedAt Last change of the copy the content was edited from.
+   * @param ws The connection of the interface.
+   */
+  private async writeConfigFile(path: string, content: string, baseUpdatedAt: string | null, ws: WebSocket): Promise<void> {
+    const file = await this.configFiles.write(path, content, baseUpdatedAt);
+    await this.http.sendToWsConnections("configFile", file, ws);
+    if (!file.saved) {
+      return;
+    }
+
+    if (this.configFiles.isDevtoolConfig(path)) {
+      await this.reconfigure();
+    }
+    this.refreshEnvironment();
+  }
+
   async removeCommandStream(streamSlug: string): Promise<void> {
     this.commandStreams = this.commandStreams.filter((stream) => stream.slug !== streamSlug);
   }
@@ -200,6 +235,7 @@ export class DevtoolServer {
       await this.lb.recreate();
     }
     await this.http.sendToWsConnections("config", this.configWrapper.getForClient(this.version));
+    await this.http.sendToWsConnections("configFiles", this.configFiles.list());
     await this.cdnSession.publish();
   }
 
@@ -246,6 +282,7 @@ export class DevtoolServer {
     this.config = this.configWrapper.runtimeConfig;
     this.cdnSession.configure(nextConfig.raw.cdn);
     this.environment.configure(nextConfig.raw);
+    this.configFiles.configure(nextConfig.raw);
 
     if (nextConfig.loadedPaths.length) {
       logger.info("Server", "Config", `Loaded: ${nextConfig.loadedPaths.join(", ")}`);
