@@ -1,6 +1,17 @@
 /** Address the server listens on, so only this machine reaches it. */
 export const LISTEN_ADDRESS = "127.0.0.1";
 
+const ANSI_SEQUENCE = /\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]/g;
+
+/**
+ * Removes the terminal escape sequences of output, such as colors.
+ * @param text The output.
+ * @returns The plain text.
+ */
+export function stripAnsi(text: string): string {
+  return text.replace(ANSI_SEQUENCE, "");
+}
+
 export function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }

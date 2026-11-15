@@ -1,9 +1,9 @@
 import { OpTerminal } from "./op-terminal.js";
+import { stripAnsi } from "./utils.js";
 
 const VALUE_BLOCK = /\{\{\s*(.*?)\s*\}\}/gs;
 const SECRET_REFERENCE = /^op:\/\/\S+$/;
 const SHELL_SUBSTITUTION = /^\$\((.+)\)$/s;
-const ANSI_SEQUENCE = /\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]/g;
 const MAX_OUTPUT_LENGTH = 8192;
 const MIN_SCRUBBED_LENGTH = 4;
 const SCRUBBED = "••••";
@@ -154,7 +154,7 @@ export class AnswerMatcher {
       return null;
     }
 
-    this._output = `${this._output}${data.replace(ANSI_SEQUENCE, "")}`.slice(-MAX_OUTPUT_LENGTH);
+    this._output = `${this._output}${stripAnsi(data)}`.slice(-MAX_OUTPUT_LENGTH);
     for (const [index, answer] of this._pending.entries()) {
       const match = answer.pattern.exec(this._output);
       if (match) {

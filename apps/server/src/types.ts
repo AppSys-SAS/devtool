@@ -1,5 +1,5 @@
 import type { RawConfig } from "@appsys/devtool-config";
-import type { FileEntryPayload, RuntimeConfig } from "@appsys/devtool-shared";
+import type { FileEntryPayload, PortConflictAction, RuntimeConfig } from "@appsys/devtool-shared";
 import type { WebSocket } from "ws";
 import type { EnvironmentTarget } from "./environment.js";
 
@@ -56,6 +56,12 @@ export interface CommandStreamResizePayload {
   streamSlug: string;
   cols: number;
   rows: number;
+}
+
+/** Asks to free the port a command could not use, or to forget the conflict. */
+export interface CommandStreamPortConflictPayload {
+  streamSlug: string;
+  action: PortConflictAction;
 }
 
 export type ConnectionMessage =
@@ -142,6 +148,10 @@ export type ConnectionMessage =
   | {
       type: "streamResize";
       data: CommandStreamResizePayload;
+    }
+  | {
+      type: "portConflict";
+      data: CommandStreamPortConflictPayload;
     };
 
 export interface ServerContextLike {

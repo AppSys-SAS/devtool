@@ -3,7 +3,7 @@ import type { EnvironmentKeysPayload, EnvironmentPayload, EnvironmentTablesPaylo
 
 /**
  * Development environment as the server describes it, the tables of its databases and the keys
- * differing between the copies of its YAML files.
+ * differing between the copies of its configuration files.
  */
 class EnvironmentStore {
   state = ref<EnvironmentPayload | null>(null);
@@ -33,7 +33,7 @@ class EnvironmentStore {
   }
 
   /**
-   * Keeps the differing keys of a YAML file sent by the server.
+   * Keeps the differing keys of a configuration file sent by the server.
    * @param payload The differing keys of one file.
    */
   loadKeys(payload: EnvironmentKeysPayload): void {
@@ -41,7 +41,7 @@ class EnvironmentStore {
   }
 
   /**
-   * Forgets the differing keys of a YAML file, before asking for them again.
+   * Forgets the differing keys of a configuration file, before asking for them again.
    * @param path The path of the file.
    */
   forgetKeys(path: string): void {

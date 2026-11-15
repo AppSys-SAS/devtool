@@ -7,6 +7,7 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Terminal } from "@xterm/xterm";
 import { Eraser, Play, RotateCcw, Search, Square, Trash2 } from "@lucide/vue";
 import router from "@/router";
+import PortConflictBanner from "@/components/PortConflictBanner.vue";
 import SidebarToggle from "@/components/SidebarToggle.vue";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -69,6 +70,7 @@ let searchAddon: SearchAddon | null = null;
 let resizeObserver: ResizeObserver | null = null;
 let outputStore: CommandStreamOutputStore | null = null;
 let fitFrame: number | null = null;
+let replaying = false;
 
 const outputListener = (event: Event): void => {
   if (!(event instanceof CustomEvent) || !terminal) {
@@ -107,6 +109,11 @@ function formatDate(value: number, diffWith?: number): string {
   return str;
 }
 
+/**
+ * Shows the output kept for the stream, then follows the new output. While the kept output is
+ * written, the answers the terminal gives to the queries it holds are not sent to the command, which
+ * asked them long ago.
+ */
 function syncOutputStore(): void {
   if (!terminal) {
     return;
@@ -118,10 +125,13 @@ function syncOutputStore(): void {
 
   outputStore = outputStoreRef.value;
   terminal.clear();
-  const output = outputStore?.output ?? [];
-  for (const line of output) {
+  replaying = true;
+  for (const line of outputStore?.output ?? []) {
     writeLine(line);
   }
+  terminal.write("", () => {
+    replaying = false;
+  });
   terminal.scrollToBottom();
 
   if (outputStore) {
@@ -227,7 +237,11 @@ onMounted(() => {
   );
 
   terminal.unicode.activeVersion = "11";
-  terminal.onData((data) => wsStore.streamInput(props.streamSlug, data));
+  terminal.onData((data) => {
+    if (!replaying) {
+      wsStore.streamInput(props.streamSlug, data);
+    }
+  });
   terminal.onKey((event) => {
     if (event.domEvent.ctrlKey && event.domEvent.key === "f") {
       event.domEvent.preventDefault();
@@ -387,6 +401,12 @@ watch(
         </p>
       </div>
     </section>
+
+    <PortConflictBanner
+      v-if="stream.portConflict"
+      :conflict="stream.portConflict"
+      @resolve="wsStore.resolvePortConflict(stream.slug, $event)"
+    />
 
     <footer class="mx-3 mb-3 mt-2 flex flex-wrap items-center gap-1 rounded-md border bg-card p-2">
       <SidebarToggle

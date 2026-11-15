@@ -1,6 +1,7 @@
 import {
   CdnClient,
   type CdnOptions,
+  configFormatOf,
   type CopyInfo,
   Environment,
   type EnvironmentOptions,
@@ -22,7 +23,7 @@ import type {
   EnvironmentTablesPayload,
 } from "@appsys/devtool-shared";
 
-/** An item asked for by the interface, whole or restricted to some tables of a database or keys of a YAML file. */
+/** An item asked for by the interface, whole or restricted to some tables of a database or keys of a configuration file. */
 export interface EnvironmentTarget {
   path: string;
   tables: string[] | null;
@@ -109,6 +110,7 @@ export class DevtoolEnvironment {
         container: item.kind === "database" ? item.container : null,
         bucket: item.kind === "bucket" ? item.bucket : null,
         redis: item.kind === "redis" ? redisDatabaseName(item.url) : null,
+        keyed: item.kind === "file" && configFormatOf(item.path) !== null,
         local: local ? copyPayload(local) : null,
         remote: remote === "unknown" || remote === null ? remote : copyPayload(remote),
         synced: synced ? { localUpdatedAt: synced.localUpdatedAt.toISOString(), remoteUpdatedAt: synced.remoteUpdatedAt.toISOString() } : null,
@@ -162,7 +164,7 @@ export class DevtoolEnvironment {
   }
 
   /**
-   * Lists the keys whose values differ between the local and CDN copies of a YAML item.
+   * Lists the keys whose values differ between the local and CDN copies of a configuration file.
    *
    * @param path - The path of the item.
    * @returns The differing keys, or why they could not be listed.
@@ -207,7 +209,7 @@ export class DevtoolEnvironment {
    * items again. A request while a run is in progress does nothing.
    *
    * @param direction - Whether the CDN copies replace the local ones, or the reverse.
-   * @param targets - The items, with the tables of the databases and the keys of the YAML files.
+   * @param targets - The items, with the tables of the databases and the keys of the configuration files.
    */
   async run(direction: "pull" | "push", targets: EnvironmentTarget[]): Promise<void> {
     const environment = this.environment();

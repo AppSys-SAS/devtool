@@ -20,7 +20,7 @@ import {
 } from "@lucide/vue";
 import type { EnvironmentCopyPayload, EnvironmentItemPayload, EnvironmentKeyChoicePayload, EnvironmentStepPayload } from "@appsys/devtool-shared";
 import ConfirmDialog from "@/components/ConfirmDialog.vue";
-import YamlKeyChooser from "@/components/YamlKeyChooser.vue";
+import ConfigKeyChooser from "@/components/ConfigKeyChooser.vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -219,17 +219,17 @@ function chooseWhole(path: string, whole: boolean): void {
 }
 
 /**
- * Tells whether the keys of an item can be chosen one by one: a YAML file present on both sides.
+ * Tells whether the keys of an item can be chosen one by one: a configuration file present on both sides.
  * @param item The item.
  * @returns True for such a file.
  */
 function hasKeys(item: EnvironmentItemPayload): boolean {
-  return item.kind === "file" && /\.ya?ml$/.test(item.path) && item.local !== null && item.remote !== null && item.remote !== "unknown";
+  return item.keyed && item.local !== null && item.remote !== null && item.remote !== "unknown";
 }
 
 /**
  * Gives the copy a differing key takes until the developer chooses: the newer one.
- * @param item The YAML file item.
+ * @param item The configuration file item.
  * @returns The CDN when its copy is newer, the local copy otherwise.
  */
 function defaultSideOf(item: EnvironmentItemPayload): Side {
@@ -238,7 +238,7 @@ function defaultSideOf(item: EnvironmentItemPayload): Side {
 
 /**
  * Chooses between the whole file and some of its keys, asking the server for the differing keys.
- * @param path The path of the YAML file item.
+ * @param path The path of the configuration file item.
  * @param whole Whether the whole file is transferred.
  */
 function chooseWholeFile(path: string, whole: boolean): void {
@@ -250,8 +250,8 @@ function chooseWholeFile(path: string, whole: boolean): void {
 }
 
 /**
- * Keeps the copies chosen for the differing keys of a YAML file.
- * @param path The path of the YAML file item.
+ * Keeps the copies chosen for the differing keys of a configuration file.
+ * @param path The path of the configuration file item.
  * @param keys The copy of each key.
  */
 function setKeys(path: string, keys: Record<string, Side>): void {
@@ -580,7 +580,7 @@ onMounted(() => wsStore.envRefresh());
                 >
                   {{ environmentStore.keys.value[item.path].error }}
                 </div>
-                <YamlKeyChooser
+                <ConfigKeyChooser
                   v-else
                   :model-value="selected[item.path].keys!"
                   :entries="environmentStore.keys.value[item.path].entries"

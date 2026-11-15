@@ -8,10 +8,18 @@ import { localPathOf, writeLocalFile } from "./directory.js";
 import { databaseEngine, type DatabaseEngineName, isDatabaseEngineName } from "./engines.js";
 import { listRedisGroups, redisDatabaseName, redisRecordGroup, restoreRedis, snapshotRedis } from "./redis.js";
 import { readSyncJournal, type SyncRecord, writeSyncRecord } from "./sync-journal.js";
-import { countChoices, diffYaml, mergeYaml, type YamlDifference, type YamlKeyChoice } from "./yaml-merge.js";
+import { type ConfigFormat, configFormatOf, countChoices, diffConfig, type KeyChoice, type KeyDifference, mergeConfig } from "./config-merge.js";
 
 /** Path of the shared devtool configuration, always part of the environment. */
 export const SHARED_CONFIG_PATH = "devtool/config.yml";
+
+const MEDIA_TYPES: Record<string, string> = {
+  ".yml": "application/yaml",
+  ".yaml": "application/yaml",
+  ".json": "application/json",
+  ".env": "text/plain",
+  ".gz": "application/gzip",
+};
 
 /** A file of the environment: a configuration, a database archive, a bucket or a Redis database snapshot. */
 export type EnvironmentItem =
@@ -30,8 +38,8 @@ export interface EnvironmentOptions {
 export interface EnvironmentSelection {
   item: EnvironmentItem;
   tables: string[] | null;
-  /** For a YAML file, the value to keep for each differing key; the whole file when missing. */
-  keys?: YamlKeyChoice[] | null;
+  /** For a configuration file, the value to keep for each differing key; the whole file when missing. */
+  keys?: KeyChoice[] | null;
 }
 
 /** Outcome of the transfer of one item. */
@@ -183,7 +191,8 @@ export function overwritesLocalData(selection: EnvironmentSelection): boolean {
  * @returns The media type.
  */
 function mediaTypeOf(filePath: string): string {
-  return filePath.endsWith(".yml") ? "application/yaml" : filePath.endsWith(".gz") ? "application/gzip" : "application/octet-stream";
+  const extension = path.extname(filePath);
+  return MEDIA_TYPES[extension] ?? "application/octet-stream";
 }
 
 /**
@@ -252,7 +261,7 @@ export class Environment {
   /**
    * Replaces the local copy of an item, and the local data it holds, by the one of the CDN.
    *
-   * @param selection - The item, the tables or key groups to restore, or the keys to take for a YAML file.
+   * @param selection - The item, the tables or key groups to restore, or the keys to take for a configuration file.
    * @returns What was done.
    */
   async pull(selection: EnvironmentSelection): Promise<TransferResult> {
@@ -326,7 +335,7 @@ export class Environment {
   /**
    * Sends the local copy of an item to the CDN, after dumping the local data it holds. For some tables of a database, only their rows are replaced in the stored archive.
    *
-   * @param selection - The item, the tables or key groups to dump, or the keys to send for a YAML file.
+   * @param selection - The item, the tables or key groups to dump, or the keys to send for a configuration file.
    * @returns What was done.
    */
   async push(selection: EnvironmentSelection): Promise<TransferResult> {
@@ -353,29 +362,29 @@ export class Environment {
   }
 
   /**
-   * Lists the keys whose values differ between the local and CDN copies of a YAML file.
+   * Lists the keys whose values differ between the local and CDN copies of a configuration file.
    *
    * @param item - The file item.
    * @returns The differing keys.
    */
-  async diffKeys(item: EnvironmentItem): Promise<YamlDifference[]> {
-    const { local, remote } = await this.readBothCopies(item.path);
-    return diffYaml(local, remote);
+  async diffKeys(item: EnvironmentItem): Promise<KeyDifference[]> {
+    const { format, local, remote } = await this.readBothCopies(item.path);
+    return diffConfig(format, local, remote);
   }
 
   /**
-   * Writes in the local copy of a YAML file the CDN values chosen for its differing keys.
+   * Writes in the local copy of a configuration file the CDN values chosen for its differing keys.
    *
    * @param filePath - The path of the file.
    * @param keys - The value to keep for each differing key.
    * @returns What was done.
    */
-  private async pullKeys(filePath: string, keys: YamlKeyChoice[]): Promise<TransferResult> {
-    const { local, remote } = await this.readBothCopies(filePath);
-    const differences = diffYaml(local, remote);
-    const merged = mergeYaml(local, "local", differences, keys);
+  private async pullKeys(filePath: string, keys: KeyChoice[]): Promise<TransferResult> {
+    const { format, local, remote } = await this.readBothCopies(filePath);
+    const differences = diffConfig(format, local, remote);
+    const merged = mergeConfig(format, local, "local", differences, keys);
     await writeLocalFile(localPathOf(filePath), merged);
-    if (diffYaml(merged, remote).length === 0) {
+    if (diffConfig(format, merged, remote).length === 0) {
       await this.recordSync(filePath);
     }
 
@@ -384,17 +393,17 @@ export class Environment {
   }
 
   /**
-   * Sends to the CDN its copy of a YAML file with the local values chosen for its differing keys,
-   * leaving the local copy as it is.
+   * Sends to the CDN its copy of a configuration file with the local values chosen for its
+   * differing keys, leaving the local copy as it is.
    *
    * @param filePath - The path of the file.
    * @param keys - The value to keep for each differing key.
    * @returns What was done.
    */
-  private async pushKeys(filePath: string, keys: YamlKeyChoice[]): Promise<TransferResult> {
-    const { local, remote } = await this.readBothCopies(filePath);
-    const differences = diffYaml(local, remote);
-    const merged = mergeYaml(remote, "remote", differences, keys);
+  private async pushKeys(filePath: string, keys: KeyChoice[]): Promise<TransferResult> {
+    const { format, local, remote } = await this.readBothCopies(filePath);
+    const differences = diffConfig(format, local, remote);
+    const merged = mergeConfig(format, remote, "remote", differences, keys);
     const mergedPath = `${localPathOf(filePath)}.merged`;
     try {
       await fs.writeFile(mergedPath, merged, { mode: 0o600 });
@@ -402,7 +411,7 @@ export class Environment {
     } finally {
       await fs.rm(mergedPath, { force: true });
     }
-    if (diffYaml(local, merged).length === 0) {
+    if (diffConfig(format, local, merged).length === 0) {
       await this.recordSync(filePath);
     }
 
@@ -411,14 +420,15 @@ export class Environment {
   }
 
   /**
-   * Reads the local and CDN copies of a YAML file, without replacing the local one.
+   * Reads the local and CDN copies of a configuration file, without replacing the local one.
    *
    * @param filePath - The path of the file.
-   * @returns Both texts.
+   * @returns Its format and both texts.
    */
-  private async readBothCopies(filePath: string): Promise<{ local: string; remote: string }> {
-    if (!/\.ya?ml$/.test(filePath)) {
-      throw new Error(`${filePath} is not a YAML file`);
+  private async readBothCopies(filePath: string): Promise<{ format: ConfigFormat; local: string; remote: string }> {
+    const format = configFormatOf(filePath);
+    if (!format) {
+      throw new Error(`${filePath} cannot be merged key by key: YAML, JSON and .env files only`);
     }
 
     const remotePath = `${localPathOf(filePath)}.remote`;
@@ -430,7 +440,7 @@ export class Environment {
       const local = await fs.readFile(localPathOf(filePath), "utf-8").catch(() => {
         throw new Error(`no local file ${localPathOf(filePath)}`);
       });
-      return { local, remote: await fs.readFile(remotePath, "utf-8") };
+      return { format, local, remote: await fs.readFile(remotePath, "utf-8") };
     } finally {
       await fs.rm(remotePath, { force: true });
     }

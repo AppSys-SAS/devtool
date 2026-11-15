@@ -1,57 +1,23 @@
 import fs from "node:fs/promises";
 import http from "node:http";
+import http2 from "node:http2";
 import net from "node:net";
-import { Duplex } from "node:stream";
 import tls from "node:tls";
 import { logger } from "@appsys/devtool-shared";
-import type { IncomingMessage, ServerResponse } from "node:http";
+import type { IncomingMessage } from "node:http";
 import type { Socket } from "node:net";
 import type { RuntimeConfig } from "@appsys/devtool-shared";
-import { allows, matchesHost, rememberClientAddress } from "./access.js";
+import { allows, forgetRelayedClient, matchesHost, rememberRelayedClient } from "./access.js";
 import { DevtoolDns } from "./dns.js";
-import { DevtoolProxy } from "./proxy.js";
+import { DevtoolProxy, type ProxyRequest, type ProxyResponse, requestHost } from "./proxy.js";
 import { readServerName } from "./sni.js";
 import type { LoadBalancerContext } from "./types.js";
 
 /** The load balancer listens on every interface, who reaches each host being decided per host. */
 const LB_LISTEN_ADDRESS = "0.0.0.0";
+const LOOPBACK_ADDRESS = "127.0.0.1";
 const MAX_CLIENT_HELLO_BYTES = 64 * 1024;
 const CLIENT_HELLO_TIMEOUT_MS = 10_000;
-
-/**
- * Gives a stream that replays the bytes already read from a connection, then carries the rest of it
- * both ways.
- * @param socket The connection, paused.
- * @param received The bytes already read from it.
- * @returns The stream.
- */
-function replay(socket: Socket, received: Buffer): Duplex {
-  const stream = new Duplex({
-    read() {
-      socket.resume();
-    },
-    write(chunk: Buffer, encoding, callback) {
-      socket.write(chunk, encoding, callback);
-    },
-    final(callback) {
-      socket.end();
-      callback();
-    },
-    destroy(error, callback) {
-      socket.destroy();
-      callback(error);
-    },
-  });
-  stream.push(received);
-  socket.on("data", (chunk: Buffer) => {
-    if (!stream.push(chunk)) {
-      socket.pause();
-    }
-  });
-  socket.on("end", () => stream.push(null));
-  socket.on("close", () => stream.destroy());
-  return stream;
-}
 
 export class DevtoolLB {
   private readonly serverContext: LoadBalancerContext;
@@ -60,11 +26,14 @@ export class DevtoolLB {
 
   private certificates: Record<string, tls.SecureContext>;
 
-  /** The listening server: the TLS front reading the server names, or the HTTP server itself. */
+  /** The certificate given to clients naming no server: the first one declared, null without any. */
+  private defaultCertificate: { cert: string; key: string } | null;
+
+  /** The listening server: the TLS front reading the server names, or the plain HTTP server. */
   private server: net.Server | null;
 
-  /** The HTTP server answering the requests, given its TLS connections by the front. */
-  private httpServer: http.Server | null;
+  /** The HTTP/2 and HTTP/1.1 server behind the TLS front, listening on this machine only. */
+  private secureServer: http2.Http2SecureServer | null;
 
   private isSecure: boolean;
 
@@ -78,8 +47,9 @@ export class DevtoolLB {
     this.serverContext = serverContext;
     this.proxy = new DevtoolProxy();
     this.certificates = {};
+    this.defaultCertificate = null;
     this.server = null;
-    this.httpServer = null;
+    this.secureServer = null;
     this.isSecure = false;
   }
 
@@ -110,17 +80,25 @@ export class DevtoolLB {
       await this.dns.apply(config.dns);
     }
     this.certificates = {};
+    this.defaultCertificate = null;
 
     for (const [serverName, options] of Object.entries(config.loadBalancers)) {
       const cert = await this.resolveCertificateInput(options.crt);
       const key = await this.resolveCertificateInput(options.key);
 
       this.certificates[serverName] = tls.createSecureContext({ cert, key });
+      this.defaultCertificate ??= { cert, key };
+    }
+    if (this.defaultCertificate) {
+      this.secureServer?.setSecureContext(this.defaultCertificate);
     }
 
     return shouldRecreate;
   }
 
+  /**
+   * Creates the servers again for a new port or security, listening again when they were.
+   */
   async recreate(): Promise<void> {
     if (!this.server) {
       return;
@@ -130,6 +108,8 @@ export class DevtoolLB {
     if (wasListening) {
       await new Promise<void>((resolve) => this.server?.close(() => resolve()));
     }
+    this.secureServer?.close();
+    this.secureServer = null;
     await this.createServer();
     if (wasListening) {
       await this.listen(port);
@@ -167,22 +147,27 @@ export class DevtoolLB {
   }
 
   /**
-   * Creates the servers of the load balancer: the HTTP server answering the requests and, with
-   * certificates, the TLS front listening before it and reading the server name of each connection.
+   * Creates the servers of the load balancer: with certificates, the TLS front reading the server
+   * name of each connection and the HTTP/2 and HTTP/1.1 server it relays them to, listening on this
+   * machine; without, a plain HTTP server.
    */
   private async createServer(): Promise<void> {
-    this.httpServer = http.createServer(this.onRequest.bind(this));
-    this.httpServer.on("upgrade", this.onUpgrade.bind(this));
-    this.isSecure = Object.keys(this.certificates).length > 0;
-    if (this.isSecure) {
-      this.server = net.createServer(this.onConnection.bind(this));
+    this.isSecure = this.defaultCertificate !== null;
+    if (!this.defaultCertificate) {
+      if (this.serverContext.config.passthrough.length) {
+        logger.warn("LoadBalancer", "Passthrough", "Ignored without certificates: it needs TLS");
+      }
+      const server = http.createServer((req, res) => this.onRequest(req, res));
+      server.on("upgrade", (req: IncomingMessage, socket: Socket, head: Buffer) => this.onUpgrade(req, socket, head));
+      this.server = server;
       return;
     }
 
-    if (this.serverContext.config.passthrough.length) {
-      logger.warn("LoadBalancer", "Passthrough", "Ignored without certificates: it needs TLS");
-    }
-    this.server = this.httpServer;
+    const secureServer = http2.createSecureServer({ ...this.defaultCertificate, allowHTTP1: true, SNICallback: this.sniCallback.bind(this) }, (req, res) => this.onRequest(req, res));
+    secureServer.on("upgrade", (req: IncomingMessage, socket: Socket, head: Buffer) => this.onUpgrade(req, socket, head));
+    await new Promise<void>((resolve) => secureServer.listen(0, LOOPBACK_ADDRESS, resolve));
+    this.secureServer = secureServer;
+    this.server = net.createServer(this.onConnection.bind(this));
   }
 
   /**
@@ -211,7 +196,7 @@ export class DevtoolLB {
 
   /**
    * Forwards a TLS connection untouched to the target of its passthrough host, closes it when the client
-   * may not reach its host, or opens its TLS session for the HTTP server, the client address kept.
+   * may not reach its host, or relays it to the HTTP server behind the front, the client address kept.
    * @param socket The connection of the client, paused.
    * @param received The bytes already read from it.
    * @param serverName The server name of its ClientHello, null when it named none.
@@ -225,13 +210,7 @@ export class DevtoolLB {
         return;
       }
 
-      const upstream = net.connect(passthrough.port, passthrough.host, () => {
-        upstream.write(received);
-        socket.pipe(upstream).pipe(socket);
-        socket.resume();
-      });
-      upstream.on("error", () => socket.destroy());
-      socket.on("close", () => upstream.destroy());
+      this.relay(socket, received, passthrough.port, passthrough.host);
       return;
     }
 
@@ -242,15 +221,36 @@ export class DevtoolLB {
       return;
     }
 
-    const tlsSocket = new tls.TLSSocket(replay(socket, received), {
-      isServer: true,
-      secureContext: Object.values(this.certificates)[0],
-      SNICallback: this.sniCallback.bind(this),
-      ALPNProtocols: ["http/1.1"],
+    const address = this.secureServer?.address();
+    if (!address || typeof address === "string") {
+      socket.destroy();
+      return;
+    }
+    this.relay(socket, received, address.port, LOOPBACK_ADDRESS, socket.remoteAddress);
+  }
+
+  /**
+   * Relays a connection to another server, the bytes already read first.
+   * @param socket The connection of the client, paused.
+   * @param received The bytes already read from it.
+   * @param port The port of the server.
+   * @param host The address of the server.
+   * @param client The client address the server is told of, none for a server outside the devtool.
+   */
+  private relay(socket: Socket, received: Buffer, port: number, host: string, client?: string): void {
+    let localPort: number | undefined;
+    const upstream = net.connect(port, host, () => {
+      localPort = upstream.localPort;
+      if (client) {
+        rememberRelayedClient(localPort, client);
+      }
+      upstream.write(received);
+      socket.pipe(upstream).pipe(socket);
+      socket.resume();
     });
-    rememberClientAddress(tlsSocket, socket.remoteAddress);
-    tlsSocket.on("error", () => tlsSocket.destroy());
-    this.httpServer?.emit("connection", tlsSocket);
+    upstream.on("close", () => forgetRelayedClient(localPort));
+    upstream.on("error", () => socket.destroy());
+    socket.on("close", () => upstream.destroy());
   }
 
   private async resolveCertificateInput(input: string): Promise<string> {
@@ -265,28 +265,34 @@ export class DevtoolLB {
     }
   }
 
-  private onRequest(req: IncomingMessage, res: ServerResponse): void {
-    const host = (req.headers.host ?? "").split(":")[0] ?? "";
-    req.headers.host = host;
-
+  /**
+   * Proxies a request to the server of its host, or answers 404 when no server serves it.
+   * @param req The request, HTTP/1.1 or HTTP/2.
+   * @param res Its response.
+   */
+  private onRequest(req: ProxyRequest, res: ProxyResponse): void {
     if (this.proxy.proxyRequest(req, res)) {
       return;
     }
 
-    logger.warn("LoadBalancer", host, "No proxy found");
+    logger.warn("LoadBalancer", requestHost(req), "No proxy found");
     res.writeHead(404);
     res.end("404 Not Found");
   }
 
+  /**
+   * Proxies a WebSocket upgrade to the server of its host, or closes the connection when no server
+   * serves it.
+   * @param req The upgrade request.
+   * @param socket The connection of the client.
+   * @param head The first bytes of the upgraded stream.
+   */
   private onUpgrade(req: IncomingMessage, socket: Socket, head: Buffer): void {
-    const host = (req.headers.host ?? "").split(":")[0] ?? "";
-    req.headers.host = host;
-
     if (this.proxy.proxyUpgrade(req, socket, head)) {
       return;
     }
 
-    logger.warn("LoadBalancer", host, "No proxy found");
+    logger.warn("LoadBalancer", requestHost(req), "No proxy found");
     socket.destroy();
   }
 

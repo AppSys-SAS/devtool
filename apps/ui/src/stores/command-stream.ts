@@ -1,4 +1,4 @@
-import type { StreamUpdatePayload } from "@appsys/devtool-shared";
+import type { PortConflict, StreamUpdatePayload } from "@appsys/devtool-shared";
 import type { CommandStream } from "@/types";
 
 export const STREAM_STATUS = {
@@ -42,6 +42,8 @@ export class CommandStreamStore implements CommandStream {
 
   exitCode: number | null = null;
 
+  portConflict: PortConflict | null = null;
+
   status: CommandStream["status"] = STREAM_STATUS.STOPPED;
 
   unread = false;
@@ -64,6 +66,7 @@ export class CommandStreamStore implements CommandStream {
     this.runningArgs = payload.runningArgs;
     this.stoppedDate = payload.stoppedDate;
     this.exitCode = payload.exitCode;
+    this.portConflict = payload.portConflict;
 
     if (this.runningDate && !this.stoppedDate) {
       this.status = STREAM_STATUS.RUNNING;

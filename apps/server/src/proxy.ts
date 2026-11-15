@@ -1,14 +1,64 @@
 import http from "node:http";
+import type { Http2ServerRequest } from "node:http2";
 import https from "node:https";
-import httpProxy from "http-proxy";
 import { logger } from "@appsys/devtool-shared";
-import type { IncomingMessage, ServerResponse } from "node:http";
+import type { IncomingMessage, OutgoingHttpHeaders } from "node:http";
 import type { Socket } from "node:net";
 import type { HostAccess, RuntimeConfig } from "@appsys/devtool-shared";
 import { allows, clientAddressOf } from "./access.js";
 
 const httpAgent = new http.Agent({ keepAlive: true });
 const httpsAgent = new https.Agent({ keepAlive: true });
+
+/** Headers describing a single connection, never forwarded from one connection to another. */
+const CONNECTION_HEADERS = new Set(["connection", "keep-alive", "proxy-connection", "transfer-encoding", "upgrade", "te", "http2-settings", "host"]);
+
+/** A request the load balancer receives, over HTTP/1.1 or HTTP/2. */
+export type ProxyRequest = IncomingMessage | Http2ServerRequest;
+
+/** The response to a request the load balancer receives, over HTTP/1.1 or HTTP/2. */
+export interface ProxyResponse extends NodeJS.WritableStream {
+  readonly headersSent: boolean;
+  writeHead(statusCode: number, headers?: OutgoingHttpHeaders): unknown;
+}
+
+/**
+ * Gives the host name a request is sent to.
+ * @param request The request.
+ * @returns The host name, lower case, without port.
+ */
+export function requestHost(request: ProxyRequest): string {
+  const authority = request.headers[":authority"] ?? request.headers.host ?? "";
+  return String(authority).split(":")[0].toLowerCase();
+}
+
+/**
+ * Copies the headers of a response, without those describing its connection.
+ * @param response The response.
+ * @returns The headers to send on.
+ */
+function responseHeaders(response: IncomingMessage): OutgoingHttpHeaders {
+  const headers: OutgoingHttpHeaders = {};
+  for (const [name, value] of Object.entries(response.headers)) {
+    if (value !== undefined && !CONNECTION_HEADERS.has(name)) {
+      headers[name] = value;
+    }
+  }
+  return headers;
+}
+
+/**
+ * Writes the status line and the headers of a response on a raw connection.
+ * @param socket The connection.
+ * @param response The response.
+ */
+function writeHead(socket: Socket, response: IncomingMessage): void {
+  const lines = [`HTTP/1.1 ${response.statusCode ?? 502} ${response.statusMessage ?? ""}`];
+  for (let index = 0; index < response.rawHeaders.length; index += 2) {
+    lines.push(`${response.rawHeaders[index]}: ${response.rawHeaders[index + 1]}`);
+  }
+  socket.write(`${lines.join("\r\n")}\r\n\r\n`);
+}
 
 interface ServerCandidate {
   slug: string;
@@ -51,29 +101,10 @@ function readUiProxyTarget(uiPath: string | undefined): { url: string; tls: bool
 }
 
 export class DevtoolProxy {
-  private readonly proxy: httpProxy;
-
   private serversAvailable: ServerCandidate[];
 
   constructor() {
-    this.proxy = httpProxy.createProxyServer({
-      ws: true,
-      changeOrigin: true,
-    });
     this.serversAvailable = [];
-
-    this.proxy.on("error", (error, _req, res) => {
-      logger.warn("Proxy", "HTTP", error.message);
-      if (!res || !(res as ServerResponse).writeHead) {
-        return;
-      }
-      try {
-        (res as ServerResponse).writeHead(503);
-        (res as ServerResponse).end("503 Service Unavailable");
-      } catch {
-        // No-op.
-      }
-    });
   }
 
   /**
@@ -145,16 +176,14 @@ export class DevtoolProxy {
   }
 
   /**
-   * Proxies an HTTP request to the server matching its host and path, reusing upstream connections,
-   * or answers 403 when the client may not reach that server.
+   * Proxies an HTTP/1.1 or HTTP/2 request to the server matching its host and path, reusing upstream
+   * connections, answering 403 when the client may not reach that server and 503 when it is down.
    * @param req Incoming request.
    * @param res Response to write to.
    * @returns True when a server matched, the request being proxied or refused.
    */
-  proxyRequest(req: IncomingMessage, res: ServerResponse): boolean {
-    const host = this.getHost(req);
-    const url = req.url ?? "/";
-    const server = this.getMatchServer(host, url);
+  proxyRequest(req: ProxyRequest, res: ProxyResponse): boolean {
+    const server = this.getMatchServer(requestHost(req), req.url ?? "/");
     if (!server) {
       return false;
     }
@@ -167,17 +196,28 @@ export class DevtoolProxy {
       return true;
     }
 
-    const target = this.nextTarget(server);
-    this.applyForwardedHeaders(req, target);
-    this.rewriteRequest(req, server);
-    logger.debug("Proxy", `${server.slug}:${target.url}`, req.url ?? "/");
-
-    this.proxy.web(req, res, {
-      target: target.url,
-      changeOrigin: !server.preserveHost,
-      agent: target.url.startsWith("https:") ? httpsAgent : httpAgent,
+    let completed = false;
+    const outgoing = this.openRequest(req, server, this.nextTarget(server), client, false);
+    outgoing.on("response", (response) => {
+      res.writeHead(response.statusCode ?? 502, responseHeaders(response));
+      response.on("end", () => (completed = true));
+      response.pipe(res);
     });
-
+    outgoing.on("error", (error) => {
+      logger.warn("Proxy", server.slug, error.message);
+      if (res.headersSent) {
+        res.end();
+        return;
+      }
+      res.writeHead(503);
+      res.end("503 Service Unavailable");
+    });
+    res.on("close", () => {
+      if (!completed) {
+        outgoing.destroy();
+      }
+    });
+    req.pipe(outgoing);
     return true;
   }
 
@@ -190,9 +230,7 @@ export class DevtoolProxy {
    * @returns True when a server matched, the upgrade being proxied or refused.
    */
   proxyUpgrade(req: IncomingMessage, socket: Socket, head: Buffer): boolean {
-    const host = this.getHost(req);
-    const url = req.url ?? "/";
-    const server = this.getMatchServer(host, url);
+    const server = this.getMatchServer(requestHost(req), req.url ?? "/");
     if (!server) {
       return false;
     }
@@ -204,22 +242,73 @@ export class DevtoolProxy {
       return true;
     }
 
-    const target = this.nextTarget(server);
-    this.applyForwardedHeaders(req, target);
-    this.rewriteRequest(req, server);
-    logger.debug("Proxy", `${server.slug}:${target.url}`, req.url ?? "/");
-
-    this.proxy.ws(req, socket, head, {
-      target: this.toWebSocketTarget(target.url),
-      changeOrigin: !server.preserveHost,
+    const outgoing = this.openRequest(req, server, this.nextTarget(server), client, true);
+    outgoing.on("upgrade", (response, upstream, upstreamHead) => {
+      writeHead(socket, response);
+      socket.write(upstreamHead);
+      upstream.write(head);
+      upstream.on("error", () => socket.destroy());
+      socket.on("error", () => upstream.destroy());
+      upstream.pipe(socket).pipe(upstream);
     });
-
+    outgoing.on("response", (response) => {
+      writeHead(socket, response);
+      response.pipe(socket);
+    });
+    outgoing.on("error", (error) => {
+      logger.warn("Proxy", server.slug, error.message);
+      socket.destroy();
+    });
+    outgoing.end();
     return true;
   }
 
-  private getHost(request: IncomingMessage): string {
-    const host = request.headers.host ?? "";
-    return host.split(":")[0]?.toLowerCase() ?? "";
+  /**
+   * Opens the request to a target of a server, with the headers of the incoming request but those
+   * describing its connection, its host or the target's, and the forwarded headers.
+   * @param req Incoming request.
+   * @param server The server.
+   * @param target The target of the server.
+   * @param client The address of the client, never taken from a header.
+   * @param upgrade Whether the request asks for a WebSocket upgrade.
+   * @returns The request, its body still to send.
+   */
+  private openRequest(req: ProxyRequest, server: ServerCandidate, target: { url: string; tls: boolean }, client: string | undefined, upgrade: boolean): http.ClientRequest {
+    const url = new URL(target.url);
+    const headers: OutgoingHttpHeaders = {};
+    for (const [name, value] of Object.entries(req.headers)) {
+      if (value !== undefined && !name.startsWith(":") && !CONNECTION_HEADERS.has(name)) {
+        headers[name] = value;
+      }
+    }
+
+    const authorityPort = /:(\d+)$/.exec(String(req.headers[":authority"] ?? req.headers.host ?? ""))?.[1];
+    headers.host = server.preserveHost ? requestHost(req) : url.host;
+    headers["x-forwarded-proto"] = target.tls ? "https" : "http";
+    headers["x-forwarded-port"] = authorityPort ?? (target.tls ? "443" : "80");
+    headers["x-forwarded-ssl"] = target.tls ? "on" : "off";
+    if (client) {
+      headers["x-forwarded-for"] = client;
+    } else {
+      delete headers["x-forwarded-for"];
+    }
+    if (upgrade) {
+      headers.connection = "Upgrade";
+      headers.upgrade = req.headers.upgrade;
+    }
+
+    const path = this.targetPath(url, req.url ?? "/", server);
+    logger.debug("Proxy", `${server.slug}:${target.url}`, path);
+    const secure = url.protocol === "https:";
+    return (secure ? https : http).request({
+      protocol: url.protocol,
+      hostname: url.hostname,
+      port: url.port || undefined,
+      method: req.method,
+      path,
+      headers,
+      agent: upgrade ? false : secure ? httpsAgent : httpAgent,
+    });
   }
 
   private getMatchServer(host: string, requestUrl: string): ServerCandidate | null {
@@ -240,44 +329,19 @@ export class DevtoolProxy {
     return server.targets[server.roundRobinTargetIndex];
   }
 
-  private rewriteRequest(request: IncomingMessage, server: ServerCandidate): void {
-    const rawUrl = request.url ?? "/";
-    if (server.prefix && rawUrl.startsWith(server.prefix)) {
-      request.url = rawUrl.slice(server.prefix.length);
+  /**
+   * Gives the path a request takes on a target: the path of the target, then the requested path
+   * without the prefix of the server.
+   * @param target The URL of the target.
+   * @param requestUrl The requested path.
+   * @param server The server.
+   * @returns The path on the target.
+   */
+  private targetPath(target: URL, requestUrl: string, server: ServerCandidate): string {
+    let path = server.prefix && requestUrl.startsWith(server.prefix) ? requestUrl.slice(server.prefix.length) : requestUrl;
+    if (!path.startsWith("/")) {
+      path = `/${path}`;
     }
-
-    if (!(request.url ?? "").startsWith("/")) {
-      request.url = `/${request.url ?? ""}`;
-    }
-  }
-
-  private applyForwardedHeaders(request: IncomingMessage, target: { url: string; tls: boolean }): void {
-    const host = request.headers.host ?? "";
-    const hostParts = host.split(":");
-    const lastHostPart = hostParts.length > 1 ? hostParts[hostParts.length - 1] : null;
-    const forwardedPort = lastHostPart && /^\d+$/.test(lastHostPart) ? lastHostPart : target.tls ? "443" : "80";
-
-    request.headers["x-forwarded-proto"] = target.tls ? "https" : "http";
-    request.headers["x-forwarded-port"] = forwardedPort;
-    const client = clientAddressOf(request.socket);
-    if (client) {
-      request.headers["x-forwarded-for"] = client;
-    } else {
-      delete request.headers["x-forwarded-for"];
-    }
-    request.headers["x-forwarded-ssl"] = target.tls ? "on" : "off";
-  }
-
-  private toWebSocketTarget(targetUrl: string): string {
-    const parsedUrl = new URL(targetUrl);
-    if (parsedUrl.protocol === "http:") {
-      parsedUrl.protocol = "ws:";
-      return parsedUrl.toString();
-    }
-    if (parsedUrl.protocol === "https:") {
-      parsedUrl.protocol = "wss:";
-      return parsedUrl.toString();
-    }
-    return targetUrl;
+    return `${target.pathname.replace(/\/$/, "")}${path}`;
   }
 }

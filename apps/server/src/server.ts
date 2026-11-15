@@ -13,6 +13,7 @@ import { listScripts } from "./scripts.js";
 import type {
   CommandStreamCreatePayload,
   CommandStreamInputPayload,
+  CommandStreamPortConflictPayload,
   CommandStreamResizePayload,
   CommandStreamUpdatePayload,
   ConfigProvider,
@@ -217,6 +218,11 @@ export class DevtoolServer {
       return;
     }
 
+    if (message.type === "portConflict") {
+      await this.resolvePortConflict(message.data);
+      return;
+    }
+
     if (message.type === "streamInput") {
       await this.streamInput(message.data);
       return;
@@ -376,6 +382,17 @@ export class DevtoolServer {
       action: data.action,
       options: data.options,
     });
+  }
+
+  /**
+   * Stops the processes holding the port a command could not use, or forgets the conflict.
+   * @param data The stream of the command and what to do.
+   */
+  private async resolvePortConflict(data: CommandStreamPortConflictPayload): Promise<void> {
+    if (data.action !== "kill" && data.action !== "killAndRestart" && data.action !== "dismiss") {
+      return;
+    }
+    await this.commandStreams.find((item) => item.slug === data.streamSlug)?.resolvePortConflict(data.action);
   }
 
   private async streamInput(data: CommandStreamInputPayload): Promise<void> {

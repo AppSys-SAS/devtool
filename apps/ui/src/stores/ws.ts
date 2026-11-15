@@ -1,5 +1,5 @@
 import { ref } from "vue";
-import type { EnvironmentKeyChoicePayload, FileEntryPayload } from "@appsys/devtool-shared";
+import type { EnvironmentKeyChoicePayload, FileEntryPayload, PortConflictAction } from "@appsys/devtool-shared";
 import configStore from "./config";
 import filesStore from "./files";
 import environmentStore from "./environment";
@@ -137,6 +137,15 @@ class WsStore {
 
   updateCommandStream(streamSlug: string, action: "start" | "stop" | "restart" | "close", options: Record<string, unknown> = {}): void {
     this.send("updateCommandStream", { streamSlug, action, options });
+  }
+
+  /**
+   * Asks to free the port a command could not use, or to forget the conflict.
+   * @param streamSlug The stream of the command.
+   * @param action Stop the holders, also running the command again, or leave them.
+   */
+  resolvePortConflict(streamSlug: string, action: PortConflictAction): void {
+    this.send("portConflict", { streamSlug, action });
   }
 
   streamInput(streamSlug: string, data: string): void {

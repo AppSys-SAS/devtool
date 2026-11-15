@@ -200,7 +200,24 @@ export interface StreamUpdatePayload {
   runningArgs: string[] | null;
   stoppedDate: number | null;
   exitCode: number | null;
+  /** The port the command could not use because other processes hold it, null when none. */
+  portConflict: PortConflict | null;
 }
+
+/** A process listening on a port. */
+export interface PortOwner {
+  pid: number;
+  command: string;
+}
+
+/** A port a command could not use, and the processes holding it. */
+export interface PortConflict {
+  port: number;
+  owners: PortOwner[];
+}
+
+/** What to do about a port conflict: stop its holders, also running the command again, or leave it. */
+export type PortConflictAction = "kill" | "killAndRestart" | "dismiss";
 
 /** Sign-in state of the developer on the CDN. */
 export interface CdnSessionPayload {
@@ -233,6 +250,8 @@ export interface EnvironmentItemPayload {
   bucket: string | null;
   /** The Redis server and database number, without credentials. */
   redis: string | null;
+  /** Whether the item is a configuration file whose keys can be pulled or pushed one by one. */
+  keyed: boolean;
   local: EnvironmentCopyPayload | null;
   /** The CDN copy, null when there is none, "unknown" when the CDN copies could not be listed. */
   remote: EnvironmentCopyPayload | null | "unknown";
@@ -240,27 +259,27 @@ export interface EnvironmentItemPayload {
   synced: { localUpdatedAt: string; remoteUpdatedAt: string } | null;
 }
 
-/** A value of a YAML key in one copy of a file. */
+/** A value of a key of a configuration file in one copy of it. */
 export interface EnvironmentKeyValuePayload {
   present: boolean;
   value: unknown;
 }
 
-/** A key whose value differs between the local and CDN copies of a YAML file. */
+/** A key whose value differs between the local and CDN copies of a configuration file. */
 export interface EnvironmentKeyPayload {
   path: string[];
   local: EnvironmentKeyValuePayload;
   remote: EnvironmentKeyValuePayload;
 }
 
-/** Keys differing between the local and CDN copies of a YAML item. */
+/** Keys differing between the local and CDN copies of a configuration file. */
 export interface EnvironmentKeysPayload {
   path: string;
   entries: EnvironmentKeyPayload[];
   error: string | null;
 }
 
-/** The copy whose value a YAML key takes. */
+/** The copy whose value a key of a configuration file takes. */
 export interface EnvironmentKeyChoicePayload {
   path: string[];
   side: "local" | "remote";

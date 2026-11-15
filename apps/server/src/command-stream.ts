@@ -4,10 +4,11 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { spawn as spawnPty, type IPty } from "node-pty";
 import treeKill from "tree-kill";
-import type { StreamOutputLine, StreamUpdatePayload } from "@appsys/devtool-shared";
+import type { PortConflict, PortConflictAction, StreamOutputLine, StreamUpdatePayload } from "@appsys/devtool-shared";
 import { logger } from "@appsys/devtool-shared";
 import type { WebSocket } from "ws";
 import { AnswerMatcher, type CommandAutomation, CommandSecrets } from "./command-automation.js";
+import { killPortOwners, PortConflictWatcher } from "./ports.js";
 import type { CommandStreamCreatePayload } from "./types.js";
 import type { DevtoolServer } from "./server.js";
 
@@ -190,7 +191,11 @@ export class DevtoolCommandStream {
 
   public exitCode: number | null;
 
+  public portConflict: PortConflict | null;
+
   public output: StreamOutputLine[];
+
+  private portWatcher: PortConflictWatcher | null;
 
   private proc: IPty | null;
 
@@ -222,7 +227,9 @@ export class DevtoolCommandStream {
     this.runningArgs = null;
     this.stoppedDate = null;
     this.exitCode = null;
+    this.portConflict = null;
     this.output = [];
+    this.portWatcher = null;
     this.proc = null;
     this.exited = null;
     this.defaultEnv = {
@@ -389,6 +396,7 @@ export class DevtoolCommandStream {
       runningArgs: this.runningArgs,
       stoppedDate: this.stoppedDate,
       exitCode: this.exitCode,
+      portConflict: this.portConflict,
     };
 
     await this.sendToWsConnections("streamUpdate", payload, wsInstance);
@@ -569,8 +577,11 @@ export class DevtoolCommandStream {
     this.runningArgs = finalArgs;
     this.stoppedDate = null;
     this.exitCode = null;
+    this.portConflict = null;
 
     const answers = new AnswerMatcher(this.automation?.answers ?? []);
+    const portWatcher = new PortConflictWatcher(this.expectedPorts());
+    this.portWatcher = portWatcher;
     const proc = this.proc;
     proc.onData((data) => {
       const answer = answers.feed(data);
@@ -578,6 +589,7 @@ export class DevtoolCommandStream {
         void this.typeAnswer(proc, secrets, answer);
       }
       void this.addOutput("stdout", secrets.scrub(data));
+      void this.watchPorts(portWatcher, data);
     });
 
     this.exited = new Promise<void>((resolve) => {
@@ -627,6 +639,49 @@ export class DevtoolCommandStream {
     this.stoppedDate = Date.now();
     this.runningArgs = null;
     return true;
+  }
+
+  /**
+   * Stops the processes holding the port the command could not use, or forgets the conflict.
+   * @param action What to do: stop them, stop them and run the command again, or leave them.
+   */
+  async resolvePortConflict(action: PortConflictAction): Promise<void> {
+    const conflict = this.portConflict;
+    this.portConflict = null;
+    if (!conflict || action === "dismiss") {
+      await this.sendUpdate();
+      return;
+    }
+
+    const errors = await killPortOwners(conflict.owners);
+    const pids = conflict.owners.map((owner) => owner.pid).join(", ");
+    await this.addOutput("info", errors.length ? `Port ${conflict.port} not freed: ${errors.join(", ")}` : `Port ${conflict.port} freed: stopped pid ${pids}`);
+    await this.sendUpdate();
+    if (action === "killAndRestart" && !errors.length) {
+      await this.update({ action: this.proc ? "restart" : "start" });
+    }
+  }
+
+  /**
+   * Gives the ports the services of the directory of the command listen on.
+   * @returns The ports, none when the command belongs to no directory.
+   */
+  private expectedPorts(): number[] {
+    const directory = this.projectSlug && this.directorySlug ? this.server.config.projects[this.projectSlug]?.directories[this.directorySlug] : undefined;
+    return [...new Set(Object.values(directory?.loadBalancer ?? {}).flatMap((rule) => rule.ports))];
+  }
+
+  /**
+   * Reports the port a run of the command could not use once its output tells so.
+   * @param watcher Follows the output of the run.
+   * @param data Output of the run.
+   */
+  private async watchPorts(watcher: PortConflictWatcher, data: string): Promise<void> {
+    const conflict = await watcher.feed(data);
+    if (conflict && this.portWatcher === watcher) {
+      this.portConflict = conflict;
+      await this.sendUpdate();
+    }
   }
 
   /**

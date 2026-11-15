@@ -15,27 +15,37 @@ export function isLoopback(address: string | undefined): boolean {
   return ipv4.startsWith("127.") || address === "::1";
 }
 
-const clientAddresses = new WeakMap<Socket, string>();
+const relayedClients = new Map<number, string>();
 
 /**
- * Remembers the address of the client of a connection that cannot tell it, such as a TLS socket opened
- * over a stream.
- * @param socket The connection.
+ * Remembers the client of a connection relayed from this machine, by the local port of the relay.
+ * @param localPort The local port of the relaying connection.
  * @param address The remote address of the client.
  */
-export function rememberClientAddress(socket: Socket, address: string | undefined): void {
-  if (address) {
-    clientAddresses.set(socket, address);
+export function rememberRelayedClient(localPort: number | undefined, address: string | undefined): void {
+  if (localPort !== undefined && address) {
+    relayedClients.set(localPort, address);
   }
 }
 
 /**
- * Gives the address of the client of a connection.
+ * Forgets the client of a relayed connection once the relay is closed.
+ * @param localPort The local port of the relaying connection.
+ */
+export function forgetRelayedClient(localPort: number | undefined): void {
+  if (localPort !== undefined) {
+    relayedClients.delete(localPort);
+  }
+}
+
+/**
+ * Gives the address of the client of a connection, the relayed client for a relay of this machine.
  * @param socket The connection.
  * @returns The remote address, undefined when unknown.
  */
-export function clientAddressOf(socket: Socket): string | undefined {
-  return clientAddresses.get(socket) ?? socket.remoteAddress;
+export function clientAddressOf(socket: Pick<Socket, "remoteAddress" | "remotePort">): string | undefined {
+  const relayed = socket.remotePort !== undefined && isLoopback(socket.remoteAddress) ? relayedClients.get(socket.remotePort) : undefined;
+  return relayed ?? socket.remoteAddress;
 }
 
 /**
