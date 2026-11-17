@@ -1,4 +1,4 @@
-import type { DirectoryDefinition, DirectoryExtra } from "@appsys/devtool-shared";
+import type { DirectoryDefinition, DirectoryExtra, ProjectDefinition } from "@appsys/devtool-shared";
 import commandRunsStore from "@/stores/command-runs";
 import configStore from "@/stores/config";
 import wsStore from "@/stores/ws";
@@ -33,8 +33,9 @@ export function commandName(command: DirectoryExtra): string {
  * @param projectSlug The slug of the project.
  * @param directorySlug The slug of the directory.
  * @param command The command.
+ * @param redirect Whether the interface then shows the terminal of the command.
  */
-export function runDirectoryCommand(projectSlug: string, directorySlug: string, command: DirectoryExtra): void {
+export function runDirectoryCommand(projectSlug: string, directorySlug: string, command: DirectoryExtra, redirect = true): void {
   if (command.detached) {
     wsStore.newCommandDetached(projectSlug, directorySlug, command.args, command.env);
     return;
@@ -63,8 +64,42 @@ export function runDirectoryCommand(projectSlug: string, directorySlug: string, 
     command.killSignal,
     command.notifications,
     commandName(command),
-    { redirect: true, command: command.slug },
+    { redirect, command: command.slug },
   );
+}
+
+/**
+ * Starts the commands of a section declared with `startWithSection`, the main command of a directory as
+ * its main command, each one only when it does not run already.
+ * @param project The section.
+ */
+export function startSection(project: ProjectDefinition): void {
+  const running = configStore.commandStreams.value.filter((stream) => stream.projectSlug === project.slug && stream.status === "RUNNING");
+  for (const directory of Object.values(project.directories)) {
+    const mainCommand = directory.defaultAction?.shortcut.type === "command" ? directory.defaultAction.shortcut.slug : null;
+    for (const command of Object.values(directory.extras).filter((extra) => extra.startWithSection)) {
+      const directoryStreams = running.filter((stream) => stream.directorySlug === directory.slug);
+      if (command.slug === mainCommand) {
+        if (!directoryStreams.some((stream) => stream.primary)) {
+          startDefaultCommand(project.slug, directory);
+        }
+      } else if (!directoryStreams.some((stream) => !stream.primary && stream.args.join("\0") === command.args.join("\0"))) {
+        runDirectoryCommand(project.slug, directory.slug, command, false);
+      }
+    }
+  }
+}
+
+/**
+ * Stops every running command of a section.
+ * @param projectSlug The slug of the section.
+ */
+export function stopSection(projectSlug: string): void {
+  for (const stream of configStore.commandStreams.value) {
+    if (stream.projectSlug === projectSlug && stream.status === "RUNNING") {
+      wsStore.updateCommandStream(stream.slug, "stop");
+    }
+  }
 }
 
 /**

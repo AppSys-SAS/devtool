@@ -100,6 +100,8 @@ export interface DirectoryExtra {
   prompt: boolean;
   /** Whether the server skips it or answers its questions on its own, as the configuration declares. */
   automated: boolean;
+  /** Whether the start button of its section starts it. */
+  startWithSection: boolean;
   notifications: boolean;
   env: Record<string, string>;
   shell: string | null;

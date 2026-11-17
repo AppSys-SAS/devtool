@@ -3,7 +3,7 @@ import { computed, ref, watch } from "vue";
 import { RouterLink, useRouter } from "vue-router";
 import { useColorMode } from "@vueuse/core";
 import { Icon } from "@iconify/vue";
-import { ArrowDownUp, Bookmark, Circle, Download, FileCog, FolderTree, FolderX, Monitor, Moon, RefreshCw, RotateCcw, Square, Sun } from '@lucide/vue'
+import { ArrowDownUp, Bookmark, Circle, Download, FileCog, FolderTree, FolderX, Monitor, Moon, Play, RefreshCw, RotateCcw, Square, Sun } from '@lucide/vue'
 import CdnSession from "@/components/CdnSession.vue";
 import SidebarStreamItem from "@/components/SidebarStreamItem.vue";
 import { Button } from "@/components/ui/button";
@@ -12,7 +12,7 @@ import { Separator } from "@/components/ui/separator";
 import type { DirectoryDefaultAction, DirectoryDefinition, ProjectRestore } from "@appsys/devtool-shared";
 import ShortcutLine from "@/components/ShortcutLine.vue";
 import { defaultShortcut, directoryShortcuts, integrationShortcut, type SidebarShortcut } from "@/lib/shortcuts";
-import { iconFromMeta } from "@/lib/directory-commands";
+import { iconFromMeta, startSection, stopSection } from "@/lib/directory-commands";
 import bookmarkStore from "@/stores/bookmark";
 import commandRunsStore from "@/stores/command-runs";
 import configStore from "@/stores/config";
@@ -46,6 +46,10 @@ interface SidebarProject {
   restore: ProjectRestore | null;
   directories: SidebarDirectory[];
   streams: CommandStream[];
+  /** Whether a command of the section starts with it. */
+  startable: boolean;
+  /** Whether a command of the section runs. */
+  running: boolean;
   meta?: unknown;
 }
 
@@ -140,6 +144,8 @@ const sidebarData = computed(() => {
         restore: project.restore,
         directories,
         streams: [],
+        startable: Object.values(project.directories).some((directory) => Object.values(directory.extras).some((command) => command.startWithSection)),
+        running: allStreams.value.some((stream) => stream.projectSlug === projectSlug && stream.status === "RUNNING"),
         meta: project.meta,
       };
 
@@ -196,6 +202,17 @@ const projects = computed(() => {
 
 function streamUpdate(streamSlug: string, action: "start" | "stop" | "restart" | "close"): void {
   wsStore.updateCommandStream(streamSlug, action);
+}
+
+/**
+ * Starts the commands of a section that start with it.
+ * @param projectSlug The slug of the section.
+ */
+function startProject(projectSlug: string): void {
+  const project = configStore.projects.value?.[projectSlug];
+  if (project) {
+    startSection(project);
+  }
 }
 
 /**
@@ -388,10 +405,32 @@ function resolveStreamIcon(directory: SidebarDirectory, stream: CommandStream): 
           <RouterLink
             v-else
             :to="{ name: 'project', params: { projectSlug: project.slug } }"
-            class="flex items-center gap-2 rounded-md px-2 py-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground transition-colors hover:bg-accent/50"
+            class="group flex items-center gap-2 rounded-md px-2 py-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground transition-colors hover:bg-accent/50"
           >
             <FolderTree class="size-3.5" />
-            {{ project.name }}
+            <span class="min-w-0 flex-1 truncate">{{ project.name }}</span>
+            <div class="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+              <Button
+                v-if="project.startable"
+                size="icon"
+                variant="ghost"
+                class="size-5"
+                title="Start the section"
+                @click.prevent.stop="startProject(project.slug)"
+              >
+                <Play class="size-3" />
+              </Button>
+              <Button
+                v-if="project.running"
+                size="icon"
+                variant="ghost"
+                class="size-5"
+                title="Stop the section"
+                @click.prevent.stop="stopSection(project.slug)"
+              >
+                <Square class="size-3" />
+              </Button>
+            </div>
           </RouterLink>
 
           <div class="space-y-1 pl-2">

@@ -444,6 +444,7 @@ export class DevtoolConfigure {
         detached: extra.detached === true,
         prompt: extra.prompt === true,
         automated: automation !== null,
+        startWithSection: extra.startWithSection === true,
         notifications: extra.notifications === false ? false : directoryDefinition.notifications,
         env: extraEnv,
         shell: this.readShell(

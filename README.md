@@ -80,6 +80,20 @@ projects:
       web: { host: web.example.dev, target: 5173, tls: true, access: network }
 ```
 
+## Section start and stop
+
+The header of a section in the sidebar stops every running command of the section, and starts the
+commands declaring `startWithSection: true`, those not running yet; the command a project runs by
+`default` starts as its main command.
+
+```yaml
+projects:
+  web:
+    default: { action: command:dev }
+    commands:
+      dev: { name: Vite dev, args: [ pnpm, dev ], startWithSection: true }
+```
+
 ## Integrations
 
 External tools reachable over HTTP, declared at the root of the configuration (rows under Environment
