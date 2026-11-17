@@ -4,6 +4,7 @@ import http from "node:http";
 import mime from "mime-types";
 import { WebSocketServer, type WebSocket } from "ws";
 import { logger } from "@appsys/devtool-shared";
+import { serveIcons } from "./icons.js";
 import type { ServerContextLike } from "./types.js";
 import { LISTEN_ADDRESS } from "./utils.js";
 
@@ -78,8 +79,18 @@ export class DevtoolHttp {
     }
   }
 
+  /**
+   * Answers an HTTP request: icons from the installed icon sets, else the files of the interface,
+   * falling back to its index page.
+   * @param req The request.
+   * @param res Its response.
+   */
   private async onRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     try {
+      if (await serveIcons(req.url ?? "/", res)) {
+        return;
+      }
+
       const uiPath = this.context.config.adt.uiPath;
       if (!uiPath) {
         res.writeHead(404);

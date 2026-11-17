@@ -18,6 +18,7 @@ export default defineConfig({
         target: "http://127.0.0.1:6730",
         ws: true,
       },
+      "/icons/": "http://127.0.0.1:6730",
     },
   },
 });
