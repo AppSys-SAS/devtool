@@ -60,37 +60,45 @@ function resolveConfigPath(cwd: string, input: string): string {
   return path.resolve(cwd, input);
 }
 
-function resolveLoadBalancerCertificatePaths(config: RawConfig, cwd: string): void {
-  if (typeof config.loadBalancers !== "object" || config.loadBalancers === null) {
-    return;
-  }
-
-  for (const options of Object.values(config.loadBalancers)) {
-    if (typeof options !== "object" || options === null) {
-      continue;
-    }
-
-    const certificate = options as Record<string, unknown>;
-    if (typeof certificate.crt === "string") {
-      certificate.crt = resolveConfigPath(cwd, certificate.crt);
-    }
-    if (typeof certificate.key === "string") {
-      certificate.key = resolveConfigPath(cwd, certificate.key);
+/**
+ * Resolves a path setting of a record from a directory, leaving other values untouched.
+ * @param record The record holding the setting.
+ * @param key The name of the setting.
+ * @param cwd Directory the relative path is resolved from.
+ */
+function resolvePathSetting(record: unknown, key: string, cwd: string): void {
+  if (typeof record === "object" && record !== null) {
+    const settings = record as Record<string, unknown>;
+    if (typeof settings[key] === "string") {
+      settings[key] = resolveConfigPath(cwd, settings[key]);
     }
   }
 }
 
-function resolveAdtPaths(config: RawConfig, cwd: string): void {
-  if (typeof config.adt !== "object" || config.adt === null) {
-    return;
-  }
-
-  const adt = config.adt as Record<string, unknown>;
-  if (typeof adt.uiPath === "string") {
-    adt.uiPath = resolveConfigPath(cwd, adt.uiPath);
+/**
+ * Resolves the paths a configuration file gives relative to the configuration folder: the interface, the cache,
+ * the certificates of the load balancers, the environment folder and the workspace.
+ * @param config The configuration of the file.
+ * @param cwd The configuration folder.
+ */
+function resolveFolderPaths(config: RawConfig, cwd: string): void {
+  resolvePathSetting(config, "workspace", cwd);
+  resolvePathSetting(config.adt, "uiPath", cwd);
+  resolvePathSetting(config.adt, "cacheDir", cwd);
+  resolvePathSetting(config.environment, "folder", cwd);
+  if (typeof config.loadBalancers === "object" && config.loadBalancers !== null) {
+    for (const certificate of Object.values(config.loadBalancers)) {
+      resolvePathSetting(certificate, "crt", cwd);
+      resolvePathSetting(certificate, "key", cwd);
+    }
   }
 }
 
+/**
+ * Resolves the paths of the sections from the workspace.
+ * @param config The merged configuration.
+ * @param cwd The workspace.
+ */
 function resolveSectionPaths(config: RawConfig, cwd: string): void {
   if (typeof config.sections !== "object" || config.sections === null) {
     return;
@@ -158,9 +166,7 @@ async function loadConfigFileInternal(filePath: string, seen: Set<string>, baseD
   }
 
   delete config.include;
-  resolveAdtPaths(config, baseDirectory);
-  resolveSectionPaths(config, baseDirectory);
-  resolveLoadBalancerCertificatePaths(config, baseDirectory);
+  resolveFolderPaths(config, baseDirectory);
 
   return config;
 }
@@ -175,21 +181,42 @@ export async function loadConfigFile(filePath: string, baseDirectory = path.dirn
   return loadConfigFileInternal(filePath, new Set<string>(), baseDirectory);
 }
 
-/**
- * Lists the default configuration files: the one of the devtool installation, then the shared configuration of the
- * environment directory, then the personal overrides.
- * @param cwd Directory of the devtool application, two levels below the installation root.
- * @returns The configuration paths, in merge order.
- */
-export function resolveDefaultConfigPaths(cwd = process.cwd()): string[] {
-  const environmentDirectory = path.join(os.homedir(), ".config/appsys/devtool");
+/** The environment variable naming the configuration folder. */
+export const CONFIG_FOLDER_VARIABLE = "ADT_CONFIG_FOLDER";
 
-  return [path.join(cwd, "../../devtool-config.yml"), path.join(environmentDirectory, "config.yml"), path.join(environmentDirectory, "config.local.yml")];
+/**
+ * Gives the configuration folder: the one named by `ADT_CONFIG_FOLDER`, else `~/.config/appsys/devtool`.
+ * @returns The absolute path of the folder.
+ */
+export function resolveConfigFolder(): string {
+  const folder = process.env[CONFIG_FOLDER_VARIABLE]?.trim();
+  return path.resolve(resolveHomePath(folder || "~/.config/appsys/devtool"));
 }
 
 /**
- * Loads and merges configuration files, each overriding the previous ones. Relative paths of every file are resolved
- * from the directory of the first one, the devtool installation.
+ * Gives the cache folder of a configuration: its `adt.cacheDir`, else `~/.cache/appsys/devtool`.
+ * @param config The merged configuration.
+ * @returns The absolute path of the folder.
+ */
+export function resolveCacheFolder(config: RawConfig): string {
+  const adt = typeof config.adt === "object" && config.adt !== null ? (config.adt as Record<string, unknown>) : {};
+  return typeof adt.cacheDir === "string" && adt.cacheDir.trim() ? adt.cacheDir : path.join(os.homedir(), ".cache/appsys/devtool");
+}
+
+/**
+ * Lists the default configuration files: the shared configuration of the configuration folder, then the personal
+ * overrides.
+ * @param folder The configuration folder.
+ * @returns The configuration paths, in merge order.
+ */
+export function resolveDefaultConfigPaths(folder = resolveConfigFolder()): string[] {
+  return [path.join(folder, "config.yml"), path.join(folder, "config.local.yml")];
+}
+
+/**
+ * Loads and merges configuration files, each overriding the previous ones. Relative paths are resolved from the
+ * directory of the first file, the configuration folder, but those of the sections, resolved from the `workspace`
+ * of the merged configuration and left relative without one.
  * @param configPaths Paths of the configuration files; missing files are skipped.
  * @returns The merged configuration and the files loaded.
  */
@@ -206,6 +233,9 @@ export async function loadMergedConfig(configPaths = resolveDefaultConfigPaths()
 
     mergeConfig(result, await loadConfigFile(absolutePath, baseDirectory));
     loadedPaths.push(absolutePath);
+  }
+  if (typeof result.workspace === "string") {
+    resolveSectionPaths(result, result.workspace);
   }
 
   return {

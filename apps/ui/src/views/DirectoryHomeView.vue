@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { RouterLink } from "vue-router";
-import { FolderOpen } from "@lucide/vue";
+import { Icon } from "@iconify/vue";
 import StreamView from "@/views/StreamView.vue";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import configStore from "@/stores/config";
 import { startDefaultCommand } from "@/lib/directory-commands";
+import { defaultShortcut } from "@/lib/shortcuts";
 
 const props = defineProps<{
   projectSlug: string;
@@ -19,7 +19,7 @@ const directoryName = computed(() => directory.value?.name ?? props.directorySlu
 const directoryDescription = computed(() => directory.value?.description ?? null);
 const directoryArgs = computed(() => directory.value?.args ?? null);
 const directoryShell = computed(() => directory.value?.shell ?? "N/A");
-const defaultFiles = computed(() => (directory.value?.defaultFiles ? (directory.value.files[directory.value.defaultFiles] ?? null) : null));
+const defaultAction = computed(() => (directory.value ? defaultShortcut(props.projectSlug, directory.value) : null));
 const streamSlug = computed(() => configStore.getDirectoryStreamPrimary(props.projectSlug, props.directorySlug));
 </script>
 
@@ -54,15 +54,16 @@ const streamSlug = computed(() => configStore.getDirectoryStreamPrimary(props.pr
           {{ directoryArgs.join(" ") || directoryShell }}
         </Button>
         <Button
-          v-if="defaultFiles"
-          as-child
+          v-if="defaultAction && directory?.defaultAction?.shortcut.type !== 'command'"
           variant="outline"
           class="w-full justify-start"
+          @click="defaultAction.open()"
         >
-          <RouterLink :to="{ name: 'directory-files', params: { projectSlug, directorySlug, fileSpace: defaultFiles.slug } }">
-            <FolderOpen class="size-4" />
-            {{ defaultFiles.name }}
-          </RouterLink>
+          <Icon
+            :icon="defaultAction.icon"
+            class="size-4"
+          />
+          {{ defaultAction.name }}
         </Button>
       </CardContent>
     </Card>

@@ -4,7 +4,7 @@ import type { S3Client } from "@aws-sdk/client-s3";
 import { ArchiveWriter, readArchive, type RecordHeader } from "./archive.js";
 import { createS3Client, restoreBucket, type S3Options, snapshotBucket } from "./buckets.js";
 import type { CdnClient } from "./client.js";
-import { localPathOf, writeLocalFile } from "./directory.js";
+import { defaultEnvironmentFolder, localPathOf, writeLocalFile } from "./directory.js";
 import { databaseEngine, type DatabaseEngineName, isDatabaseEngineName } from "./engines.js";
 import { listRedisGroups, redisDatabaseName, redisRecordGroup, restoreRedis, snapshotRedis } from "./redis.js";
 import { readSyncJournal, type SyncRecord, writeSyncRecord } from "./sync-journal.js";
@@ -30,8 +30,33 @@ export type EnvironmentItem =
 
 /** What the environment is made of, as declared in the `environment` section of the configuration. */
 export interface EnvironmentOptions {
+  /** The local folder mirroring the devtool files of the CDN. */
+  folder: string;
+  /** What is synchronized with the CDN. */
   items: EnvironmentItem[];
+  /** The configuration files of the environment, synchronized or not. */
+  configFiles: EnvironmentConfigFile[];
+  /** The items pulled on their own, on a schedule or when the server starts. */
+  autoPulls: EnvironmentAutoPull[];
   s3: S3Options | null;
+}
+
+/** When an item of the environment is pulled on its own. */
+export interface EnvironmentAutoPull {
+  path: string;
+  /** Cron expression of its pulls, null for none. */
+  cron: string | null;
+  /** Whether it is pulled when the server starts. */
+  startup: boolean;
+}
+
+/** A configuration file of the environment and how the configurations tab shows it. */
+export interface EnvironmentConfigFile {
+  path: string;
+  /** Whether the configurations tab lists it. */
+  display: boolean;
+  /** Whether the configurations tab lists its personal `.local` override. */
+  local: boolean;
 }
 
 /** An item to transfer, whole or restricted to some tables of a database or key groups of a Redis database. */
@@ -85,7 +110,27 @@ function recordsOf(value: unknown): Record<string, unknown>[] {
 }
 
 /**
- * Reads the `environment` section of the devtool configuration.
+ * Reads when an item of the environment is pulled on its own, `pull: { cron, startup }`.
+ *
+ * @param path - The path of the item.
+ * @param value - The raw `pull` setting.
+ * @returns When it is pulled, null when it never is on its own.
+ */
+function readAutoPull(path: string, value: unknown): EnvironmentAutoPull | null {
+  if (value === undefined) {
+    return null;
+  }
+  const pull = recordOf(value);
+  if (pull !== value || (pull.cron !== undefined && typeof pull.cron !== "string") || (pull.startup !== undefined && typeof pull.startup !== "boolean")) {
+    throw new Error(`invalid pull of ${path} in the environment: ${JSON.stringify(value)}`);
+  }
+  return pull.cron || pull.startup ? { path, cron: typeof pull.cron === "string" ? pull.cron : null, startup: pull.startup === true } : null;
+}
+
+/**
+ * Reads the `environment` section of the devtool configuration, its `folder` being the parent of the
+ * configuration folder when it names none, each of its `files` a path or `{ path, display, local, sync, pull }`,
+ * its databases, buckets and Redis databases taking a `pull` too.
  *
  * @param section - The raw section.
  * @returns The environment, or null when the section is missing.
@@ -97,33 +142,54 @@ export function readEnvironmentOptions(section: unknown): EnvironmentOptions | n
 
   const record = recordOf(section);
   const items: EnvironmentItem[] = [{ kind: "file", path: SHARED_CONFIG_PATH }];
+  const configFiles: EnvironmentConfigFile[] = [{ path: SHARED_CONFIG_PATH, display: true, local: true }];
+  const autoPulls: EnvironmentAutoPull[] = [];
+  const addItem = (item: EnvironmentItem, pull: unknown): void => {
+    items.push(item);
+    const autoPull = readAutoPull(item.path, pull);
+    if (autoPull) {
+      autoPulls.push(autoPull);
+    }
+  };
   for (const file of Array.isArray(record.files) ? record.files : []) {
-    if (typeof file === "string" && file !== SHARED_CONFIG_PATH) {
-      items.push({ kind: "file", path: file });
+    const entry = typeof file === "string" ? { path: file } : recordOf(file);
+    const flags = [entry.display, entry.local, entry.sync];
+    if (typeof entry.path !== "string" || flags.some((flag) => flag !== undefined && typeof flag !== "boolean")) {
+      throw new Error(`invalid file in the environment: ${JSON.stringify(file)}`);
+    }
+    if (entry.path === SHARED_CONFIG_PATH) {
+      continue;
+    }
+    configFiles.push({ path: entry.path, display: entry.display !== false, local: entry.local !== false });
+    if (entry.sync !== false) {
+      addItem({ kind: "file", path: entry.path }, entry.pull);
     }
   }
   for (const database of recordsOf(record.databases)) {
     if (typeof database.path !== "string" || !isDatabaseEngineName(database.engine) || typeof database.container !== "string") {
       throw new Error(`invalid database in the environment: ${JSON.stringify(database)}`);
     }
-    items.push({ kind: "database", path: database.path, engine: database.engine, container: database.container });
+    addItem({ kind: "database", path: database.path, engine: database.engine, container: database.container }, database.pull);
   }
   for (const bucket of recordsOf(record.buckets)) {
     if (typeof bucket.path !== "string" || typeof bucket.bucket !== "string") {
       throw new Error(`invalid bucket in the environment: ${JSON.stringify(bucket)}`);
     }
-    items.push({ kind: "bucket", path: bucket.path, bucket: bucket.bucket });
+    addItem({ kind: "bucket", path: bucket.path, bucket: bucket.bucket }, bucket.pull);
   }
   for (const redis of recordsOf(record.redis)) {
     if (typeof redis.path !== "string" || typeof redis.url !== "string") {
       throw new Error(`invalid Redis database in the environment: ${JSON.stringify({ path: redis.path })}`);
     }
-    items.push({ kind: "redis", path: redis.path, url: redis.url });
+    addItem({ kind: "redis", path: redis.path, url: redis.url }, redis.pull);
   }
 
   const s3 = recordOf(record.s3);
   return {
+    folder: typeof record.folder === "string" ? record.folder : defaultEnvironmentFolder(),
     items,
+    configFiles,
+    autoPulls,
     s3:
       typeof s3.endpoint === "string" && typeof s3.accessKeyId === "string" && typeof s3.secretAccessKey === "string"
         ? { endpoint: s3.endpoint, accessKeyId: s3.accessKeyId, secretAccessKey: s3.secretAccessKey, region: typeof s3.region === "string" ? s3.region : "us-east-1" }
@@ -245,7 +311,7 @@ export class Environment {
     const journal = await readSyncJournal();
     const items = await Promise.all(
       this._options.items.map(async (item) => {
-        const stat = await fs.stat(localPathOf(item.path)).catch(() => null);
+        const stat = await fs.stat(localPathOf(this._options.folder, item.path)).catch(() => null);
         return {
           item,
           local: stat?.isFile() ? { size: stat.size, updatedAt: stat.mtime } : null,
@@ -274,7 +340,7 @@ export class Environment {
       return { done: false, detail: "absent from the CDN" };
     }
 
-    const localPath = localPathOf(item.path);
+    const localPath = localPathOf(this._options.folder, item.path);
     await this.recordSync(item.path);
     if (item.kind === "file") {
       return { done: true, detail: localPath };
@@ -344,7 +410,7 @@ export class Environment {
       return this.pushKeys(item.path, selection.keys);
     }
 
-    const localPath = localPathOf(item.path);
+    const localPath = localPathOf(this._options.folder, item.path);
     let detail = localPath;
     if (item.kind === "database") {
       detail = await this.writeLocal(localPath, (archive) => this.dumpDatabase(item, tables, archive));
@@ -383,7 +449,7 @@ export class Environment {
     const { format, local, remote } = await this.readBothCopies(filePath);
     const differences = diffConfig(format, local, remote);
     const merged = mergeConfig(format, local, "local", differences, keys);
-    await writeLocalFile(localPathOf(filePath), merged);
+    await writeLocalFile(localPathOf(this._options.folder, filePath), merged);
     if (diffConfig(format, merged, remote).length === 0) {
       await this.recordSync(filePath);
     }
@@ -404,7 +470,7 @@ export class Environment {
     const { format, local, remote } = await this.readBothCopies(filePath);
     const differences = diffConfig(format, local, remote);
     const merged = mergeConfig(format, remote, "remote", differences, keys);
-    const mergedPath = `${localPathOf(filePath)}.merged`;
+    const mergedPath = `${localPathOf(this._options.folder, filePath)}.merged`;
     try {
       await fs.writeFile(mergedPath, merged, { mode: 0o600 });
       await this._client.upload(filePath, mergedPath, mediaTypeOf(filePath));
@@ -431,14 +497,14 @@ export class Environment {
       throw new Error(`${filePath} cannot be merged key by key: YAML, JSON and .env files only`);
     }
 
-    const remotePath = `${localPathOf(filePath)}.remote`;
+    const remotePath = `${localPathOf(this._options.folder, filePath)}.remote`;
     try {
       if (!(await this.download(filePath, remotePath))) {
         throw new Error(`${filePath} is not on the CDN`);
       }
 
-      const local = await fs.readFile(localPathOf(filePath), "utf-8").catch(() => {
-        throw new Error(`no local file ${localPathOf(filePath)}`);
+      const local = await fs.readFile(localPathOf(this._options.folder, filePath), "utf-8").catch(() => {
+        throw new Error(`no local file ${localPathOf(this._options.folder, filePath)}`);
       });
       return { format, local, remote: await fs.readFile(remotePath, "utf-8") };
     } finally {
@@ -454,7 +520,7 @@ export class Environment {
    */
   private async recordSync(filePath: string): Promise<void> {
     const remote = (await this._client.list())?.find((file) => file.path === filePath);
-    const local = await fs.stat(localPathOf(filePath)).catch(() => null);
+    const local = await fs.stat(localPathOf(this._options.folder, filePath)).catch(() => null);
     if (remote && local) {
       await writeSyncRecord(filePath, { localUpdatedAt: local.mtime, remoteUpdatedAt: remote.updatedAt });
     }
@@ -523,7 +589,7 @@ export class Environment {
    * @param keep - Tells whether a record of the CDN copy is kept.
    */
   private async copyBase(itemPath: string, archive: ArchiveWriter, keep: (header: RecordHeader) => boolean): Promise<void> {
-    const basePath = `${localPathOf(itemPath)}.base`;
+    const basePath = `${localPathOf(this._options.folder, itemPath)}.base`;
     try {
       if (!(await this.download(itemPath, basePath))) {
         throw new Error(`${itemPath} is not on the CDN yet: push the whole item first`);
@@ -570,7 +636,7 @@ export class Environment {
    * @param localPath - The local file, its mirror in the environment directory by default.
    * @returns False when the CDN has no such file.
    */
-  private async download(filePath: string, localPath = localPathOf(filePath)): Promise<boolean> {
+  private async download(filePath: string, localPath = localPathOf(this._options.folder, filePath)): Promise<boolean> {
     const content = await this._client.download(filePath);
     if (!content) {
       return false;

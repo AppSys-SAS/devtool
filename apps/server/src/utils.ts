@@ -114,19 +114,3 @@ export function toCommandArgsArray(value: unknown): string[] | null {
 
   return args;
 }
-
-export function toIntegerArray(value: unknown): number[] | null {
-  if (!Array.isArray(value)) {
-    return null;
-  }
-
-  const numbers: number[] = [];
-  for (const item of value) {
-    if (!Number.isInteger(item) || item <= 0) {
-      return null;
-    }
-    numbers.push(item);
-  }
-
-  return numbers;
-}

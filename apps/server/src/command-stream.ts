@@ -13,6 +13,7 @@ import type { CommandStreamCreatePayload } from "./types.js";
 import type { DevtoolServer } from "./server.js";
 
 const MAX_OUTPUT = 2048;
+const LOCAL_HOSTNAMES = new Set(["127.0.0.1", "localhost", "[::1]"]);
 const STOP_TIMEOUT_MS = 10_000;
 const ANSI_RESET = "\u001b[0m";
 const ANSI_INFO_PREFIX = "\u001b[38;5;195m\u001b[48;5;27m";
@@ -207,6 +208,10 @@ export class DevtoolCommandStream {
 
   private rows: number;
 
+  /**
+   * Creates a stopped command, its environment holding what every command of the devtool receives.
+   * @param server The server running the command.
+   */
   private constructor(server: DevtoolServer) {
     this.server = server;
     this.creationDate = Date.now();
@@ -234,6 +239,7 @@ export class DevtoolCommandStream {
     this.exited = null;
     this.defaultEnv = {
       APPSYS_DEVTOOL: "true",
+      APPSYS_DEVTOOL_CACHE_DIR: server.config.adt.cacheDir,
       FORCE_COLOR: "3",
       TERM: "xterm-256color",
     };
@@ -523,7 +529,7 @@ export class DevtoolCommandStream {
 
     const spawnOptions = {
       cwd: this.cwd,
-      env: { ...this.defaultEnv, ...process.env, ...resolvedEnv },
+      env: { ...process.env, ...this.defaultEnv, ...resolvedEnv },
       cols: this.cols,
       rows: this.rows,
       name: "xterm-256color",
@@ -663,12 +669,15 @@ export class DevtoolCommandStream {
   }
 
   /**
-   * Gives the ports the services of the directory of the command listen on.
+   * Gives the ports of this machine the services of the directory of the command send requests to.
    * @returns The ports, none when the command belongs to no directory.
    */
   private expectedPorts(): number[] {
     const directory = this.projectSlug && this.directorySlug ? this.server.config.projects[this.projectSlug]?.directories[this.directorySlug] : undefined;
-    return [...new Set(Object.values(directory?.loadBalancer ?? {}).flatMap((rule) => rule.ports))];
+    const localTargets = Object.values(directory?.loadBalancer ?? {})
+      .flatMap((rule) => rule.targets.map((target) => new URL(target)))
+      .filter((url) => LOCAL_HOSTNAMES.has(url.hostname) && url.port);
+    return [...new Set(localTargets.map((url) => Number(url.port)))];
   }
 
   /**
@@ -696,7 +705,7 @@ export class DevtoolCommandStream {
     }
 
     return new Promise((resolve) => {
-      const child = spawnDetached(shell, getShellArgs(shell, command), { cwd: this.cwd, env: { ...this.defaultEnv, ...process.env, ...this.env } });
+      const child = spawnDetached(shell, getShellArgs(shell, command), { cwd: this.cwd, env: { ...process.env, ...this.defaultEnv, ...this.env } });
       let stdout = "";
       let stderr = "";
       child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));

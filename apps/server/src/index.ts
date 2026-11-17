@@ -23,7 +23,8 @@ function readShell(record: Record<string, unknown>): unknown {
 
 /**
  * Turns the sections and projects of the shared configuration into projects of directories, each
- * project becoming a directory of its section with its default command, if any, and its other commands.
+ * project becoming a directory of its section with its commands, the one its default action names
+ * becoming its main command.
  * @param config The raw configuration.
  * @returns The configuration with projects of directories.
  */
@@ -61,12 +62,11 @@ function normalizeProjectsShape(config: RawConfig): RawConfig {
     let env: unknown = project.env;
     let shell: unknown = readShell(project);
     let killSignal: unknown = readKillSignal(project);
-    const defaultCommand = toRecord(commands.default);
-    if (Array.isArray(defaultCommand.args)) {
-      const defaultArgs = toCommandArgsArray(defaultCommand.args);
-      if (defaultArgs) {
-        args = defaultArgs;
-      }
+    const action = toRecord(project.default).action;
+    const defaultCommandSlug = typeof action === "string" && action.startsWith("command:") ? action.slice("command:".length) : null;
+    if (defaultCommandSlug && defaultCommandSlug in commands) {
+      const defaultCommand = toRecord(commands[defaultCommandSlug]);
+      args = toCommandArgsArray(defaultCommand.args);
       if ("env" in defaultCommand) {
         env = defaultCommand.env;
       }
@@ -76,29 +76,6 @@ function normalizeProjectsShape(config: RawConfig): RawConfig {
       if ("killSignal" in defaultCommand || "killsignal" in defaultCommand) {
         killSignal = readKillSignal(defaultCommand);
       }
-    } else if (typeof defaultCommand.alias === "string") {
-      const alias = toRecord(commands[defaultCommand.alias]);
-      const aliasArgs = toCommandArgsArray(alias.args);
-      if (aliasArgs) {
-        args = aliasArgs;
-      }
-      if ("env" in alias) {
-        env = alias.env;
-      }
-      if ("shell" in alias) {
-        shell = readShell(alias);
-      }
-      if ("killSignal" in alias || "killsignal" in alias) {
-        killSignal = readKillSignal(alias);
-      }
-    }
-
-    const extras: Record<string, unknown> = {};
-    for (const [commandSlug, command] of Object.entries(commands)) {
-      if (commandSlug === "default") {
-        continue;
-      }
-      extras[commandSlug] = command;
     }
 
     sectionProjects.push(projectSlug);
@@ -108,7 +85,7 @@ function normalizeProjectsShape(config: RawConfig): RawConfig {
       env,
       shell,
       killSignal,
-      extras,
+      extras: commands,
       loadBalancer: services,
     };
 

@@ -4,6 +4,8 @@ export type HostAccess = "local" | "network";
 export interface AdtDefinition {
   host: string | null;
   uiPath?: string;
+  /** Folder of the files the devtool rebuilds or keeps between runs, given to the commands as `APPSYS_DEVTOOL_CACHE_DIR`. */
+  cacheDir: string;
   shell: string | null;
   ports: {
     server: number;
@@ -46,11 +48,40 @@ export interface LoadBalancerCertificate {
   key: string;
 }
 
+/** An external tool reachable from the interface, shown in the devtool or opened in a new tab. */
+export interface IntegrationDefinition {
+  slug: string;
+  name: string;
+  /** Iconify name of its icon. */
+  icon: string;
+  url: string;
+  /** Whether the interface shows it in a frame, the load balancer then allowing the devtool to frame its host. */
+  embed: boolean;
+}
+
+/** A reference to something of a directory the sidebar offers in one click. */
+export interface DirectoryShortcut {
+  type: "integration" | "command" | "files" | "service";
+  /** Slug of the integration, command, folder of files or service. */
+  slug: string;
+  /** For a service, the index of the host opened. */
+  index: number;
+}
+
+/** What a directory does by default, a command being its main command. */
+export interface DirectoryDefaultAction {
+  shortcut: DirectoryShortcut;
+  /** `icon`: from its button in the row of the directory; `row`: on a click on the row itself; `row-icon`: both. */
+  trigger: "icon" | "row" | "row-icon";
+  /** The icon of its button: an Iconify name, `own` for the icon of its integration, null for the icon of its type. */
+  icon: string | null;
+}
+
 export interface DirectoryLoadBalancerRule {
   slug: string;
   hosts: string[];
-  ports: number[];
-  urls: string[];
+  /** Where requests are sent, as http(s) URLs, shared in turn. */
+  targets: string[];
   tls: boolean;
   path: string | null;
   prefix: string | null;
@@ -129,8 +160,14 @@ export interface DirectoryDefinition {
   /** The folders whose executables are offered as scripts. */
   scripts: DirectoryScripts[];
   files: Record<string, DirectoryFiles>;
-  /** Slug of the folder of files opened by default, null when there is none. */
-  defaultFiles: string | null;
+  /** What the directory does by default, null when it declares nothing. */
+  defaultAction: DirectoryDefaultAction | null;
+  /** The integrations of the directory, in the order of the configuration. */
+  integrations: IntegrationDefinition[];
+  /** Shown as icons in the row of the directory, in order. */
+  icons: DirectoryShortcut[];
+  /** Shown as rows under the row of the directory, in order. */
+  lines: DirectoryShortcut[];
   notifications: boolean;
   env: Record<string, string>;
   shell: string | null;
@@ -164,6 +201,8 @@ export interface RuntimeConfig {
   passthrough: PassthroughRule[];
   /** The local DNS, null when no record is declared. */
   dns: DnsDefinition | null;
+  /** The integrations, in the order of the configuration. */
+  integrations: IntegrationDefinition[];
   projects: Record<string, ProjectDefinition>;
   warnings: string[];
 }
@@ -172,6 +211,7 @@ export interface ClientConfigPayload {
   version: string;
   warnings: string[];
   loadBalancers: string[];
+  integrations: IntegrationDefinition[];
   projects: Record<string, ProjectDefinition>;
 }
 
@@ -223,6 +263,8 @@ export type PortConflictAction = "kill" | "killAndRestart" | "dismiss";
 export interface CdnSessionPayload {
   /** Whether the configuration declares a CDN. */
   configured: boolean;
+  /** Name shown for the OpenID Connect issuer signing in, null when the configuration gives none. */
+  issuerName: string | null;
   signedIn: boolean;
   user: {
     name: string | null;

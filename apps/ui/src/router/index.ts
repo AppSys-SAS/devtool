@@ -20,6 +20,12 @@ const router = createRouter({
       props: { space: "configs", name: "Configs" },
     },
     {
+      name: "integration",
+      path: "/i/:integration",
+      component: () => import("@/views/IntegrationView.vue"),
+      props: true,
+    },
+    {
       name: "stream",
       path: "/s/:streamSlug",
       component: () => import("@/views/StreamView.vue"),
@@ -63,6 +69,12 @@ const router = createRouter({
               name: "directory-files",
               path: "files/:fileSpace",
               component: () => import("@/views/DirectoryFilesView.vue"),
+              props: true,
+            },
+            {
+              name: "directory-integration",
+              path: "i/:integration",
+              component: () => import("@/views/IntegrationView.vue"),
               props: true,
             },
           ],

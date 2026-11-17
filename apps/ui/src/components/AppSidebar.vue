@@ -3,14 +3,16 @@ import { computed, ref, watch } from "vue";
 import { RouterLink, useRouter } from "vue-router";
 import { useColorMode } from "@vueuse/core";
 import { Icon } from "@iconify/vue";
-import { ArrowDownUp, Bookmark, Circle, Download, FileCog, FolderOpen, FolderTree, FolderX, Monitor, Moon, Play, RefreshCw, RotateCcw, Square, Sun } from '@lucide/vue'
+import { ArrowDownUp, Bookmark, Circle, Download, FileCog, FolderTree, FolderX, Monitor, Moon, RefreshCw, RotateCcw, Square, Sun } from '@lucide/vue'
 import CdnSession from "@/components/CdnSession.vue";
 import SidebarStreamItem from "@/components/SidebarStreamItem.vue";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
-import type { ProjectRestore } from "@appsys/devtool-shared";
-import { iconFromMeta, startDefaultCommand } from "@/lib/directory-commands";
+import type { DirectoryDefaultAction, DirectoryDefinition, ProjectRestore } from "@appsys/devtool-shared";
+import ShortcutLine from "@/components/ShortcutLine.vue";
+import { defaultShortcut, directoryShortcuts, integrationShortcut, type SidebarShortcut } from "@/lib/shortcuts";
+import { iconFromMeta } from "@/lib/directory-commands";
 import bookmarkStore from "@/stores/bookmark";
 import commandRunsStore from "@/stores/command-runs";
 import configStore from "@/stores/config";
@@ -22,7 +24,12 @@ interface SidebarDirectory {
   projectSlug: string;
   name: string;
   args: string[] | null;
-  defaultFiles: { slug: string; name: string } | null;
+  /** What the directory does by default, `command` telling whether it is its main command. */
+  defaultAction: { shortcut: SidebarShortcut; trigger: DirectoryDefaultAction["trigger"]; command: boolean } | null;
+  /** Shortcuts shown as icons in the row of the directory. */
+  icons: SidebarShortcut[];
+  /** Shortcuts shown as rows under the row of the directory. */
+  lines: SidebarShortcut[];
   env: Record<string, string>;
   extras: Record<string, { name: string; args: string[]; killSignal: string | null; meta?: unknown }>;
   killSignal: string | null;
@@ -100,7 +107,9 @@ const sidebarData = computed(() => {
           projectSlug,
           name: directory.name || directorySlug,
           args: directory.args,
-          defaultFiles: directory.defaultFiles ? { slug: directory.defaultFiles, name: directory.files[directory.defaultFiles]?.name ?? directory.defaultFiles } : null,
+          defaultAction: readDefaultAction(projectSlug, directory),
+          icons: directoryShortcuts(projectSlug, directory, directory.icons),
+          lines: directoryShortcuts(projectSlug, directory, directory.lines),
           env: directory.env,
           killSignal: directory.killSignal,
           extras: directory.extras,
@@ -213,13 +222,32 @@ function restoreProject(project: SidebarProject): void {
 }
 
 /**
- * Opens the folder of files a directory opens by default.
+ * Gives what a directory of the sidebar does by default.
+ * @param projectSlug The project of the directory.
+ * @param directory The directory.
+ * @returns Its default action, null when it declares none.
+ */
+function readDefaultAction(projectSlug: string, directory: DirectoryDefinition): SidebarDirectory["defaultAction"] {
+  const shortcut = defaultShortcut(projectSlug, directory);
+  if (!shortcut || !directory.defaultAction) {
+    return null;
+  }
+  return { shortcut, trigger: directory.defaultAction.trigger, command: directory.defaultAction.shortcut.type === "command" };
+}
+
+/**
+ * Runs the default action of a directory on a click on its row, when it is triggered from the row,
+ * the row then not opening the directory; a main command already running opens the directory as usual.
+ * @param event The click, its buttons keeping their own action.
  * @param directory The directory.
  */
-function openDefaultFiles(directory: SidebarDirectory): void {
-  if (directory.defaultFiles) {
-    void router.push({ name: "directory-files", params: { projectSlug: directory.projectSlug, directorySlug: directory.slug, fileSpace: directory.defaultFiles.slug } });
+function runDefaultActionFromRow(event: MouseEvent, directory: SidebarDirectory): void {
+  const action = directory.defaultAction;
+  if (!action || action.trigger === "icon" || (event.target as Element).closest("button") || (action.command && directory.stream?.status === "RUNNING")) {
+    return;
   }
+  event.preventDefault();
+  action.shortcut.open();
 }
 
 function areArgsEqual(left: string[], right: string[]): boolean {
@@ -272,29 +300,42 @@ function resolveStreamIcon(directory: SidebarDirectory, stream: CommandStream): 
           {{ configStore.warnings.value.length }} config warning{{ configStore.warnings.value.length > 1 ? "s" : "" }}
         </RouterLink>
 
-        <div class="flex items-center gap-1 rounded-md p-1">
-          <Button
-            as-child
-            size="sm"
-            variant="ghost"
-            class="h-8 flex-1 justify-start gap-2"
+        <div class="space-y-1">
+          <div class="flex items-center gap-1 rounded-md p-1">
+            <Button
+              as-child
+              size="sm"
+              variant="ghost"
+              class="h-8 flex-1 justify-start gap-2"
+            >
+              <RouterLink :to="{ name: 'environment' }">
+                <ArrowDownUp class="size-4" />
+                Environment
+              </RouterLink>
+            </Button>
+            <Button
+              as-child
+              size="sm"
+              variant="ghost"
+              class="h-8 flex-1 justify-start gap-2"
+            >
+              <RouterLink :to="{ name: 'configs' }">
+                <FileCog class="size-4" />
+                Configs
+              </RouterLink>
+            </Button>
+          </div>
+
+          <div
+            v-if="configStore.integrations.value.length"
+            class="space-y-1 px-1"
           >
-            <RouterLink :to="{ name: 'environment' }">
-              <ArrowDownUp class="size-4" />
-              Environment
-            </RouterLink>
-          </Button>
-          <Button
-            as-child
-            size="sm"
-            variant="ghost"
-            class="h-8 flex-1 justify-start gap-2"
-          >
-            <RouterLink :to="{ name: 'configs' }">
-              <FileCog class="size-4" />
-              Configs
-            </RouterLink>
-          </Button>
+            <ShortcutLine
+              v-for="integration in configStore.integrations.value"
+              :key="integration.slug"
+              :shortcut="integrationShortcut(integration)"
+            />
+          </div>
         </div>
 
         <p
@@ -374,6 +415,7 @@ function resolveStreamIcon(directory: SidebarDirectory, stream: CommandStream): 
               <RouterLink
                 :to="{ name: 'directory', params: { projectSlug: project.slug, directorySlug: directory.slug } }"
                 class="group relative flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent/60"
+                @click.capture="runDefaultActionFromRow($event, directory)"
                 :class="{
                   'bg-accent/60': directory.stream?.status === 'RUNNING',
                   'border border-destructive/40': directory.stream?.status === 'ERROR',
@@ -396,23 +438,17 @@ function resolveStreamIcon(directory: SidebarDirectory, stream: CommandStream): 
                 <span class="min-w-0 flex-1 truncate">{{ directory.name }}</span>
                 <div class="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
                   <Button
-                    v-if="directory.defaultFiles"
+                    v-if="directory.defaultAction && directory.defaultAction.trigger !== 'row' && !(directory.defaultAction.command && directory.stream?.status === 'RUNNING')"
                     size="icon"
                     variant="ghost"
                     class="size-6"
-                    :title="directory.defaultFiles.name"
-                    @click.prevent.stop="openDefaultFiles(directory)"
+                    :title="directory.defaultAction.shortcut.name"
+                    @click.prevent.stop="directory.defaultAction.shortcut.open()"
                   >
-                    <FolderOpen class="size-3.5" />
-                  </Button>
-                  <Button
-                    v-if="(directory.args || directory.stream) && directory.stream?.status !== 'RUNNING'"
-                    size="icon"
-                    variant="ghost"
-                    class="size-6"
-                    @click.prevent.stop="startDefaultCommand(directory.projectSlug, directory)"
-                  >
-                    <Play class="size-3.5" />
+                    <Icon
+                      :icon="directory.defaultAction.shortcut.icon"
+                      class="size-3.5"
+                    />
                   </Button>
                   <Button
                     v-if="directory.stream && directory.stream.status === 'RUNNING'"
@@ -433,7 +469,24 @@ function resolveStreamIcon(directory: SidebarDirectory, stream: CommandStream): 
                     <RotateCcw class="size-3.5" />
                   </Button>
                 </div>
+                <ShortcutLine
+                  v-for="shortcut in directory.icons"
+                  :key="shortcut.key"
+                  :shortcut="shortcut"
+                  compact
+                />
               </RouterLink>
+
+              <div
+                v-if="directory.lines.length"
+                class="space-y-1 pl-2"
+              >
+                <ShortcutLine
+                  v-for="shortcut in directory.lines"
+                  :key="shortcut.key"
+                  :shortcut="shortcut"
+                />
+              </div>
 
               <div class="space-y-1 pl-2">
                 <SidebarStreamItem

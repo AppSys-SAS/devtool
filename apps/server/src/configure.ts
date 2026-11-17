@@ -1,13 +1,15 @@
 import path from "node:path";
 import fs from "node:fs/promises";
 import net from "node:net";
-import type { ClientConfigPayload, DirectoryDefinition, DirectoryFiles, DirectoryScripts, ScriptArgument, ScriptSettings, AdtDefinition, DnsDefinition, DnsRecord, HostAccess, LoadBalancerCertificate, PassthroughRule, ProjectDefinition, ProjectRestore, RuntimeConfig } from "@appsys/devtool-shared";
+import type { ClientConfigPayload, DirectoryDefinition, DirectoryFiles, DirectoryScripts, ScriptArgument, ScriptSettings, AdtDefinition, DirectoryDefaultAction, DirectoryShortcut, DnsDefinition, DnsRecord, HostAccess, IntegrationDefinition, LoadBalancerCertificate, PassthroughRule, ProjectDefinition, ProjectRestore, RuntimeConfig } from "@appsys/devtool-shared";
 import { logger } from "@appsys/devtool-shared";
+import { resolveCacheFolder } from "@appsys/devtool-config";
 import { type CommandAnswer, type CommandAutomation, findInvalidValueBlocks } from "./command-automation.js";
-import { isObject, toCommandArgsArray, toIntegerArray, toRecord, toStringArray, toStringRecord } from "./utils.js";
+import { isObject, toCommandArgsArray, toRecord, toStringArray, toStringRecord } from "./utils.js";
 
 const SLUG_REGEXP = /^[a-zA-Z0-9\-\/_.]+$/i;
 const HOST_PATTERN_REGEXP = /^(\*\.)?[a-z0-9-]+(\.[a-z0-9-]+)*$/;
+const DEFAULT_INTEGRATION_ICON = "lucide:app-window";
 
 /**
  * Gives the settings of the devtool before the configuration is read.
@@ -16,6 +18,7 @@ const HOST_PATTERN_REGEXP = /^(\*\.)?[a-z0-9-]+(\.[a-z0-9-]+)*$/;
 function defaultAdt(): AdtDefinition {
   return {
     host: null,
+    cacheDir: resolveCacheFolder({}),
     shell: null,
     ports: {
       server: 6730,
@@ -48,42 +51,60 @@ export class DevtoolConfigure {
 
   public dns: DnsDefinition | null;
 
+  public integrations: IntegrationDefinition[];
+
   constructor(config: Record<string, unknown>) {
     this.initialConfig = config;
     this.adt = defaultAdt();
     this.loadBalancers = {};
     this.passthrough = [];
     this.dns = null;
+    this.integrations = [];
     this.projects = {};
     this.automations = {};
     this.warnings = [];
   }
 
+  /**
+   * Gives the configuration the server runs with.
+   * @returns The configuration read last.
+   */
   get runtimeConfig(): RuntimeConfig {
     return {
       adt: this.adt,
       loadBalancers: this.loadBalancers,
       passthrough: this.passthrough,
       dns: this.dns,
+      integrations: this.integrations,
       projects: this.projects,
       warnings: this.warnings,
     };
   }
 
+  /**
+   * Gives the part of the configuration the interfaces see.
+   * @param version The version of the devtool.
+   * @returns The configuration sent to the interfaces.
+   */
   getForClient(version: string): ClientConfigPayload {
     return {
       version,
       warnings: this.warnings,
       loadBalancers: Object.keys(this.loadBalancers),
+      integrations: this.integrations,
       projects: this.projects,
     };
   }
 
+  /**
+   * Reads the raw configuration again from scratch, every invalid setting becoming a warning.
+   */
   async reconfigure(): Promise<void> {
     this.adt = defaultAdt();
     this.loadBalancers = {};
     this.passthrough = [];
     this.dns = null;
+    this.integrations = [];
     this.projects = {};
     this.automations = {};
     this.warnings = [];
@@ -102,6 +123,7 @@ export class DevtoolConfigure {
 
     this.passthrough = this.readPassthrough("passthrough", this.initialConfig.passthrough);
     this.dns = this.readDns("dns", this.initialConfig.dns);
+    this.integrations = this.readIntegrations("integrations", this.initialConfig.integrations);
 
     try {
       await this.reconfigureProjects();
@@ -110,6 +132,9 @@ export class DevtoolConfigure {
     }
   }
 
+  /**
+   * Reads the settings of the devtool itself, `adt`: its host, interface, cache, shell, ports and access.
+   */
   private async reconfigureAdt(): Promise<void> {
     const adt = toRecord(this.initialConfig.adt);
     if (Object.keys(adt).length === 0) {
@@ -123,6 +148,7 @@ export class DevtoolConfigure {
     if (typeof adt.uiPath === "string") {
       this.adt.uiPath = adt.uiPath;
     }
+    this.adt.cacheDir = resolveCacheFolder(this.initialConfig);
 
     const adtShell = this.readShell("adt.shell", adt.shell);
     if (adtShell !== null) {
@@ -206,6 +232,10 @@ export class DevtoolConfigure {
     if (!this.checkString(`${slug}.path`, project.path)) {
       return;
     }
+    if (!path.isAbsolute(project.path as string)) {
+      this.addWarning(`${slug}.path`, "is relative to the workspace, which is not declared (workspace: <folder>)");
+      return;
+    }
 
     const projectPath = this.pathFrom(project.path as string);
     const projectDefinition: ProjectDefinition = {
@@ -256,6 +286,13 @@ export class DevtoolConfigure {
     this.projects[projectSlug] = projectDefinition;
   }
 
+  /**
+   * Reads a directory of a project: its commands, services, scripts, files and integrations.
+   * @param slug Names the directory in warnings.
+   * @param projectDefinition The project receiving the directory.
+   * @param directorySlug The slug of the directory.
+   * @param directory The raw directory.
+   */
   private async reconfigureProjectDirectory(
     slug: string,
     projectDefinition: ProjectDefinition,
@@ -290,7 +327,10 @@ export class DevtoolConfigure {
       extras: {},
       scripts: [],
       files: {},
-      defaultFiles: null,
+      defaultAction: null,
+      integrations: [],
+      icons: [],
+      lines: [],
       notifications: directory.notifications === false ? false : projectDefinition.notifications,
       env: {},
       shell: this.adt.shell,
@@ -326,95 +366,63 @@ export class DevtoolConfigure {
     const lbRecord = toRecord(directory.loadBalancer);
     for (const [lbSlug, lbRaw] of Object.entries(lbRecord)) {
       const lb = toRecord(lbRaw);
-      const hosts = toStringArray(lb.hosts);
-      const parsedPorts = toIntegerArray(lb.ports);
-      if ("ports" in lb && parsedPorts === null) {
-        this.addWarning(`${slug}.loadBalancer[${lbSlug}].ports`, "must be an array of positive integers");
-        continue;
+      const setting = `${slug}.services[${lbSlug}]`;
+      for (const replaced of ["ports", "urls", "url"].filter((key) => key in lb)) {
+        this.addWarning(`${setting}.${replaced}`, "is replaced by target: <port> | <host>:<port> | <URL>, or a list of them");
       }
-      const ports = parsedPorts ?? [];
-      const urls: string[] = [];
 
+      const rawHosts = lb.hosts ?? lb.host;
+      const hosts = typeof rawHosts === "string" ? [rawHosts] : toStringArray(rawHosts);
       if (!hosts?.length) {
-        this.addWarning(`${slug}.loadBalancer[${lbSlug}].hosts`, "not defined or empty");
+        this.addWarning(`${setting}.host`, "must be a host name or a list of host names");
         continue;
       }
-
-      if ("url" in lb) {
-        if (typeof lb.url !== "string") {
-          this.addWarning(`${slug}.loadBalancer[${lbSlug}].url`, "is not a string");
-          continue;
-        }
-        urls.push(lb.url);
-      }
-
-      if ("urls" in lb) {
-        const lbUrls = toStringArray(lb.urls);
-        if (!lbUrls) {
-          this.addWarning(`${slug}.loadBalancer[${lbSlug}].urls`, "must be an array of strings");
-          continue;
-        }
-        urls.push(...lbUrls);
-      }
-
-      const validatedUrls: string[] = [];
-      for (const rawUrl of urls) {
-        const urlValue = rawUrl.trim();
-        if (!urlValue.length) {
-          continue;
-        }
-
-        try {
-          const parsedUrl = new URL(urlValue);
-          if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
-            this.addWarning(`${slug}.loadBalancer[${lbSlug}].url`, "must use http:// or https://");
-            continue;
-          }
-          validatedUrls.push(parsedUrl.toString());
-        } catch {
-          this.addWarning(`${slug}.loadBalancer[${lbSlug}].url`, `invalid URL: ${urlValue}`);
-          continue;
-        }
+      const targets = this.readTargets(`${setting}.target`, lb.target);
+      if (!targets) {
+        continue;
       }
 
       const tls = lb.tls === true;
       if ("tls" in lb && lb.tls !== true && lb.tls !== false) {
-        this.addWarning(`${slug}.loadBalancer[${lbSlug}].tls`, "is not a boolean");
+        this.addWarning(`${setting}.tls`, "is not a boolean");
         continue;
       }
 
-      if (lb.path && !this.checkString(`${slug}.loadBalancer[${lbSlug}].path`, lb.path)) {
+      if (lb.path && !this.checkString(`${setting}.path`, lb.path)) {
         continue;
       }
-      if (lb.prefix && !this.checkString(`${slug}.loadBalancer[${lbSlug}].prefix`, lb.prefix)) {
+      if (lb.prefix && !this.checkString(`${setting}.prefix`, lb.prefix)) {
         continue;
       }
-      if (lb.pathNot && !this.checkString(`${slug}.loadBalancer[${lbSlug}].pathNot`, lb.pathNot)) {
+      if (lb.pathNot && !this.checkString(`${setting}.pathNot`, lb.pathNot)) {
         continue;
       }
 
       const preserveHost = lb.preserveHost === true;
       if ("preserveHost" in lb && lb.preserveHost !== true && lb.preserveHost !== false) {
-        this.addWarning(`${slug}.loadBalancer[${lbSlug}].preserveHost`, "is not a boolean");
+        this.addWarning(`${setting}.preserveHost`, "is not a boolean");
         continue;
       }
 
       directoryDefinition.loadBalancer[lbSlug] = {
         slug: lbSlug,
         hosts,
-        ports,
-        urls: validatedUrls,
+        targets,
         tls,
         path: typeof lb.path === "string" ? lb.path : null,
         prefix: typeof lb.prefix === "string" ? lb.prefix : null,
         pathNot: typeof lb.pathNot === "string" ? lb.pathNot : null,
         preserveHost,
-        access: this.readAccess(`${slug}.loadBalancer[${lbSlug}].access`, lb.access),
+        access: this.readAccess(`${setting}.access`, lb.access),
       };
     }
 
     const extras = toRecord(directory.extras);
     for (const [extraSlug, extraRaw] of Object.entries(extras)) {
+      if (extraSlug === "default") {
+        this.addWarning(`${slug}.commands.default`, "is replaced by default: { action: command:<slug> }");
+        continue;
+      }
       const extra = toRecord(extraRaw);
       const extraArgs = toCommandArgsArray(extra.args);
       if (!extraArgs) {
@@ -452,7 +460,10 @@ export class DevtoolConfigure {
 
     directoryDefinition.scripts = await this.readScripts(`${slug}.scripts`, directoryPath, directory.scripts);
     directoryDefinition.files = this.readFiles(`${slug}.files`, directoryDefinition, directory.files);
-    directoryDefinition.defaultFiles = this.readDefaultFiles(`${slug}.files.default`, directoryDefinition.files, toRecord(directory.files).default);
+    directoryDefinition.integrations = this.readIntegrations(`${slug}.integrations`, directory.integrations);
+    directoryDefinition.defaultAction = this.readDefaultAction(`${slug}.default`, directoryDefinition, directory.default);
+    directoryDefinition.icons = this.readShortcuts(`${slug}.icons`, directoryDefinition, directory.icons);
+    directoryDefinition.lines = this.readShortcuts(`${slug}.lines`, directoryDefinition, directory.lines);
 
     projectDefinition.directories[directorySlug] = directoryDefinition;
   }
@@ -561,6 +572,98 @@ export class DevtoolConfigure {
       return null;
     }
     return records.length ? { port, access: this.readAccess(`${slug}.access`, dns.access), records } : null;
+  }
+
+  /**
+   * Reads the integrations, `{ <slug>: { name, url, icon, embed } }`, in the order they are declared.
+   * @param slug Names the setting in warnings.
+   * @param value The raw setting.
+   * @returns The valid integrations.
+   */
+  private readIntegrations(slug: string, value: unknown): IntegrationDefinition[] {
+    if (value === undefined) {
+      return [];
+    }
+    if (!isObject(value)) {
+      this.addWarning(slug, "must be a map of integrations");
+      return [];
+    }
+
+    const integrations: IntegrationDefinition[] = [];
+    for (const [integrationSlug, raw] of Object.entries(value)) {
+      const integration = toRecord(raw);
+      const setting = `${slug}.${integrationSlug}`;
+      if (!this.checkSlug(setting, integrationSlug) || !this.checkString(`${setting}.name`, integration.name)) {
+        continue;
+      }
+      if (typeof integration.url !== "string" || !/^https?:\/\/[^/]/.test(integration.url)) {
+        this.addWarning(`${setting}.url`, "must be an http or https URL");
+        continue;
+      }
+      if (integration.icon !== undefined && !this.checkString(`${setting}.icon`, integration.icon)) {
+        continue;
+      }
+      if (integration.embed !== undefined && typeof integration.embed !== "boolean") {
+        this.addWarning(`${setting}.embed`, "must be true or false");
+        continue;
+      }
+
+      integrations.push({
+        slug: integrationSlug,
+        name: integration.name as string,
+        icon: (integration.icon as string | undefined) ?? DEFAULT_INTEGRATION_ICON,
+        url: integration.url,
+        embed: integration.embed ?? true,
+      });
+    }
+    return integrations;
+  }
+
+  /**
+   * Reads a list of shortcuts of a directory, each `integration:<slug>`, `command:<slug>`,
+   * `files:<slug>` or `service:<slug>[:<host index>]`, keeping those naming something of the directory.
+   * @param slug Names the setting in warnings.
+   * @param directory The directory, its integrations, commands, files and services already read.
+   * @param value The raw setting.
+   * @returns The valid shortcuts, in order.
+   */
+  private readShortcuts(slug: string, directory: DirectoryDefinition, value: unknown): DirectoryShortcut[] {
+    if (value === undefined) {
+      return [];
+    }
+    if (!Array.isArray(value)) {
+      this.addWarning(slug, "must be a list of <type>:<slug>");
+      return [];
+    }
+    return value.flatMap((entry, index) => this.readShortcut(`${slug}[${index}]`, directory, entry) ?? []);
+  }
+
+  /**
+   * Reads one shortcut of a directory, `integration:<slug>`, `command:<slug>`, `files:<slug>` or
+   * `service:<slug>[:<host index>]`.
+   * @param slug Names the setting in warnings.
+   * @param directory The directory, its integrations, commands, files and services already read.
+   * @param value The raw shortcut.
+   * @returns The shortcut, null when it names nothing of the directory.
+   */
+  private readShortcut(slug: string, directory: DirectoryDefinition, value: unknown): DirectoryShortcut | null {
+    if (typeof value !== "string") {
+      this.addWarning(slug, "must be <type>:<slug>");
+      return null;
+    }
+
+    const [type, target = "", hostIndex = "0"] = value.split(":");
+    const shortcut = { type, slug: target, index: Number(hostIndex) } as DirectoryShortcut;
+    const exists =
+      (type === "integration" && directory.integrations.some((integration) => integration.slug === target)) ||
+      (type === "command" && target in directory.extras) ||
+      (type === "files" && target in directory.files) ||
+      (type === "service" && Number.isInteger(shortcut.index) && directory.loadBalancer[target]?.hosts[shortcut.index] !== undefined);
+    if (!exists) {
+      this.addWarning(slug, `${value} names no integration, command, files or service host of the directory`);
+      return null;
+    }
+    return shortcut;
   }
 
   /**
@@ -691,28 +794,60 @@ export class DevtoolConfigure {
   }
 
   /**
-   * Reads the folder of files a directory opens by default, given as `{ alias: <slug> }`.
+   * Reads what a directory does by default, `{ action: <type>:<slug>, trigger: icon | row | row-icon, icon: own | <prefix>:<name> }`.
    * @param slug Names the setting in warnings.
-   * @param files The folders of files of the directory.
+   * @param directory The directory, its integrations, commands, files and services already read.
    * @param value The raw setting.
-   * @returns The slug of the folder, null when there is none.
+   * @returns The default action, null when there is none.
    */
-  private readDefaultFiles(slug: string, files: Record<string, DirectoryFiles>, value: unknown): string | null {
+  private readDefaultAction(slug: string, directory: DirectoryDefinition, value: unknown): DirectoryDefaultAction | null {
     if (value === undefined) {
       return null;
     }
 
-    const alias = toRecord(value).alias;
-    if (typeof alias !== "string" || !(alias in files)) {
-      this.addWarning(slug, "must be { alias: <slug of a folder of files> }");
+    const setting = toRecord(value);
+    const shortcut = this.readShortcut(`${slug}.action`, directory, setting.action);
+    if (setting.trigger !== undefined && setting.trigger !== "icon" && setting.trigger !== "row" && setting.trigger !== "row-icon") {
+      this.addWarning(`${slug}.trigger`, "must be icon, row or row-icon");
       return null;
     }
-    return alias;
+    if (setting.icon !== undefined && (typeof setting.icon !== "string" || (setting.icon !== "own" && !setting.icon.includes(":")))) {
+      this.addWarning(`${slug}.icon`, "must be own or an Iconify name <prefix>:<name>");
+      return null;
+    }
+    return shortcut ? { shortcut, trigger: setting.trigger ?? "icon", icon: setting.icon ?? null } : null;
   }
 
   /**
-   * Reads the folders of editable files a directory declares, which may not exist yet; `default`
-   * names the one opened by default.
+   * Reads where a service sends its requests: a port of this machine, `<host>:<port>` or an http(s)
+   * URL, or a list of them shared in turn.
+   * @param slug Names the setting in warnings.
+   * @param value The raw setting.
+   * @returns The targets as URLs, null when one of them is invalid or none is given.
+   */
+  private readTargets(slug: string, value: unknown): string[] | null {
+    const entries = Array.isArray(value) ? value : value === undefined ? [] : [value];
+    if (!entries.length) {
+      this.addWarning(slug, "must be <port> | <host>:<port> | <URL>, or a list of them");
+      return null;
+    }
+
+    const targets: string[] = [];
+    for (const entry of entries) {
+      const text = typeof entry === "number" ? `127.0.0.1:${entry}` : typeof entry === "string" ? entry.trim() : "";
+      const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(text);
+      const url = URL.parse(withScheme ? text : `http://${text}`);
+      if (!url || (url.protocol !== "http:" && url.protocol !== "https:") || !url.hostname || (!withScheme && !/:\d+$/.test(text))) {
+        this.addWarning(slug, `${String(entry)} is not a port, <host>:<port> or http(s) URL`);
+        return null;
+      }
+      targets.push(url.toString());
+    }
+    return targets;
+  }
+
+  /**
+   * Reads the folders of editable files a directory declares, which may not exist yet.
    * @param slug Names the setting in warnings.
    * @param directory The directory, its extras already read.
    * @param value The raw setting.
@@ -722,6 +857,7 @@ export class DevtoolConfigure {
     const files: Record<string, DirectoryFiles> = {};
     for (const [filesSlug, filesRaw] of Object.entries(toRecord(value))) {
       if (filesSlug === "default") {
+        this.addWarning(`${slug}.default`, "is replaced by default: { action: files:<slug> }");
         continue;
       }
 

@@ -1,7 +1,7 @@
 import { isUtf8 } from "node:buffer";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { APPSYS_DIRECTORY, readEnvironmentOptions, readYaml, readYamlMap, SHARED_CONFIG_PATH, writeLocalFile } from "@appsys/devtool-cdn";
+import { defaultEnvironmentFolder, readEnvironmentOptions, readYaml, readYamlMap, SHARED_CONFIG_PATH, writeLocalFile } from "@appsys/devtool-cdn";
 import type { RawConfig } from "@appsys/devtool-config";
 import type { FileEntryPayload, FilePayload, FileTreePayload, ProjectDefinition } from "@appsys/devtool-shared";
 
@@ -32,21 +32,27 @@ function localOverrideOf(filePath: string): string | null {
 }
 
 /**
- * Lists the configuration files of the environment, sorted, each followed by its personal override.
+ * Lists the configuration files of the environment the configurations tab shows, sorted, each followed by its
+ * personal override unless its `local` is false.
  *
  * @param section - The raw `environment` section of the configuration.
- * @returns Their paths, the shared devtool configuration alone when the section is missing or invalid.
+ * @returns The folder of the environment and the paths of the files in it, the shared devtool configuration alone
+ * in the default folder when the section is missing or invalid.
  */
-function configPaths(section: unknown): string[] {
-  let files = [SHARED_CONFIG_PATH];
+function configFiles(section: unknown): { folder: string; paths: string[] } {
+  const sharedConfig = { path: SHARED_CONFIG_PATH, display: true, local: true };
+  let folder = defaultEnvironmentFolder();
+  let files = [sharedConfig];
   try {
-    files = readEnvironmentOptions(section)?.items.filter((item) => item.kind === "file").map((item) => item.path) ?? files;
+    const options = readEnvironmentOptions(section);
+    folder = options?.folder ?? folder;
+    files = options?.configFiles.filter((file) => file.display) ?? files;
   } catch {
-    files = [SHARED_CONFIG_PATH];
+    files = [sharedConfig];
   }
 
-  const paths = [...files].sort().flatMap((filePath) => [filePath, localOverrideOf(filePath)]);
-  return [...new Set(paths.filter((filePath) => filePath !== null))];
+  const paths = [...files].sort((left, right) => left.path.localeCompare(right.path)).flatMap((file) => [file.path, file.local ? localOverrideOf(file.path) : null]);
+  return { folder, paths: [...new Set(paths.filter((filePath) => filePath !== null))] };
 }
 
 /**
@@ -366,7 +372,8 @@ export class DevtoolFileSpaces {
    * @param afterConfigWrite - Runs once a configuration file is written.
    */
   configure(config: RawConfig, projects: Record<string, ProjectDefinition>, afterConfigWrite: (filePath: string) => Promise<void>): void {
-    const spaces = new Map<string, FileSpace>([[CONFIGS_SPACE, new ListedFileSpace(CONFIGS_SPACE, APPSYS_DIRECTORY, configPaths(config.environment), afterConfigWrite)]]);
+    const { folder, paths } = configFiles(config.environment);
+    const spaces = new Map<string, FileSpace>([[CONFIGS_SPACE, new ListedFileSpace(CONFIGS_SPACE, folder, paths, afterConfigWrite)]]);
     for (const project of Object.values(projects)) {
       for (const directory of Object.values(project.directories)) {
         for (const files of Object.values(directory.files)) {

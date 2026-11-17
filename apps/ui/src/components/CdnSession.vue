@@ -63,7 +63,7 @@ function login(): void {
       </template>
       <template v-else-if="state.pendingLoginUrl">
         <div class="truncate text-sm">
-          Waiting for Authelia…
+          Waiting for {{ state.issuerName ?? "the sign-in" }}…
         </div>
         <a
           :href="state.pendingLoginUrl"
@@ -101,6 +101,7 @@ function login(): void {
       size="sm"
       variant="outline"
       class="h-8 shrink-0 gap-1.5 px-2 text-xs"
+      :title="state.issuerName ? `Sign in with ${state.issuerName}` : undefined"
       @click="login"
     >
       <LogIn class="size-3.5" />

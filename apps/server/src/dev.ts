@@ -1,10 +1,11 @@
 import runServer, { relaunchUnderApp } from "./index.js";
+import { loadMergedConfig, resolveCacheFolder } from "@appsys/devtool-config";
 import { logger } from "@appsys/devtool-shared";
 import { DEV_UI_PATH } from "./dev-options.js";
 
 void (async () => {
   try {
-    if (await relaunchUnderApp()) {
+    if (await relaunchUnderApp(resolveCacheFolder((await loadMergedConfig()).config))) {
       return;
     }
     logger.setLevel("debug");

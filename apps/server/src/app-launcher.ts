@@ -1,14 +1,12 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import net from "node:net";
-import os from "node:os";
 import path from "node:path";
 import type { Duplex } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { logger } from "@appsys/devtool-shared";
 
 const APP_NAME = "AppSys Devtool";
-const APP_DIRECTORY = path.join(os.homedir(), ".cache", "appsys-devtool", `${APP_NAME}.app`);
 const APP_ICON = fileURLToPath(new URL("../assets/AppIcon.icns", import.meta.url));
 const INFO_PLIST = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -31,11 +29,13 @@ const STOP_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
 /**
  * Builds the app named after devtool whose executable is a hard link to Node, so that the programs
  * it runs, 1Password prompts included, show its name and icon.
+ * @param cacheDir The cache folder of the devtool, holding the app.
  * @returns The path of its executable.
  */
-async function createLauncher(): Promise<string> {
-  const executable = path.join(APP_DIRECTORY, "Contents", "MacOS", APP_NAME);
-  const resources = path.join(APP_DIRECTORY, "Contents", "Resources");
+async function createLauncher(cacheDir: string): Promise<string> {
+  const appDirectory = path.join(cacheDir, `${APP_NAME}.app`);
+  const executable = path.join(appDirectory, "Contents", "MacOS", APP_NAME);
+  const resources = path.join(appDirectory, "Contents", "Resources");
   await fs.mkdir(path.dirname(executable), { recursive: true });
   await fs.mkdir(resources, { recursive: true });
 
@@ -44,7 +44,7 @@ async function createLauncher(): Promise<string> {
     await fs.rm(executable, { force: true });
     await fs.link(process.execPath, executable);
   }
-  await fs.writeFile(path.join(APP_DIRECTORY, "Contents", "Info.plist"), INFO_PLIST);
+  await fs.writeFile(path.join(appDirectory, "Contents", "Info.plist"), INFO_PLIST);
   await fs.copyFile(APP_ICON, path.join(resources, "AppIcon.icns"));
   return executable;
 }
@@ -65,9 +65,10 @@ function followStarter(): void {
  * its process tree, the current process then only waiting for it: it stops it on SIGINT, SIGTERM or
  * SIGHUP and ends with it. Does nothing in the process run again, outside macOS, or when the app
  * cannot be built.
+ * @param cacheDir The cache folder of the devtool, where the app is built.
  * @returns True when the current process only waits for the one run under the app.
  */
-export async function relaunchUnderApp(): Promise<boolean> {
+export async function relaunchUnderApp(cacheDir: string): Promise<boolean> {
   if (process.env[UNDER_APP_VARIABLE] === "1") {
     delete process.env[UNDER_APP_VARIABLE];
     followStarter();
@@ -79,7 +80,7 @@ export async function relaunchUnderApp(): Promise<boolean> {
 
   let executable: string;
   try {
-    executable = await createLauncher();
+    executable = await createLauncher(cacheDir);
   } catch (error) {
     logger.warn("Server", APP_NAME, `Not run under the app: ${error instanceof Error ? error.message : String(error)}`);
     return false;

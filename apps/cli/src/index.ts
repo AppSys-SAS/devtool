@@ -11,6 +11,7 @@ import {
   CdnClient,
   type CdnOptions,
   CdnSignInRequiredError,
+  defaultEnvironmentFolder,
   Environment,
   type EnvironmentItem,
   type EnvironmentOptions,
@@ -28,7 +29,7 @@ import {
   SHARED_CONFIG_PATH,
   type TransferResult,
 } from "@appsys/devtool-cdn";
-import { loadMergedConfig, resolveDefaultConfigPaths } from "@appsys/devtool-config";
+import { CONFIG_FOLDER_VARIABLE, loadMergedConfig, resolveCacheFolder, resolveDefaultConfigPaths } from "@appsys/devtool-config";
 import runProxy from "@appsys/devtool-proxy";
 import runServer, { relaunchUnderApp } from "@appsys/devtool-server";
 import { logger, type LogLevel } from "@appsys/devtool-shared";
@@ -38,16 +39,15 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const DEFAULT_UI_PATH = path.resolve(__dirname, "../../ui/dist");
-const INSTALLATION_CONFIG_PATHS = resolveDefaultConfigPaths(path.resolve(__dirname, ".."));
 
 /**
  * Reads the CDN options of the configuration of the devtool installation.
  * @returns The options.
  */
 async function requireConfiguredCdn(): Promise<CdnOptions> {
-  const options = readCdnOptions((await loadMergedConfig(INSTALLATION_CONFIG_PATHS)).config.cdn);
+  const options = readCdnOptions((await loadMergedConfig()).config.cdn);
   if (!options) {
-    throw new Error("no `cdn` section (url, authelia.issuer, authelia.clientId) in the devtool configuration");
+    throw new Error("no `cdn` section (url, openid.issuer, openid.clientId) in the devtool configuration");
   }
 
   return options;
@@ -59,7 +59,7 @@ async function requireConfiguredCdn(): Promise<CdnOptions> {
  */
 async function signIn(options: CdnOptions): Promise<void> {
   await login(options, (url) => {
-    logger.info("CLI", "Login", `Sign in on ${url}`);
+    logger.info("CLI", "Login", `Sign in${options.issuerName ? ` with ${options.issuerName}` : ""} on ${url}`);
     openInBrowser(url);
   });
   logger.info("CLI", "Login", "Signed in");
@@ -76,9 +76,10 @@ const SHARED_CONFIG_SELECTION: EnvironmentSelection = { item: { kind: "file", pa
  */
 async function loadEnvironment(client: CdnClient, configPaths: string[]): Promise<EnvironmentOptions> {
   const read = async (): Promise<EnvironmentOptions | null> => readEnvironmentOptions((await loadMergedConfig(configPaths)).config.environment);
-  const options = (await read()) ?? ((await new Environment(client, { items: [], s3: null }).pull(SHARED_CONFIG_SELECTION)).done ? await read() : null);
+  const bootstrap: EnvironmentOptions = { folder: defaultEnvironmentFolder(), items: [], configFiles: [], autoPulls: [], s3: null };
+  const options = (await read()) ?? ((await new Environment(client, bootstrap).pull(SHARED_CONFIG_SELECTION)).done ? await read() : null);
   if (!options) {
-    throw new Error(`no \`environment\` section in ${localPathOf(SHARED_CONFIG_PATH)}`);
+    throw new Error(`no \`environment\` section in ${localPathOf(bootstrap.folder, SHARED_CONFIG_PATH)}`);
   }
 
   return options;
@@ -206,7 +207,7 @@ async function transfer(selections: EnvironmentSelection[], run: (selection: Env
  */
 async function syncEnvironment(direction: "pull" | "push", targets: string[], flags: { interactive?: boolean; yes?: boolean }): Promise<void> {
   const client = new CdnClient(await requireConfiguredCdn());
-  const options = await loadEnvironment(client, INSTALLATION_CONFIG_PATHS);
+  const options = await loadEnvironment(client, resolveDefaultConfigPaths());
   const selections = flags.interactive ? await chooseSelections(options, direction) : parseTargets(options, targets);
   const environment = new Environment(client, options);
   if (direction === "push") {
@@ -244,7 +245,17 @@ function parseOptionalPort(input: string | undefined, label: string): number | u
 async function main(): Promise<void> {
   const program = new Command();
 
-  program.name("devtool").version(pkg.version);
+  program
+    .name("devtool")
+    .version(pkg.version)
+    .option("--config-folder <folder>", `configuration folder, else $${CONFIG_FOLDER_VARIABLE}, else ~/.config/appsys/devtool`)
+    .hook("preAction", () => {
+      const folder = program.opts<{ configFolder?: string }>().configFolder;
+      if (folder) {
+        const invocationCwd = process.env.INIT_CWD || process.cwd();
+        process.env[CONFIG_FOLDER_VARIABLE] = folder.startsWith("~") ? folder : path.resolve(invocationCwd, folder);
+      }
+    });
 
   program
     .command("server [configurations...]")
@@ -255,15 +266,14 @@ async function main(): Promise<void> {
     .option("--ui-path <path>", "path to static UI files", DEFAULT_UI_PATH)
     .option("--log-level <level>", "set log level (error|warn|info|debug)", "info")
     .action(async (configurations: string[], options: Record<string, string | undefined>) => {
-      if (await relaunchUnderApp()) {
-        return;
-      }
-      logger.setLevel((options.logLevel ?? "info") as LogLevel);
-
       const invocationCwd = process.env.INIT_CWD && process.env.INIT_CWD.length ? process.env.INIT_CWD : process.cwd();
       const configPaths = configurations.length
         ? configurations.map((configuration) => (path.isAbsolute(configuration) ? configuration : path.resolve(invocationCwd, configuration)))
         : resolveDefaultConfigPaths();
+      if (await relaunchUnderApp(resolveCacheFolder((await loadMergedConfig(configPaths)).config))) {
+        return;
+      }
+      logger.setLevel((options.logLevel ?? "info") as LogLevel);
 
       await runServer({
         serverPort: parseOptionalPort(options.serverPort, "server port"),
@@ -290,7 +300,7 @@ async function main(): Promise<void> {
 
   program
     .command("login")
-    .description("Sign in to the CDN with Authelia")
+    .description("Sign in to the CDN with its OpenID Connect issuer")
     .action(async () => {
       await signIn(await requireConfiguredCdn());
     });
@@ -349,7 +359,7 @@ async function main(): Promise<void> {
 
   const env = program
     .command("env")
-    .description(`Development environment in ${localPathOf("")}, mirrored on the CDN: configurations, databases, buckets, Redis databases`)
+    .description("Development environment (environment.folder), mirrored on the CDN: configurations, databases, buckets, Redis databases")
     .addHelpText("after", "\nTargets: <path> for an item, <path>:<table>,<table> for tables of a database, <path>:<group>,<group> for key groups of a Redis database (such as account/redis.gz:session:*); every item without target.");
 
   env

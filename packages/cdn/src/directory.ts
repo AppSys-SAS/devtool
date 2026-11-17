@@ -1,18 +1,25 @@
 import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
+import { resolveConfigFolder } from "@appsys/devtool-config";
 
-/** Directory of the AppSys development environment, mirroring the devtool files of the CDN. */
-export const APPSYS_DIRECTORY = path.join(os.homedir(), ".config/appsys");
+/**
+ * Gives the folder of the environment when the configuration names none: the parent of the configuration folder.
+ *
+ * @returns The absolute path.
+ */
+export function defaultEnvironmentFolder(): string {
+  return path.dirname(resolveConfigFolder());
+}
 
 /**
  * Gives the local path of a devtool file of the CDN.
  *
+ * @param folder - The folder of the environment, mirroring the devtool files of the CDN.
  * @param filePath - The path of the file on the CDN, such as `account/config.yml`.
  * @returns The absolute local path.
  */
-export function localPathOf(filePath: string): string {
-  return path.join(APPSYS_DIRECTORY, filePath);
+export function localPathOf(folder: string, filePath: string): string {
+  return path.join(folder, filePath);
 }
 
 /**

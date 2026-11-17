@@ -362,7 +362,7 @@ onMounted(() => wsStore.envRefresh());
               Environment
             </h1>
             <p class="text-sm text-muted-foreground">
-              Configurations, databases, buckets and Redis databases shared by the developers: <code>~/.config/appsys</code> ⇄ CDN.
+              Configurations, databases, buckets and Redis databases shared by the developers: <code>environment.folder</code> ⇄ CDN.
             </p>
           </div>
           <div class="flex items-center gap-2">
@@ -400,12 +400,12 @@ onMounted(() => wsStore.envRefresh());
             size="sm"
             @click="login"
           >
-            Sign in
+            Sign in{{ session.issuerName ? ` with ${session.issuerName}` : "" }}
           </Button>
           <span
             v-else
             class="text-xs text-muted-foreground"
-          >Waiting for Authelia…</span>
+          >Waiting for {{ session.issuerName ?? "the sign-in" }}…</span>
         </div>
 
         <div
@@ -434,7 +434,7 @@ onMounted(() => wsStore.envRefresh());
               v-else
               class="text-sm text-muted-foreground"
             >
-              Add a <code>cdn</code> section to <code>devtool-config.yml</code> to get the shared devtool configuration.
+              Add a <code>cdn</code> section to <code>config.local.yml</code> of the configuration folder to get the shared devtool configuration.
             </p>
           </div>
           <Button

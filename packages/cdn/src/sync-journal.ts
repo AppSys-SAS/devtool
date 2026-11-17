@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { localPathOf } from "./directory.js";
+import { resolveConfigFolder } from "@appsys/devtool-config";
 
 /** Dates of both copies of an item when they were last made equal by a pull or a push. */
 export interface SyncRecord {
@@ -8,7 +8,14 @@ export interface SyncRecord {
   remoteUpdatedAt: Date;
 }
 
-const JOURNAL_PATH = localPathOf("devtool/sync.json");
+/**
+ * Gives the path of the synchronization journal, in the configuration folder.
+ *
+ * @returns The absolute path.
+ */
+function journalPath(): string {
+  return path.join(resolveConfigFolder(), "sync.json");
+}
 
 /**
  * Reads the synchronization journal of the developer.
@@ -18,7 +25,7 @@ const JOURNAL_PATH = localPathOf("devtool/sync.json");
 export async function readSyncJournal(): Promise<Map<string, SyncRecord>> {
   let raw: Record<string, { localUpdatedAt: string; remoteUpdatedAt: string }>;
   try {
-    raw = JSON.parse(await fs.readFile(JOURNAL_PATH, "utf-8")) as typeof raw;
+    raw = JSON.parse(await fs.readFile(journalPath(), "utf-8")) as typeof raw;
   } catch {
     return new Map();
   }
@@ -35,8 +42,8 @@ export async function readSyncJournal(): Promise<Map<string, SyncRecord>> {
 export async function writeSyncRecord(itemPath: string, record: SyncRecord): Promise<void> {
   const journal = await readSyncJournal();
   journal.set(itemPath, record);
-  await fs.mkdir(path.dirname(JOURNAL_PATH), { recursive: true, mode: 0o700 });
-  const partialPath = `${JOURNAL_PATH}.${process.pid}.part`;
+  await fs.mkdir(path.dirname(journalPath()), { recursive: true, mode: 0o700 });
+  const partialPath = `${journalPath()}.${process.pid}.part`;
   await fs.writeFile(partialPath, JSON.stringify(Object.fromEntries(journal), null, 2), { mode: 0o600 });
-  await fs.rename(partialPath, JOURNAL_PATH);
+  await fs.rename(partialPath, journalPath());
 }

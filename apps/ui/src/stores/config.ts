@@ -1,6 +1,6 @@
 import { ref } from "vue";
 import router from "@/router";
-import type { ProjectDefinition, StreamUpdatePayload } from "@appsys/devtool-shared";
+import type { IntegrationDefinition, ProjectDefinition, StreamUpdatePayload } from "@appsys/devtool-shared";
 import { CommandStreamStore } from "./command-stream";
 import { CommandStreamOutputStore } from "./command-stream-output";
 import type { WsConfigPayload } from "@/types";
@@ -9,6 +9,8 @@ class ConfigStore {
   warnings = ref<string[]>([]);
 
   loadBalancers = ref<string[]>([]);
+
+  integrations = ref<IntegrationDefinition[]>([]);
 
   projects = ref<Record<string, ProjectDefinition> | null>(null);
 
@@ -20,12 +22,14 @@ class ConfigStore {
     if (!config) {
       this.warnings.value = [];
       this.loadBalancers.value = [];
+      this.integrations.value = [];
       this.projects.value = null;
       return;
     }
 
     this.warnings.value = config.warnings;
     this.loadBalancers.value = config.loadBalancers;
+    this.integrations.value = config.integrations;
     this.projects.value = config.projects;
   }
 

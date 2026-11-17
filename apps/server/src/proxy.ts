@@ -33,17 +33,33 @@ export function requestHost(request: ProxyRequest): string {
 }
 
 /**
- * Copies the headers of a response, without those describing its connection.
+ * Copies the headers of a response, without those describing its connection, letting one host frame
+ * it when given.
  * @param response The response.
+ * @param frameAncestor The host allowed to show the response in a frame, null to keep the framing rules
+ * of the response.
  * @returns The headers to send on.
  */
-function responseHeaders(response: IncomingMessage): OutgoingHttpHeaders {
+function responseHeaders(response: IncomingMessage, frameAncestor: string | null): OutgoingHttpHeaders {
   const headers: OutgoingHttpHeaders = {};
   for (const [name, value] of Object.entries(response.headers)) {
     if (value !== undefined && !CONNECTION_HEADERS.has(name)) {
       headers[name] = value;
     }
   }
+  if (!frameAncestor) {
+    return headers;
+  }
+
+  delete headers["x-frame-options"];
+  const policies = [headers["content-security-policy"] ?? []].flat().flatMap((value) => String(value).split(",")).map((policy) =>
+    policy
+      .split(";")
+      .map((directive) => directive.trim())
+      .filter((directive) => directive && !/^frame-ancestors\b/i.test(directive))
+      .join("; "),
+  );
+  headers["content-security-policy"] = [...policies.filter(Boolean), `frame-ancestors ${frameAncestor}:*`].join(", ");
   return headers;
 }
 
@@ -103,25 +119,31 @@ function readUiProxyTarget(uiPath: string | undefined): { url: string; tls: bool
 export class DevtoolProxy {
   private serversAvailable: ServerCandidate[];
 
+  /** Hosts of the integrations shown in the devtool, which the devtool host may frame. */
+  private framedHosts = new Set<string>();
+
+  /** The host allowed to frame the integrations, null without a devtool host. */
+  private frameAncestor: string | null = null;
+
   constructor() {
     this.serversAvailable = [];
   }
 
   /**
    * Builds the routes of the configuration: the services of the directories and the interface of the
-   * devtool, each with who may reach it.
+   * devtool, each with who may reach it, and the hosts the devtool frames.
    * @param config The configuration.
    */
   reload(config: RuntimeConfig): void {
     const nextServers: ServerCandidate[] = [];
+    const integrations = [...config.integrations, ...Object.values(config.projects).flatMap((project) => Object.values(project.directories).flatMap((directory) => directory.integrations))];
+    this.framedHosts = new Set(integrations.filter((integration) => integration.embed).map((integration) => new URL(integration.url).hostname.toLowerCase()));
+    this.frameAncestor = config.adt.host?.toLowerCase() ?? null;
 
     for (const [projectSlug, project] of Object.entries(config.projects)) {
       for (const [directorySlug, directory] of Object.entries(project.directories)) {
         for (const [serverSlug, server] of Object.entries(directory.loadBalancer)) {
-          const targets = [
-            ...server.ports.map((port) => ({ url: `http://127.0.0.1:${port}`, tls: server.tls })),
-            ...server.urls.map((url) => ({ url, tls: server.tls || url.startsWith("https://") })),
-          ];
+          const targets = server.targets.map((url) => ({ url, tls: server.tls || url.startsWith("https://") }));
 
           if (!targets.length) {
             continue;
@@ -183,7 +205,8 @@ export class DevtoolProxy {
    * @returns True when a server matched, the request being proxied or refused.
    */
   proxyRequest(req: ProxyRequest, res: ProxyResponse): boolean {
-    const server = this.getMatchServer(requestHost(req), req.url ?? "/");
+    const host = requestHost(req);
+    const server = this.getMatchServer(host, req.url ?? "/");
     if (!server) {
       return false;
     }
@@ -197,9 +220,10 @@ export class DevtoolProxy {
     }
 
     let completed = false;
+    const frameAncestor = this.framedHosts.has(host) ? this.frameAncestor : null;
     const outgoing = this.openRequest(req, server, this.nextTarget(server), client, false);
     outgoing.on("response", (response) => {
-      res.writeHead(response.statusCode ?? 502, responseHeaders(response));
+      res.writeHead(response.statusCode ?? 502, responseHeaders(response, frameAncestor));
       response.on("end", () => (completed = true));
       response.pipe(res);
     });

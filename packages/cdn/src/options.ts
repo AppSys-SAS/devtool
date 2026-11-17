@@ -4,6 +4,8 @@ export interface CdnOptions {
   url: string;
   /** OpenID Connect issuer signing in the developers. */
   issuer: string;
+  /** Name shown for the issuer, null when the configuration gives none. */
+  issuerName: string | null;
   /** Public client of the devtool at the issuer. */
   clientId: string;
   /** Local port receiving the sign-in redirection. */
@@ -13,7 +15,7 @@ export interface CdnOptions {
 const DEFAULT_CALLBACK_PORT = 6732;
 
 /**
- * Reads the `cdn` section of the devtool configuration.
+ * Reads the `cdn` section of the devtool configuration, `{ url, openid: { issuer, name, clientId, callbackPort } }`.
  *
  * @param section - The raw `cdn` section.
  * @returns The options, or null when the section is missing or incomplete.
@@ -24,7 +26,7 @@ export function readCdnOptions(section: unknown): CdnOptions | null {
   }
 
   const record = section as Record<string, unknown>;
-  const auth = typeof record.authelia === "object" && record.authelia !== null ? (record.authelia as Record<string, unknown>) : {};
+  const auth = typeof record.openid === "object" && record.openid !== null ? (record.openid as Record<string, unknown>) : {};
   if (typeof record.url !== "string" || typeof auth.issuer !== "string" || typeof auth.clientId !== "string") {
     return null;
   }
@@ -34,6 +36,7 @@ export function readCdnOptions(section: unknown): CdnOptions | null {
   return {
     url: record.url.replace(/\/+$/, ""),
     issuer: auth.issuer.replace(/\/+$/, ""),
+    issuerName: typeof auth.name === "string" && auth.name.trim() ? auth.name.trim() : null,
     clientId: auth.clientId,
     callbackPort: Number.isInteger(callbackPort) && callbackPort > 0 ? callbackPort : DEFAULT_CALLBACK_PORT,
   };

@@ -1,11 +1,13 @@
 export { accessToken, type CdnSessionStatus, CdnSignInRequiredError, hasSession, login, logout, openInBrowser, sessionStatus } from "./auth.js";
 export { CdnClient, type CdnFile, CdnRequestError } from "./client.js";
-export { APPSYS_DIRECTORY, localPathOf, writeLocalFile } from "./directory.js";
+export { defaultEnvironmentFolder, localPathOf, writeLocalFile } from "./directory.js";
 export {
   type CopyInfo,
   type DescribedItem,
   Environment,
   type EnvironmentItem,
+  type EnvironmentAutoPull,
+  type EnvironmentConfigFile,
   type EnvironmentOptions,
   type EnvironmentSelection,
   listTables,

@@ -87,7 +87,12 @@ export class DevtoolServer {
       await instance.createLB();
     }
     await instance.listen();
-    instance.refreshEnvironment();
+    instance.environment
+      .refresh()
+      .then(() => instance.environment.pullAtStartup())
+      .catch((error: unknown) => {
+        logger.warn("Server", "Environment", `Not described or pulled at startup: ${error instanceof Error ? error.message : String(error)}`);
+      });
     return instance;
   }
 

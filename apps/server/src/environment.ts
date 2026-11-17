@@ -3,6 +3,7 @@ import {
   type CdnOptions,
   configFormatOf,
   type CopyInfo,
+  defaultEnvironmentFolder,
   Environment,
   type EnvironmentOptions,
   type EnvironmentSelection,
@@ -13,6 +14,8 @@ import {
   SHARED_CONFIG_PATH,
 } from "@appsys/devtool-cdn";
 import type { RawConfig } from "@appsys/devtool-config";
+import { logger } from "@appsys/devtool-shared";
+import { Cron } from "croner";
 import type {
   EnvironmentCopyPayload,
   EnvironmentItemPayload,
@@ -64,6 +67,10 @@ export class DevtoolEnvironment {
   private _items: EnvironmentItemPayload[] = [];
   private _error: string | null = null;
   private _run: EnvironmentRunPayload | null = null;
+  /** The scheduled pulls of the configuration. */
+  private _pullJobs: Cron[] = [];
+  /** Why some scheduled pulls could not be scheduled. */
+  private _scheduleErrors: string[] = [];
 
   /**
    * @param _publish - Sends the state to every connected interface.
@@ -71,7 +78,8 @@ export class DevtoolEnvironment {
   constructor(private readonly _publish: (payload: EnvironmentPayload) => Promise<void>) {}
 
   /**
-   * Takes the `cdn` and `environment` sections of the configuration.
+   * Takes the `cdn` and `environment` sections of the configuration and schedules the pulls they
+   * declare, replacing the previous schedule.
    *
    * @param config - The raw configuration.
    */
@@ -84,6 +92,24 @@ export class DevtoolEnvironment {
       this._options = null;
       this._error = error instanceof Error ? error.message : String(error);
     }
+
+    for (const job of this._pullJobs) {
+      job.stop();
+    }
+    this._pullJobs = [];
+    this._scheduleErrors = [];
+    for (const { path, cron } of this._options?.autoPulls ?? []) {
+      if (!cron) {
+        continue;
+      }
+      try {
+        const onError = (error: unknown): void => logger.warn("Environment", path, `Scheduled pull failed: ${error instanceof Error ? error.message : String(error)}`);
+        this._pullJobs.push(new Cron(cron, { protect: true, catch: onError }, () => this.autoPull([path])));
+      } catch {
+        this._scheduleErrors.push(`${path}: invalid pull cron "${cron}"`);
+        logger.warn("Environment", path, `Invalid pull cron "${cron}"`);
+      }
+    }
   }
 
   /**
@@ -92,7 +118,46 @@ export class DevtoolEnvironment {
    * @returns The state.
    */
   state(): EnvironmentPayload {
-    return { configured: this._cdn !== null && this._options !== null, items: this._items, error: this._error, run: this._run };
+    const error = [this._error, ...this._scheduleErrors].filter(Boolean).join("; ") || null;
+    return { configured: this._cdn !== null && this._options !== null, items: this._items, error, run: this._run };
+  }
+
+  /**
+   * Pulls the items declared to be pulled when the server starts.
+   */
+  async pullAtStartup(): Promise<void> {
+    await this.autoPull(this._options?.autoPulls.filter((autoPull) => autoPull.startup).map((autoPull) => autoPull.path) ?? []);
+  }
+
+  /**
+   * Pulls items on their own: an item whose CDN copy is missing or unchanged since the last sync is left
+   * alone, one whose local copy changed since the last sync (or was never synchronized) is skipped and
+   * reported, the others are pulled. Nothing happens while another run is in progress.
+   *
+   * @param paths - The paths of the items.
+   */
+  async autoPull(paths: string[]): Promise<void> {
+    const environment = this.environment();
+    if (!environment || !paths.length || (this._run && !this._run.finished)) {
+      return;
+    }
+
+    const targets: EnvironmentTarget[] = [];
+    const skipped: { path: string; detail: string }[] = [];
+    const { items } = await environment.describe();
+    for (const { item, local, remote, synced } of items.filter((described) => paths.includes(described.item.path))) {
+      if (remote === null || remote === "unknown" || (synced && remote.updatedAt.getTime() === synced.remoteUpdatedAt.getTime())) {
+        continue;
+      }
+      if (local && (!synced || local.updatedAt.getTime() !== synced.localUpdatedAt.getTime())) {
+        skipped.push({ path: item.path, detail: synced ? "local copy changed since the last sync, pull it by hand" : "local copy never synchronized, pull it by hand" });
+        continue;
+      }
+      targets.push({ path: item.path, tables: null });
+    }
+    if (targets.length || skipped.length) {
+      await this.run("pull", targets, skipped);
+    }
   }
 
   /**
@@ -134,7 +199,7 @@ export class DevtoolEnvironment {
     }
 
     try {
-      const result = await new Environment(new CdnClient(this._cdn), { items: [], s3: null }).pull({ item: { kind: "file", path: SHARED_CONFIG_PATH }, tables: null });
+      const result = await new Environment(new CdnClient(this._cdn), { folder: this._options?.folder ?? defaultEnvironmentFolder(), items: [], configFiles: [], autoPulls: [], s3: null }).pull({ item: { kind: "file", path: SHARED_CONFIG_PATH }, tables: null });
       this._error = result.done ? null : `${SHARED_CONFIG_PATH} is not on the CDN`;
     } catch (error) {
       this._error = error instanceof Error ? error.message : String(error);
@@ -210,14 +275,18 @@ export class DevtoolEnvironment {
    *
    * @param direction - Whether the CDN copies replace the local ones, or the reverse.
    * @param targets - The items, with the tables of the databases and the keys of the configuration files.
+   * @param skipped - Items reported as skipped in the run, with the reason.
    */
-  async run(direction: "pull" | "push", targets: EnvironmentTarget[]): Promise<void> {
+  async run(direction: "pull" | "push", targets: EnvironmentTarget[], skipped: { path: string; detail: string }[] = []): Promise<void> {
     const environment = this.environment();
     if (!environment || !this._options || (this._run && !this._run.finished)) {
       return;
     }
 
-    const steps = targets.map((target) => ({ target: targetName(target), status: "pending" as const, detail: null }));
+    const steps: EnvironmentRunPayload["steps"] = [
+      ...targets.map((target) => ({ target: targetName(target), status: "pending" as const, detail: null })),
+      ...skipped.map(({ path, detail }) => ({ target: path, status: "skipped" as const, detail })),
+    ];
     const run: EnvironmentRunPayload = { direction, steps, finished: false };
     this._run = run;
     await this._publish(this.state());

@@ -39,11 +39,11 @@ export class DevtoolCdnSession {
    */
   async status(): Promise<CdnSessionPayload> {
     if (!this._options) {
-      return { configured: false, signedIn: false, user: null, pendingLoginUrl: null, error: null };
+      return { configured: false, issuerName: null, signedIn: false, user: null, pendingLoginUrl: null, error: null };
     }
 
     const { signedIn, user } = await sessionStatus(this._options);
-    return { configured: true, signedIn, user, pendingLoginUrl: this._pendingLoginUrl, error: this._error };
+    return { configured: true, issuerName: this._options.issuerName, signedIn, user, pendingLoginUrl: this._pendingLoginUrl, error: this._error };
   }
 
   /**

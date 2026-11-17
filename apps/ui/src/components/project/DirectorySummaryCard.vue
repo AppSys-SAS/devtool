@@ -2,13 +2,14 @@
 import { computed } from "vue";
 import { RouterLink } from "vue-router";
 import { Icon } from "@iconify/vue";
-import { FolderOpen, FolderTree, Globe, Play, RotateCcw, ScrollText, Square } from "@lucide/vue";
+import { FolderTree, Globe, Play, RotateCcw, ScrollText, Square } from "@lucide/vue";
 import type { DirectoryDefinition, HostAccess } from "@appsys/devtool-shared";
 import SummaryRow from "@/components/project/SummaryRow.vue";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
 import { useDirectoryScripts } from "@/composables/useDirectoryScripts";
 import { commandName, iconFromMeta, runDirectoryCommand, startDefaultCommand } from "@/lib/directory-commands";
+import { defaultShortcut } from "@/lib/shortcuts";
 import { cn } from "@/lib/utils";
 import configStore from "@/stores/config";
 import wsStore from "@/stores/ws";
@@ -48,6 +49,8 @@ const services = computed(() => {
   return [...hosts].map(([host, access]) => ({ host, access }));
 });
 
+const defaultAction = computed(() => defaultShortcut(props.projectSlug, props.directory));
+
 const directoryRoute = computed(() => ({ name: "directory", params: { projectSlug: props.projectSlug, directorySlug: props.directory.slug } }));
 </script>
 
@@ -73,16 +76,17 @@ const directoryRoute = computed(() => ({ name: "directory", params: { projectSlu
           {{ primary.status.toLowerCase() }}
         </span>
         <Button
-          v-if="directory.defaultFiles"
-          as-child
+          v-if="defaultAction && directory.defaultAction?.shortcut.type !== 'command'"
           size="icon"
           variant="ghost"
           class="size-7"
-          :title="directory.files[directory.defaultFiles]?.name"
+          :title="defaultAction.name"
+          @click="defaultAction.open()"
         >
-          <RouterLink :to="{ name: 'directory-files', params: { projectSlug, directorySlug: directory.slug, fileSpace: directory.defaultFiles } }">
-            <FolderOpen class="size-3.5" />
-          </RouterLink>
+          <Icon
+            :icon="defaultAction.icon"
+            class="size-3.5"
+          />
         </Button>
         <template v-if="primary?.status === 'RUNNING'">
           <Button
