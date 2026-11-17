@@ -30,8 +30,10 @@ previous one:
 
 It also keeps the CDN session (`session.json`) and the synchronization journal (`sync.json`).
 
-- Relative paths (`adt.uiPath`, certificates, `environment.folder`, `workspace`) are resolved from the
+- Relative paths (`adt.cacheDir`, certificates, `environment.folder`, `workspace`) are resolved from the
   configuration folder.
+- The interface is never configured there: `devtool server` serves the UI built with it, `pnpm dev`
+  proxies Vite (`$DEVTOOL_UI_PATH`, else `http://127.0.0.1:6731`).
 - Relative section paths are resolved from `workspace`, the personal folder holding the repositories
   (`workspace: ~/Workspace` in `config.local.yml`); without it they are ignored with a warning.
 - `environment.folder` is the local mirror of the CDN files, the parent of the configuration folder by

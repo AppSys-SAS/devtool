@@ -3,6 +3,7 @@ export type HostAccess = "local" | "network";
 
 export interface AdtDefinition {
   host: string | null;
+  /** The interface, from the startup options only: a folder of static files or the URL of a server. */
   uiPath?: string;
   /** Folder of the files the devtool rebuilds or keeps between runs, given to the commands as `APPSYS_DEVTOOL_CACHE_DIR`. */
   cacheDir: string;

@@ -38,7 +38,7 @@ import pkg from "../package.json" with { type: "json" };
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const DEFAULT_UI_PATH = path.resolve(__dirname, "../../ui/dist");
+const UI_PATH = path.resolve(__dirname, "../../ui/dist");
 
 /**
  * Reads the CDN options of the configuration of the devtool installation.
@@ -263,7 +263,6 @@ async function main(): Promise<void> {
     .option("-s, --ssl <domain>", "enable SSL for the domain given")
     .option("-g, --server-port <port>", "server port")
     .option("-l, --load-balancer-port <port>", "load balancer port")
-    .option("--ui-path <path>", "path to static UI files", DEFAULT_UI_PATH)
     .option("--log-level <level>", "set log level (error|warn|info|debug)", "info")
     .action(async (configurations: string[], options: Record<string, string | undefined>) => {
       const invocationCwd = process.env.INIT_CWD && process.env.INIT_CWD.length ? process.env.INIT_CWD : process.cwd();
@@ -279,7 +278,7 @@ async function main(): Promise<void> {
         serverPort: parseOptionalPort(options.serverPort, "server port"),
         loadBalancerPort: parseOptionalPort(options.loadBalancerPort, "load balancer port"),
         ssl: options.ssl ?? null,
-        uiPath: options.uiPath ?? null,
+        uiPath: UI_PATH,
         configPaths,
       });
     });

@@ -76,14 +76,13 @@ function resolvePathSetting(record: unknown, key: string, cwd: string): void {
 }
 
 /**
- * Resolves the paths a configuration file gives relative to the configuration folder: the interface, the cache,
- * the certificates of the load balancers, the environment folder and the workspace.
+ * Resolves the paths a configuration file gives relative to the configuration folder: the cache, the certificates
+ * of the load balancers, the environment folder and the workspace.
  * @param config The configuration of the file.
  * @param cwd The configuration folder.
  */
 function resolveFolderPaths(config: RawConfig, cwd: string): void {
   resolvePathSetting(config, "workspace", cwd);
-  resolvePathSetting(config.adt, "uiPath", cwd);
   resolvePathSetting(config.adt, "cacheDir", cwd);
   resolvePathSetting(config.environment, "folder", cwd);
   if (typeof config.loadBalancers === "object" && config.loadBalancers !== null) {

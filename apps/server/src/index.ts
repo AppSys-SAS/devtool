@@ -108,13 +108,15 @@ function normalizeProjectsShape(config: RawConfig): RawConfig {
   return config;
 }
 
+/**
+ * Applies the startup options to the configuration: ports, SSL domain and the interface, which only
+ * comes from the startup options, never from the configuration files.
+ * @param raw The merged configuration files.
+ * @param options The startup options.
+ * @returns The configuration the server runs with.
+ */
 export function createRuntimeConfig(raw: RawConfig, options: Pick<ServerBootstrapOptions, "serverPort" | "loadBalancerPort"> & { ssl: string | null; uiPath: string | null }): RawConfig {
-  const adtRuntimeOverrides: Record<string, unknown> = {
-  };
-
-  if (typeof options.uiPath === "string" && options.uiPath.length > 0) {
-    adtRuntimeOverrides.uiPath = options.uiPath;
-  }
+  const adtRuntimeOverrides: Record<string, unknown> = {};
 
   const portOverrides: Record<string, number> = {};
   if (Number.isInteger(options.serverPort) && (options.serverPort as number) > 0) {
@@ -149,6 +151,10 @@ export function createRuntimeConfig(raw: RawConfig, options: Pick<ServerBootstra
   const serverHosts = toStringArray(serverConfig.hosts);
   const adtConfig = toRecord(base.adt);
   adtConfig.hosts = serverHosts ?? [];
+  delete adtConfig.uiPath;
+  if (options.uiPath) {
+    adtConfig.uiPath = options.uiPath;
+  }
   base.adt = adtConfig;
 
   const serverDomains = toRecord(serverConfig.domains);
