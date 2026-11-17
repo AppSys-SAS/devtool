@@ -4,7 +4,7 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 
 /** Database engines a local container can run. */
-export type DatabaseEngineName = "postgres" | "mariadb";
+export type DatabaseEngineName = "postgres" | "mariadb" | "mongodb";
 
 /** Dump and restore operations of a database engine, run inside its container. */
 export interface DatabaseEngine {
@@ -100,11 +100,12 @@ async function scriptText(container: string, script: string): Promise<string> {
  * Runs a shell script in a container with an input.
  *
  * @param container - The container.
- * @param script - The script.
+ * @param script - The script, reading its arguments as `$1`, `$2`...
  * @param input - The standard input of the script.
+ * @param args - The arguments of the script.
  */
-async function scriptInput(container: string, script: string, input: AsyncIterable<Buffer>): Promise<void> {
-  const child = spawn("docker", ["exec", "-i", container, "sh", "-c", script], { stdio: ["pipe", "ignore", "pipe"] });
+async function scriptInput(container: string, script: string, input: AsyncIterable<Buffer>, args: string[] = []): Promise<void> {
+  const child = spawn("docker", ["exec", "-i", container, "sh", "-c", script, "sh", ...args], { stdio: ["pipe", "ignore", "pipe"] });
   const errors = collectErrors(child);
   const piped = pipeline(Readable.from(input), child.stdin!).then(() => null, (error: unknown) => error);
   await assertExit(child, errors, `docker exec ${container}`);
@@ -231,7 +232,63 @@ const mariadb: DatabaseEngine = {
   async finish() {},
 };
 
-const ENGINES: Record<DatabaseEngineName, DatabaseEngine> = { postgres, mariadb };
+/**
+ * Prefix of the MongoDB scripts: `$DB`, the database of the container, and `auth`, running a MongoDB
+ * tool with the root credentials of the container when it declares some.
+ */
+const MONGODB_SETUP = `DB="$MONGO_INITDB_DATABASE"
+[ -n "$DB" ] || { echo "MONGO_INITDB_DATABASE is not set in the container" >&2; exit 1; }
+auth() {
+  if [ -n "$MONGO_INITDB_ROOT_USERNAME" ]; then
+    "$@" --username "$MONGO_INITDB_ROOT_USERNAME" --password "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin
+  else
+    "$@"
+  fi
+}
+`;
+
+/**
+ * Gives an empty stream.
+ *
+ * @returns A stream without chunk.
+ */
+async function* emptyStream(): AsyncGenerator<Buffer> {}
+
+/** MongoDB of the official image: collections as tables, the database and credentials from the container environment. */
+const mongodb: DatabaseEngine = {
+  async listTables(container) {
+    const text = await scriptText(
+      container,
+      `${MONGODB_SETUP}auth mongosh "$DB" --quiet --eval 'db.getCollectionNames().filter((name) => !name.startsWith("system.")).sort().forEach((name) => print(name))'`,
+    );
+    return text.split("\n").filter((line) => line !== "");
+  },
+  dumpSchema() {
+    return emptyStream();
+  },
+  dumpTable(container, table) {
+    return scriptOutput(container, `${MONGODB_SETUP}auth mongodump --quiet --archive --db "$DB" --collection "$1"`, [table]);
+  },
+  async reset(container) {
+    await scriptText(container, `${MONGODB_SETUP}auth mongosh "$DB" --quiet --eval 'db.dropDatabase()'`);
+  },
+  async importSchema(_container, sql) {
+    for await (const chunk of sql) {
+      void chunk;
+    }
+  },
+  async importTable(container, table, sql, replace) {
+    await scriptInput(
+      container,
+      `${MONGODB_SETUP}auth mongorestore --quiet --archive --nsInclude "*.$1" --nsFrom "\\$db\\$.$1" --nsTo "$DB.$1"${replace ? " --drop" : ""}`,
+      sql,
+      [table],
+    );
+  },
+  async finish() {},
+};
+
+const ENGINES: Record<DatabaseEngineName, DatabaseEngine> = { postgres, mariadb, mongodb };
 
 /**
  * Tells whether a name is a supported database engine.

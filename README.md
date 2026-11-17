@@ -248,7 +248,10 @@ environment:
   replaced in the stored archive on push. Without target, the whole environment is synchronized;
   with `-i`, items and tables are chosen interactively.
 - Databases are dumped and restored inside their container (`docker exec`), with the credentials of
-  its environment; foreign keys are not checked while rows are loaded.
+  its environment; foreign keys are not checked while rows are loaded. Engines: `postgres` and
+  `mariadb` (official images), and `mongodb`, whose collections are its tables (official image:
+  the database is `MONGO_INITDB_DATABASE`, the root credentials `MONGO_INITDB_ROOT_USERNAME` and
+  `MONGO_INITDB_ROOT_PASSWORD` are used when set).
 - `devtool server` starts on the local copies and downloads nothing: pulls are always manual, from
   the CLI or the Environment page (which offers to pull the devtool configuration when it is
   missing).
