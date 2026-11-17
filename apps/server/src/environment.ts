@@ -8,11 +8,14 @@ import {
   type EnvironmentOptions,
   type EnvironmentSelection,
   listTables,
+  localPathOf,
   readCdnOptions,
   readEnvironmentOptions,
   redisDatabaseName,
   SHARED_CONFIG_PATH,
 } from "@appsys/devtool-cdn";
+import { X509Certificate } from "node:crypto";
+import fs from "node:fs/promises";
 import type { RawConfig } from "@appsys/devtool-config";
 import { logger } from "@appsys/devtool-shared";
 import { Cron } from "croner";
@@ -22,6 +25,7 @@ import type {
   EnvironmentKeyChoicePayload,
   EnvironmentKeysPayload,
   EnvironmentPayload,
+  EnvironmentPemPayload,
   EnvironmentRunPayload,
   EnvironmentTablesPayload,
 } from "@appsys/devtool-shared";
@@ -41,6 +45,32 @@ export interface EnvironmentTarget {
  */
 function copyPayload(copy: CopyInfo): EnvironmentCopyPayload {
   return { size: copy.size, updatedAt: copy.updatedAt.toISOString() };
+}
+
+const PEM_MAX_BYTES = 1024 * 1024;
+const CERTIFICATE_BLOCK = /-----BEGIN CERTIFICATE-----[\s\S]+?-----END CERTIFICATE-----/;
+
+/**
+ * Tells what a local PEM file holds: its first certificate, with the end of its validity, or a private key.
+ *
+ * @param filePath - The local file.
+ * @param size - Its size, larger files being left unread.
+ * @returns What it holds, null when it is no PEM file or cannot be read.
+ */
+async function readPem(filePath: string, size: number): Promise<EnvironmentPemPayload | null> {
+  if (size > PEM_MAX_BYTES) {
+    return null;
+  }
+  const content = await fs.readFile(filePath, "utf-8").catch(() => "");
+  const certificate = CERTIFICATE_BLOCK.exec(content)?.[0];
+  if (certificate) {
+    try {
+      return { kind: "certificate", expiresAt: new Date(new X509Certificate(certificate).validTo).toISOString() };
+    } catch {
+      return null;
+    }
+  }
+  return /-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(content) ? { kind: "privateKey" } : null;
 }
 
 /**
@@ -168,18 +198,25 @@ export class DevtoolEnvironment {
     if (environment) {
       const { items, remoteError } = await environment.describe();
       this._error = remoteError;
-      this._items = items.map(({ item, local, remote, synced }) => ({
-        path: item.path,
-        kind: item.kind,
-        engine: item.kind === "database" ? item.engine : null,
-        container: item.kind === "database" ? item.container : null,
-        bucket: item.kind === "bucket" ? item.bucket : null,
-        redis: item.kind === "redis" ? redisDatabaseName(item.url) : null,
-        keyed: item.kind === "file" && configFormatOf(item.path) !== null,
-        local: local ? copyPayload(local) : null,
-        remote: remote === "unknown" || remote === null ? remote : copyPayload(remote),
-        synced: synced ? { localUpdatedAt: synced.localUpdatedAt.toISOString(), remoteUpdatedAt: synced.remoteUpdatedAt.toISOString() } : null,
-      }));
+      const folder = this._options?.folder ?? defaultEnvironmentFolder();
+      this._items = await Promise.all(
+        items.map(async ({ item, local, remote, synced }) => {
+          const keyed = item.kind === "file" && configFormatOf(item.path) !== null;
+          return {
+            path: item.path,
+            kind: item.kind,
+            engine: item.kind === "database" ? item.engine : null,
+            container: item.kind === "database" ? item.container : null,
+            bucket: item.kind === "bucket" ? item.bucket : null,
+            redis: item.kind === "redis" ? redisDatabaseName(item.url) : null,
+            keyed,
+            local: local ? copyPayload(local) : null,
+            remote: remote === "unknown" || remote === null ? remote : copyPayload(remote),
+            synced: synced ? { localUpdatedAt: synced.localUpdatedAt.toISOString(), remoteUpdatedAt: synced.remoteUpdatedAt.toISOString() } : null,
+            pem: item.kind === "file" && !keyed && local ? await readPem(localPathOf(folder, item.path), local.size) : null,
+          };
+        }),
+      );
     } else {
       this._items = [];
     }

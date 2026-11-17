@@ -302,7 +302,12 @@ export interface EnvironmentItemPayload {
   remote: EnvironmentCopyPayload | null | "unknown";
   /** Dates of both copies, in ISO format, when a pull or a push last made them equal. */
   synced: { localUpdatedAt: string; remoteUpdatedAt: string } | null;
+  /** What the local copy of a PEM file holds, null for any other item. */
+  pem: EnvironmentPemPayload | null;
 }
+
+/** A certificate, with the end of its validity in ISO format, or a private key. */
+export type EnvironmentPemPayload = { kind: "certificate"; expiresAt: string } | { kind: "privateKey" };
 
 /** A value of a key of a configuration file in one copy of it. */
 export interface EnvironmentKeyValuePayload {

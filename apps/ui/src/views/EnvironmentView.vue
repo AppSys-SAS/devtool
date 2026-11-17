@@ -7,7 +7,9 @@ import {
   Check,
   CircleDashed,
   Database,
+  FileBadge,
   FileText,
+  KeyRound,
   Loader2,
   MemoryStick,
   Package,
@@ -178,8 +180,36 @@ function describeItem(item: EnvironmentItemPayload): string {
     case "redis":
       return `redis · ${item.redis}`;
     default:
-      return "file";
+      if (item.pem?.kind === "certificate") {
+        return "certificate";
+      }
+      return item.pem?.kind === "privateKey" ? "private key" : "file";
   }
+}
+
+const EXPIRY_WARNING_MS = 30 * 24 * 60 * 60 * 1000;
+
+/**
+ * Says when a certificate expires, or expired.
+ * @param expiresAt The end of its validity, in ISO format.
+ * @returns The label.
+ */
+function expiryLabel(expiresAt: string): string {
+  const date = new Date(expiresAt).toLocaleDateString(undefined, { dateStyle: "medium" });
+  return new Date(expiresAt).getTime() < Date.now() ? `expired ${date}` : `expires ${date}`;
+}
+
+/**
+ * Colors the expiry of a certificate: red once expired, amber within 30 days.
+ * @param expiresAt The end of its validity, in ISO format.
+ * @returns The classes.
+ */
+function expiryClass(expiresAt: string): string {
+  const left = new Date(expiresAt).getTime() - Date.now();
+  if (left < 0) {
+    return "text-destructive";
+  }
+  return left < EXPIRY_WARNING_MS ? "text-amber-600 dark:text-amber-400" : "";
 }
 
 /**
@@ -496,6 +526,14 @@ onMounted(() => wsStore.envRefresh());
                   v-else-if="item.kind === 'redis'"
                   class="size-4"
                 />
+                <FileBadge
+                  v-else-if="item.pem?.kind === 'certificate'"
+                  class="size-4"
+                />
+                <KeyRound
+                  v-else-if="item.pem?.kind === 'privateKey'"
+                  class="size-4"
+                />
                 <FileText
                   v-else
                   class="size-4"
@@ -516,6 +554,9 @@ onMounted(() => wsStore.envRefresh());
                 </div>
                 <div class="truncate text-xs text-muted-foreground">
                   {{ describeItem(item) }}
+                  <template v-if="item.pem?.kind === 'certificate'">
+                    · <span :class="expiryClass(item.pem.expiresAt)">{{ expiryLabel(item.pem.expiresAt) }}</span>
+                  </template>
                 </div>
               </div>
               <div class="min-w-0 text-xs">
