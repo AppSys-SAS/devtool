@@ -21,14 +21,63 @@ relayed by its load balancer or sent by web pages of other hosts are refused.
    ```
 
    The devtool reloads its configuration from the reload button of its sidebar; nothing else restarts.
-2. Declare the server to the agent:
-   - Claude Code: `claude mcp add --transport http devtool http://127.0.0.1:6730/mcp`
-   - Agents configured by JSON (Cursor, Gemini CLI and others): an HTTP / Streamable HTTP server named
-     `devtool` with the URL `http://127.0.0.1:6730/mcp`.
-   - Agents speaking stdio only: a bridge such as `npx mcp-remote http://127.0.0.1:6730/mcp`.
+2. Declare the server to the agent, as a Streamable HTTP server named `devtool` (replace 6730 by
+   `adt.ports.server` when it is changed); see [Agent configurations](#agent-configurations).
 3. The first tool call of a new agent opens a request in the devtool interface ("New client"): the user
    accepts it for the session or always. The interface must be open in a browser, otherwise the call is
-   refused with "no devtool interface is open".
+   refused with "no devtool interface is open". The request shows the name the agent gives: add it to
+   `adt.mcp.clients.allow` to accept that agent without asking.
+
+## Agent configurations
+
+Claude Code:
+
+```bash
+claude mcp add --transport http devtool http://127.0.0.1:6730/mcp
+```
+
+Codex CLI (OpenAI), with `codex mcp add devtool --url http://127.0.0.1:6730/mcp` or in
+`~/.codex/config.toml` (`.codex/config.toml` for a trusted project); older releases also need
+`experimental_use_rmcp_client = true` at the top of the file:
+
+```toml
+[mcp_servers.devtool]
+url = "http://127.0.0.1:6730/mcp"
+```
+
+opencode, in `opencode.json` of the project or `~/.config/opencode/opencode.json`:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "devtool": { "type": "remote", "url": "http://127.0.0.1:6730/mcp", "enabled": true }
+  }
+}
+```
+
+Gemini CLI, in `~/.gemini/settings.json` or `.gemini/settings.json` (`httpUrl`, not `url`, which means
+SSE):
+
+```json
+{ "mcpServers": { "devtool": { "httpUrl": "http://127.0.0.1:6730/mcp" } } }
+```
+
+Cursor, in `~/.cursor/mcp.json` or `.cursor/mcp.json`:
+
+```json
+{ "mcpServers": { "devtool": { "url": "http://127.0.0.1:6730/mcp" } } }
+```
+
+VS Code (GitHub Copilot), in `.vscode/mcp.json` (`servers` and `type: http`):
+
+```json
+{ "servers": { "devtool": { "type": "http", "url": "http://127.0.0.1:6730/mcp" } } }
+```
+
+An agent speaking stdio only goes through a bridge, such as `npx mcp-remote http://127.0.0.1:6730/mcp`.
+The formats change between releases of the agents: check their documentation when a server does not
+show up.
 
 The Agents page of the interface (robot icon next to the bookmark icon of the sidebar) shows the
 command above, the sessions, the history of every call, the grants and the effective permissions.
