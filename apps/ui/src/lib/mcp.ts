@@ -10,6 +10,7 @@ export const DECISIONS: Record<McpDecision, { label: string; class: string }> = 
   config: { label: "Config", class: "border-transparent bg-rose-500/10 text-rose-700 dark:text-rose-300" },
   timeout: { label: "Timeout", class: "border-transparent bg-amber-500/15 text-amber-700 dark:text-amber-300" },
   noUi: { label: "No UI", class: "border-transparent bg-amber-500/15 text-amber-700 dark:text-amber-300" },
+  cancelled: { label: "Cancelled", class: "border-transparent bg-muted text-muted-foreground" },
 };
 
 /** How each level of an action is shown. */

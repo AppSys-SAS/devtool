@@ -88,10 +88,15 @@ interface McpSession {
   acceptance: Promise<void> | null;
 }
 
+/** How a request ends: answered by a person, unanswered in time, or abandoned by the agent. */
+type McpOutcome = McpAnswer | "timeout" | "cancelled";
+
 interface PendingRequest {
   payload: McpRequestPayload;
-  settle: (answer: McpAnswer | "timeout", inputs: CommandInputValue[] | null) => void;
+  settle: (outcome: McpOutcome, inputs: CommandInputValue[] | null) => void;
 }
+
+const CANCELLED_MESSAGE = "Cancelled by the client";
 
 /**
  * Tells whether a text matches a pattern, `*` standing for any text.
@@ -184,7 +189,7 @@ export class DevtoolApprovals {
   }
 
   /**
-   * Forgets a session, its grants and its waiting requests, which are refused.
+   * Forgets a session, its grants and its waiting requests, which are cancelled.
    * @param id The session.
    */
   async closeSession(id: string): Promise<void> {
@@ -192,7 +197,7 @@ export class DevtoolApprovals {
       return;
     }
     for (const request of [...this._pending.values()].filter((item) => item.payload.session === id)) {
-      request.settle("deny", null);
+      request.settle("cancelled", null);
     }
     await this.publishState();
   }
@@ -231,10 +236,11 @@ export class DevtoolApprovals {
    * @param sessionId The session making the call.
    * @param tool The tool called.
    * @param permission The call.
+   * @param signal Aborted when the agent abandons the call, withdrawing its request.
    * @returns How it was allowed, with the inputs a person may have changed.
-   * @throws {McpRefusal} When the call is refused.
+   * @throws {McpRefusal} When the call is refused or abandoned.
    */
-  async authorize(sessionId: string, tool: string, permission: McpPermission): Promise<McpAuthorization> {
+  async authorize(sessionId: string, tool: string, permission: McpPermission, signal?: AbortSignal): Promise<McpAuthorization> {
     const session = await this.accept(sessionId, tool);
     const level = permission.rule.level === "keys" ? (permission.keysOnly ? "allow" : "deny") : permission.rule.level;
     if (level === "deny") {
@@ -254,21 +260,28 @@ export class DevtoolApprovals {
     }
 
     const grantKey = permission.confirm ? null : (permission.grantKey ?? null);
-    const { answer, inputs } = await this.ask(session, {
-      kind: "permission",
-      tool,
-      action: permission.action,
-      title: permission.title,
-      details: permission.details ?? [],
-      keys: permission.keys ?? [],
-      command: permission.command ?? null,
-      inputs: permission.inputs ?? null,
-      diff: permission.diff ?? null,
-      grantKey,
-      grantable: { session: grantKey !== null, always: grantKey !== null && permission.durable !== false },
-    });
+    const { answer, inputs } = await this.ask(
+      session,
+      {
+        kind: "permission",
+        tool,
+        action: permission.action,
+        title: permission.title,
+        details: permission.details ?? [],
+        keys: permission.keys ?? [],
+        command: permission.command ?? null,
+        inputs: permission.inputs ?? null,
+        diff: permission.diff ?? null,
+        grantKey,
+        grantable: { session: grantKey !== null, always: grantKey !== null && permission.durable !== false },
+      },
+      signal,
+    );
     if (answer === "timeout") {
       throw new McpRefusal("timeout", "Refused: nobody answered in time");
+    }
+    if (answer === "cancelled") {
+      throw new McpRefusal("cancelled", CANCELLED_MESSAGE);
     }
     if (answer === "deny") {
       throw new McpRefusal("denied", "Refused by the user");
@@ -492,6 +505,9 @@ export class DevtoolApprovals {
     if (answer === "timeout") {
       throw new McpRefusal("timeout", `Refused: nobody accepted the client ${session.client} in time`);
     }
+    if (answer === "cancelled") {
+      throw new McpRefusal("cancelled", CANCELLED_MESSAGE);
+    }
     if (answer === "deny") {
       session.status = "denied";
       await this.publishState();
@@ -507,16 +523,21 @@ export class DevtoolApprovals {
 
   /**
    * Shows a request to the interfaces and waits for its answer, refusing it after the timeout or at
-   * once when no interface is open.
+   * once when no interface is open, and withdrawing it when the agent abandons the call.
    * @param session The session asking.
    * @param request The request, without what this method sets.
-   * @returns The answer and the inputs changed by the person.
-   * @throws {McpRefusal} When no interface is open.
+   * @param signal Aborted when the agent abandons the call.
+   * @returns The outcome and the inputs changed by the person.
+   * @throws {McpRefusal} When no interface is open or the call is already abandoned.
    */
   private async ask(
     session: McpSession,
     request: Omit<McpRequestPayload, "id" | "session" | "client" | "notify" | "createdAt" | "expiresAt">,
-  ): Promise<{ answer: McpAnswer | "timeout"; inputs: CommandInputValue[] | null }> {
+    signal?: AbortSignal,
+  ): Promise<{ answer: McpOutcome; inputs: CommandInputValue[] | null }> {
+    if (signal?.aborted) {
+      throw new McpRefusal("cancelled", CANCELLED_MESSAGE);
+    }
     if (this._host.interfaces() === 0) {
       throw new McpRefusal("noUi", "Refused: no devtool interface is open to answer");
     }
@@ -530,13 +551,16 @@ export class DevtoolApprovals {
       createdAt: Date.now(),
       expiresAt: Date.now() + timeout,
     };
-    const result = await new Promise<{ answer: McpAnswer | "timeout"; inputs: CommandInputValue[] | null }>((resolve) => {
+    const result = await new Promise<{ answer: McpOutcome; inputs: CommandInputValue[] | null }>((resolve) => {
       const timer = setTimeout(() => settle("timeout", null), timeout);
-      const settle = (answer: McpAnswer | "timeout", inputs: CommandInputValue[] | null): void => {
+      const cancel = (): void => settle("cancelled", null);
+      const settle = (answer: McpOutcome, inputs: CommandInputValue[] | null): void => {
         clearTimeout(timer);
+        signal?.removeEventListener("abort", cancel);
         this._pending.delete(payload.id);
         resolve({ answer, inputs });
       };
+      signal?.addEventListener("abort", cancel, { once: true });
       this._pending.set(payload.id, { payload, settle });
       void this.publishState();
     });

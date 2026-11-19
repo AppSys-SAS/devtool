@@ -637,7 +637,7 @@ export interface WsPayloadMap {
 }
 
 /** How a call of an agent was decided. */
-export type McpDecision = "auto" | "once" | "session" | "always" | "denied" | "config" | "timeout" | "noUi";
+export type McpDecision = "auto" | "once" | "session" | "always" | "denied" | "config" | "timeout" | "noUi" | "cancelled";
 
 /** Whether an agent is accepted: waiting for an answer, for its session, always, by the configuration, or refused. */
 export type McpClientStatus = "pending" | "session" | "always" | "config" | "denied";

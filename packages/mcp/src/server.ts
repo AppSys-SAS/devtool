@@ -17,7 +17,8 @@ const TERMINALS_URI = "devtool://terminals";
 const TERMINAL_URI_PREFIX = "devtool://terminal/";
 const RESOURCE_UPDATE_MS = 500;
 const SESSION_IDLE_MS = 30 * 60_000;
-const SESSION_SWEEP_MS = 60_000;
+const SESSION_GONE_MS = 30_000;
+const SESSION_SWEEP_MS = 15_000;
 const RESOURCE_LINES = 200;
 const HISTORY_INPUT_LENGTH = 300;
 const INSTRUCTIONS = [
@@ -32,10 +33,12 @@ interface McpSession {
   transport: StreamableHTTPServerTransport;
   /** The terminals followed by the agent, by URI, with what stops following them. */
   subscriptions: Map<string, () => void>;
-  /** When the agent last sent a request. */
+  /** When the agent last sent a request or closed one. */
   lastSeen: number;
-  /** How many event streams the agent keeps open. */
-  streams: number;
+  /** How many requests of the agent are still open: calls in progress and event streams. */
+  open: number;
+  /** Whether the agent listens on an event stream, which it keeps open as long as it runs. */
+  listens: boolean;
 }
 
 /**
@@ -145,24 +148,24 @@ export class DevtoolMcp {
     }
     const current = session;
     current.lastSeen = Date.now();
-    if (req.method === "GET") {
-      current.streams += 1;
-      res.once("close", () => {
-        current.streams -= 1;
-        current.lastSeen = Date.now();
-      });
-    }
+    current.open += 1;
+    current.listens ||= req.method === "GET";
+    res.once("close", () => {
+      current.open -= 1;
+      current.lastSeen = Date.now();
+    });
     await current.transport.handleRequest(req, res, body);
   }
 
   /**
-   * Closes the sessions of agents gone without saying so: no request for {@link SESSION_IDLE_MS} and no
-   * event stream open. An agent coming back starts a new session.
+   * Closes the sessions of agents gone without saying so, once nothing of theirs is open: shortly after
+   * an agent listening on an event stream lost it, after {@link SESSION_IDLE_MS} without a request for
+   * the others. An agent coming back starts a new session.
    */
   private closeIdleSessions(): void {
-    const limit = Date.now() - SESSION_IDLE_MS;
+    const now = Date.now();
     for (const session of this._sessions.values()) {
-      if (session.streams === 0 && session.lastSeen < limit) {
+      if (session.open === 0 && session.lastSeen < now - (session.listens ? SESSION_GONE_MS : SESSION_IDLE_MS)) {
         void session.transport.close();
       }
     }
@@ -221,7 +224,8 @@ export class DevtoolMcp {
       server,
       subscriptions: new Map(),
       lastSeen: Date.now(),
-      streams: 0,
+      open: 0,
+      listens: false,
       transport: new StreamableHTTPServerTransport({
         sessionIdGenerator: randomUUID,
         onsessioninitialized: (id) => {
@@ -241,7 +245,7 @@ export class DevtoolMcp {
 
     for (const tool of this._tools) {
       server.registerTool(tool.name, { title: tool.title, description: tool.description, inputSchema: tool.input, annotations: { readOnlyHint: tool.readOnly } }, (input, extra) =>
-        this.call(session, tool, input, extra.sessionId ?? ""),
+        this.call(session, tool, input, extra.sessionId ?? "", extra.signal),
       );
     }
     this.registerResources(session);
@@ -281,9 +285,16 @@ export class DevtoolMcp {
    * @param tool The tool.
    * @param input Its input.
    * @param sessionId The identifier of the session.
+   * @param signal Aborted when the agent abandons the call.
    * @returns The answer to the agent.
    */
-  private async call(session: McpSession, tool: McpTool, input: Record<string, unknown>, sessionId: string): Promise<{ content: { type: "text"; text: string }[]; isError?: boolean }> {
+  private async call(
+    session: McpSession,
+    tool: McpTool,
+    input: Record<string, unknown>,
+    sessionId: string,
+    signal: AbortSignal,
+  ): Promise<{ content: { type: "text"; text: string }[]; isError?: boolean }> {
     if (this.approvals.clientOf(sessionId) === "unknown") {
       await this.openSession(session);
     }
@@ -308,7 +319,7 @@ export class DevtoolMcp {
       client: this.approvals.clientOf(sessionId),
       authorize: async (asked) => {
         permission = asked;
-        const authorization = await waitFor(this.approvals.authorize(sessionId, tool.name, asked));
+        const authorization = await waitFor(this.approvals.authorize(sessionId, tool.name, asked, signal));
         decision = authorization.decision;
         return authorization;
       },

@@ -383,7 +383,9 @@ declaring each setting (Shared: `config.yml` or the included file of a repositor
 layout, then reloads the configuration once. The history (1000 calls), the
 grants and the clients accepted always are kept in `adt.cacheDir` (`mcp-history.jsonl`,
 `mcp-grants.json`, `mcp-clients.json`); a `deny` of the configuration prevails over any grant. A session
-without request nor event stream for 30 minutes is closed; its agent starts a new one.
+is closed 30 seconds after its agent lost its event stream (the agent stopped), or after 30 minutes
+without request for an agent that keeps none; its agent starts a new one. A call the agent abandons, or
+whose session closes, withdraws its request, shown as `Cancelled` in the history.
 
 ## Development environment
 
