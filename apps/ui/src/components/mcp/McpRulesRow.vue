@@ -23,7 +23,10 @@ defineProps<{
     class="flex flex-wrap items-center gap-2 rounded-md px-2 py-1 text-xs hover:bg-accent/40"
     :style="{ paddingLeft: `${0.5 + depth * 1.25}rem` }"
   >
-    <span class="min-w-0 flex-1 truncate">
+    <span
+      class="min-w-0 flex-1 truncate"
+      :title="`${label} ${kind}`"
+    >
       <span class="font-mono">{{ label }}</span>
       <span class="ml-1.5 text-muted-foreground">{{ kind }}</span>
     </span>

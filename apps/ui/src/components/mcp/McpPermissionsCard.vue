@@ -1,10 +1,8 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { MCP_ACTIONS, type McpAction } from "@appsys/devtool-shared";
+import { MCP_ACTIONS, type McpAction, type McpLevel, type McpRules } from "@appsys/devtool-shared";
 import McpRulesRow from "@/components/mcp/McpRulesRow.vue";
-import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { LEVELS } from "@/lib/mcp";
 import configStore from "@/stores/config";
 import mcpStore from "@/stores/mcp";
 
@@ -15,6 +13,29 @@ const CERTIFICATE_ACTIONS: readonly McpAction[] = ["read", "run"];
 const settings = configStore.mcp;
 const projects = computed(() => Object.values(configStore.projects.value ?? {}));
 const granted = computed(() => new Set(mcpStore.state.value?.grants.filter((grant) => grant.scope === "always").map((grant) => grant.key)));
+
+/**
+ * Gives every action the same level, for a setting ruling some actions only.
+ * @param level The level.
+ * @param from The setting.
+ * @returns The rules, the row showing only the actions the setting rules.
+ */
+function uniformRules(level: McpLevel, from: string): McpRules {
+  return Object.fromEntries(MCP_ACTIONS.map((action) => [action, { level, from }])) as McpRules;
+}
+
+const ownTerminals = computed(() => uniformRules(settings.value?.ownTerminals ?? "allow", "adt.mcp.ownTerminals"));
+const shell = computed(() => uniformRules(settings.value?.shell.level ?? "deny", "adt.mcp.shell.level"));
+const shellKind = computed(() => {
+  const patterns = settings.value?.shell;
+  return [
+    "command lines outside the configuration",
+    patterns?.allow.length ? `allow ${patterns.allow.join(", ")}` : null,
+    patterns?.deny.length ? `deny ${patterns.deny.join(", ")}` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+});
 </script>
 
 <template>
@@ -33,26 +54,22 @@ const granted = computed(() => new Set(mcpStore.state.value?.grants.filter((gran
           :depth="0"
           :granted="granted"
         />
-        <div class="flex flex-wrap items-center gap-2 px-2 py-1 text-xs">
-          <span class="min-w-0 flex-1"><span class="font-mono">adt.mcp.ownTerminals</span> <span class="text-muted-foreground">typing into and controlling the terminals of agents</span></span>
-          <Badge :class="LEVELS[settings.ownTerminals]">
-            {{ settings.ownTerminals }}
-          </Badge>
-        </div>
-        <div class="flex flex-wrap items-center gap-2 px-2 py-1 text-xs">
-          <span class="min-w-0 flex-1"><span class="font-mono">adt.mcp.shell</span> <span class="text-muted-foreground">command lines outside the configuration</span></span>
-          <code
-            v-if="settings.shell.allow.length"
-            class="text-emerald-700 dark:text-emerald-300"
-          >allow {{ settings.shell.allow.join(", ") }}</code>
-          <code
-            v-if="settings.shell.deny.length"
-            class="text-destructive"
-          >deny {{ settings.shell.deny.join(", ") }}</code>
-          <Badge :class="LEVELS[settings.shell.level]">
-            {{ settings.shell.level }}
-          </Badge>
-        </div>
+        <McpRulesRow
+          label="adt.mcp.ownTerminals"
+          kind="the terminals an agent started itself"
+          :rules="ownTerminals"
+          :actions="['input', 'control']"
+          :depth="0"
+          :granted="granted"
+        />
+        <McpRulesRow
+          label="adt.mcp.shell"
+          :kind="shellKind"
+          :rules="shell"
+          :actions="['run']"
+          :depth="0"
+          :granted="granted"
+        />
         <McpRulesRow
           label="environment"
           kind="configs, pulls and pushes"
