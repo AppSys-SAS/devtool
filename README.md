@@ -363,7 +363,10 @@ environment:
 A request is answered once, for the session of the agent or always. The Agents page (robot icon next to
 the bookmark icon of the sidebar) lists the sessions and clients, the requests waiting, the history of
 every call (allowed again from a row for the session or always), the grants (removed one by one or all)
-and the effective level of every action with the setting it comes from. The history (1000 calls), the
+and the effective level of every action with the setting it comes from. Its Edit mode changes these levels
+(or removes one, Inherit), written to `config.local.yml` (Personal, loaded last, so it prevails over every
+file and include) or to the file declaring each setting (Shared: `config.yml` or the included file of a
+repository), keeping comments and layout; the configuration is then reloaded. The history (1000 calls), the
 grants and the clients accepted always are kept in `adt.cacheDir` (`mcp-history.jsonl`,
 `mcp-grants.json`, `mcp-clients.json`); a `deny` of the configuration prevails over any grant. A session
 without request nor event stream for 30 minutes is closed; its agent starts a new one.

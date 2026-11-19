@@ -38,6 +38,14 @@ export interface McpRule {
 /** The level of every action on something of the configuration. */
 export type McpRules = Record<McpAction, McpRule>;
 
+/** Where the `mcp` setting of something is written. */
+export interface McpTarget {
+  /** The keys leading to the setting in the configuration files, list indexes included. */
+  path: string[];
+  /** The file declaring it, besides the personal override, null when only the override does. */
+  declaredIn: string | null;
+}
+
 /** A level and the names or command lines matching patterns that override it. */
 export interface McpPatterns {
   level: McpLevel;
@@ -110,6 +118,7 @@ export interface LoadBalancerCertificate {
   acme: CertificateAcme | null;
   /** What agents may do with the certificate: see it, renew it. */
   mcp: McpRules;
+  mcpTarget: McpTarget;
 }
 
 /** When a certificate is renewed: from its button, on its own before it expires, or both. */
@@ -213,6 +222,7 @@ export interface DirectoryExtra {
   script: ScriptDescription | null;
   /** What agents may do with the command and its terminals. */
   mcp: McpRules;
+  mcpTarget: McpTarget;
   meta?: unknown;
 }
 
@@ -263,6 +273,7 @@ export interface ScriptSettings {
   form: CommandForm | null;
   /** What agents may do with the script. */
   mcp: McpRules;
+  mcpTarget: McpTarget;
 }
 
 /** A folder whose executables a directory offers as scripts. */
@@ -279,6 +290,7 @@ export interface DirectoryScripts {
   scripts: Record<string, ScriptSettings>;
   /** What agents may do with its scripts. */
   mcp: McpRules;
+  mcpTarget: McpTarget;
 }
 
 /** A folder of editable files declared by a directory. */
@@ -293,6 +305,7 @@ export interface DirectoryFiles {
   restore: string | null;
   /** What agents may do with the files. */
   mcp: McpRules;
+  mcpTarget: McpTarget;
 }
 
 export interface DirectoryDefinition {
@@ -324,6 +337,7 @@ export interface DirectoryDefinition {
   restore: ProjectRestore | null;
   /** What agents may do in the directory, inherited by what it declares. */
   mcp: McpRules;
+  mcpTarget: McpTarget;
   meta?: unknown;
 }
 
@@ -346,6 +360,7 @@ export interface ProjectDefinition {
   restore: ProjectRestore | null;
   /** What agents may do in the project, inherited by its directories. */
   mcp: McpRules;
+  mcpTarget: McpTarget;
   meta?: unknown;
 }
 
@@ -369,7 +384,14 @@ export interface ClientConfigPayload {
   projects: Record<string, ProjectDefinition>;
   sidebar: SidebarSettings;
   /** The MCP server and its rules, those of the certificates by name. */
-  mcp: McpSettings & { port: number; certificates: Record<string, McpRules> };
+  mcp: McpSettings & {
+    port: number;
+    certificates: Record<string, { rules: McpRules; target: McpTarget }>;
+    /** Where the settings of `adt.mcp` and `environment.mcp` are written. */
+    targets: Record<"default" | "ownTerminals" | "shell" | "environment", McpTarget>;
+    /** The personal override changes are written to by default, null when the server loads none. */
+    localFile: string | null;
+  };
 }
 
 export interface StreamOutputLine {

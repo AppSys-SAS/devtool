@@ -39,6 +39,23 @@ export function findMcpCommand(projects: Record<string, ProjectDefinition> | nul
   return projects?.[section]?.directories[project]?.extras[slug.join("/")] ?? null;
 }
 
+/** Where the permissions changed from the Agents page are written, while it is in edit mode. */
+export interface McpEditMode {
+  /** The personal override, or the file declaring each setting. */
+  file: "local" | "declared";
+  /** The personal override, null when the server loads none. */
+  localFile: string | null;
+}
+
+/**
+ * Shortens the path of a configuration file to its last folders.
+ * @param file The absolute path.
+ * @returns The file with its two parent folders.
+ */
+export function shortPath(file: string): string {
+  return file.split("/").slice(-3).join("/");
+}
+
 /**
  * Gives the command declaring the MCP server of the devtool to Claude Code.
  * @param port The port of the devtool server.

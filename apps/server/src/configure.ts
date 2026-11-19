@@ -1,12 +1,13 @@
 import path from "node:path";
 import fs from "node:fs/promises";
 import net from "node:net";
-import type { CertificateAcme, ClientConfigPayload, CommandArg, CommandChoice, CommandForm, CommandInput, CommandInputValue, DirectoryDefinition, DirectoryFiles, DirectoryScripts, ScriptSettings, AdtDefinition, DirectoryDefaultAction, DirectoryShortcut, DnsDefinition, DnsRecord, HostAccess, IntegrationDefinition, LoadBalancerCertificate, McpPatterns, McpRules, McpSettings, PassthroughRule, ProjectDefinition, ProjectRestore, RuntimeConfig, SidebarSettings } from "@appsys/devtool-shared";
+import type { CertificateAcme, ClientConfigPayload, CommandArg, CommandChoice, CommandForm, CommandInput, CommandInputValue, DirectoryDefinition, DirectoryFiles, DirectoryScripts, ScriptSettings, AdtDefinition, DirectoryDefaultAction, DirectoryShortcut, DnsDefinition, DnsRecord, HostAccess, IntegrationDefinition, LoadBalancerCertificate, McpPatterns, McpRules, McpSettings, McpTarget, PassthroughRule, ProjectDefinition, ProjectRestore, RuntimeConfig, SidebarSettings } from "@appsys/devtool-shared";
 import { defaultMcpRules, isMcpLevel, logger, readMcpRules } from "@appsys/devtool-shared";
 import { type LegoOptionValue, legoRunArgs } from "@appsys/devtool-certs";
-import { resolveCacheFolder } from "@appsys/devtool-config";
+import { configSourceKey, resolveCacheFolder } from "@appsys/devtool-config";
 import { type CommandAnswer, type CommandAutomation, findInvalidValueBlocks } from "./command-automation.js";
 import { listScripts } from "./scripts.js";
+import type { ConfigOrigin } from "./types.js";
 import { isObject, toCommandArgsArray, toRecord, toStringArray, toStringRecord } from "./utils.js";
 
 const SLUG_REGEXP = /^[a-zA-Z0-9\-\/_.]+$/i;
@@ -88,8 +89,16 @@ export class DevtoolConfigure {
 
   public integrations: IntegrationDefinition[];
 
-  constructor(config: Record<string, unknown>) {
+  /** Where the settings of the configuration come from. */
+  private readonly origin: ConfigOrigin;
+
+  /**
+   * @param config The raw configuration.
+   * @param origin Where its settings come from, for the settings changed from the interface.
+   */
+  constructor(config: Record<string, unknown>, origin: ConfigOrigin = { sources: {}, localPath: null, sharedPath: null }) {
     this.initialConfig = config;
+    this.origin = origin;
     this.adt = defaultAdt();
     this.loadBalancers = {};
     this.passthrough = [];
@@ -132,9 +141,76 @@ export class DevtoolConfigure {
       mcp: {
         ...this.adt.mcp,
         port: this.adt.ports.server,
-        certificates: Object.fromEntries(Object.entries(this.loadBalancers).map(([domain, certificate]) => [domain.replace(/^\./, ""), certificate.mcp])),
+        certificates: Object.fromEntries(Object.entries(this.loadBalancers).map(([domain, certificate]) => [domain.replace(/^\./, ""), { rules: certificate.mcp, target: certificate.mcpTarget }])),
+        targets: this.settingTargets(),
+        localFile: this.origin.localPath,
       },
     };
+  }
+
+  /**
+   * Gives where the MCP settings of `adt.mcp` and `environment` are written.
+   * @returns The settings and the files declaring them.
+   */
+  private settingTargets(): ClientConfigPayload["mcp"]["targets"] {
+    return {
+      default: this.mcpTarget(["adt", "mcp", "default"]),
+      ownTerminals: this.mcpTarget(["adt", "mcp", "ownTerminals"]),
+      shell: this.mcpTarget(["adt", "mcp", "shell", "level"]),
+      environment: this.mcpTarget(["environment", "mcp"]),
+    };
+  }
+
+  /**
+   * Gives the personal override the interfaces write their changes to by default.
+   * @returns Its path, null when none is loaded.
+   */
+  get localPath(): string | null {
+    return this.origin.localPath;
+  }
+
+  /**
+   * Finds where an MCP setting of the configuration is written, among the settings the interfaces may
+   * change: those of `adt.mcp` and `environment`, and of the certificates, sections, projects, commands,
+   * folders of scripts, scripts and folders of files.
+   * @param settingPath The keys leading to the setting.
+   * @returns The setting and the file declaring it, null when it is not one of them.
+   */
+  findMcpTarget(settingPath: string[]): McpTarget | null {
+    const directories = Object.values(this.projects).flatMap((project) => Object.values(project.directories));
+    const targets = [
+      ...Object.values(this.settingTargets()),
+      ...Object.values(this.loadBalancers).map((certificate) => certificate.mcpTarget),
+      ...Object.values(this.projects).map((project) => project.mcpTarget),
+      ...directories.flatMap((directory) => [
+        directory.mcpTarget,
+        ...Object.values(directory.extras).map((extra) => extra.mcpTarget),
+        ...directory.scripts.map((folder) => folder.mcpTarget),
+        ...Object.values(directory.files).map((files) => files.mcpTarget),
+      ]),
+    ];
+    return targets.find((target) => target.path.length === settingPath.length && target.path.every((key, index) => key === settingPath[index])) ?? null;
+  }
+
+  /**
+   * Gives where an MCP setting is written: the last file declaring it, else the first file declaring
+   * what holds it, the personal override left out, else the first shared configuration file.
+   * @param settingPath The keys leading to the setting in the configuration files.
+   * @returns The setting and the file declaring it.
+   */
+  mcpTarget(settingPath: string[]): McpTarget {
+    const declaring = (keys: string[]): string[] => (this.origin.sources[configSourceKey(keys)] ?? []).filter((file) => file !== this.origin.localPath);
+    const own = declaring(settingPath).at(-1);
+    if (own) {
+      return { path: settingPath, declaredIn: own };
+    }
+    for (let length = settingPath.length - 1; length > 0; length -= 1) {
+      const holder = declaring(settingPath.slice(0, length))[0];
+      if (holder) {
+        return { path: settingPath, declaredIn: holder };
+      }
+    }
+    return { path: settingPath, declaredIn: this.origin.sharedPath };
   }
 
   /**
@@ -349,6 +425,7 @@ export class DevtoolConfigure {
         warn: Number.isInteger(warn) && (warn as number) > 0 ? (warn as number) : 30,
         acme: options.acme === undefined ? null : this.readAcme(`loadBalancers[${key}].acme`, domain.slice(1), options),
         mcp: this.readMcpRules(`loadBalancers[${key}].mcp`, options.mcp, this.adt.mcp.default, `loadBalancers.${key}`),
+        mcpTarget: this.mcpTarget(["loadBalancers", key, "mcp"]),
       };
 
       logger.info("Config", "LoadBalancer", domain);
@@ -458,6 +535,7 @@ export class DevtoolConfigure {
       missing: false,
       restore: this.readRestore(`${slug}.restore`, project.restore),
       mcp: this.readMcpRules(`${slug}.mcp`, project.mcp, this.adt.mcp.default, `sections.${projectSlug}`),
+      mcpTarget: this.mcpTarget(["sections", projectSlug, "mcp"]),
       meta: project.meta,
     };
 
@@ -547,6 +625,7 @@ export class DevtoolConfigure {
       missing: false,
       restore: this.readRestore(`${slug}.restore`, directory.restore),
       mcp: this.readMcpRules(`${slug}.mcp`, directory.mcp, projectDefinition.mcp, `projects.${directorySlug}`),
+      mcpTarget: this.mcpTarget(["projects", directorySlug, "mcp"]),
       meta: directory.meta,
     };
 
@@ -678,11 +757,12 @@ export class DevtoolConfigure {
         ),
         script: null,
         mcp: this.readMcpRules(`${slug}.extras[${extraSlug}].mcp`, extra.mcp, directoryDefinition.mcp, `projects.${directorySlug}.commands.${extraSlug}`),
+        mcpTarget: this.mcpTarget(["projects", directorySlug, "commands", extraSlug, "mcp"]),
         meta: extra.meta,
       };
     }
 
-    directoryDefinition.scripts = await this.readScripts(`${slug}.scripts`, directoryPath, directory.scripts, directoryDefinition.mcp, `projects.${directorySlug}.scripts`);
+    directoryDefinition.scripts = await this.readScripts(`${slug}.scripts`, directoryPath, directory.scripts, directoryDefinition.mcp, ["projects", directorySlug, "scripts"]);
     const scripts = await listScripts(directoryDefinition).catch((error: unknown) => {
       this.addWarning(`${slug}.scripts`, error instanceof Error ? error.message : String(error));
       return [];
@@ -960,10 +1040,11 @@ export class DevtoolConfigure {
    * @param directoryPath Absolute path of the directory, relative folders are resolved from it.
    * @param value The raw setting.
    * @param inherited The MCP rules of the directory.
-   * @param from Names the setting in the MCP rules the folders declare.
+   * @param settingPath The keys leading to the setting in the configuration files.
    * @returns The existing folders.
    */
-  private async readScripts(slug: string, directoryPath: string, value: unknown, inherited: McpRules, from: string): Promise<DirectoryScripts[]> {
+  private async readScripts(slug: string, directoryPath: string, value: unknown, inherited: McpRules, settingPath: string[]): Promise<DirectoryScripts[]> {
+    const from = settingPath.join(".");
     if (value === undefined) {
       return [];
     }
@@ -985,6 +1066,7 @@ export class DevtoolConfigure {
       }
 
       const mcp = this.readMcpRules(`${slug}[${index}].mcp`, folder.mcp, inherited, `${from}[${index}]`);
+      const folderSetting = [...settingPath, String(index)];
       const scripts: Record<string, ScriptSettings> = {};
       for (const [name, settingsRaw] of Object.entries(toRecord(folder.scripts))) {
         const settings = toRecord(settingsRaw);
@@ -993,13 +1075,14 @@ export class DevtoolConfigure {
           args: settings.args === undefined ? null : this.readCommandArgs(`${slug}[${index}].scripts[${name}].args`, settings.args),
           form: this.readForm(`${slug}[${index}].scripts[${name}].form`, settings.form),
           mcp: this.readMcpRules(`${slug}[${index}].scripts[${name}].mcp`, settings.mcp, mcp, `${from}[${index}].scripts.${name}`),
+          mcpTarget: this.mcpTarget([...folderSetting, "scripts", name, "mcp"]),
         };
       }
       const only = folder.only === undefined ? null : toStringArray(folder.only);
       if (folder.only !== undefined && !only) {
         this.addWarning(`${slug}[${index}].only`, "must be an array of glob patterns");
       }
-      folders.push({ path: folderPath, prompt: folder.prompt === true, form: this.readForm(`${slug}[${index}].form`, folder.form) ?? "inline", only, scripts, mcp });
+      folders.push({ path: folderPath, prompt: folder.prompt === true, form: this.readForm(`${slug}[${index}].form`, folder.form) ?? "inline", only, scripts, mcp, mcpTarget: this.mcpTarget([...folderSetting, "mcp"]) });
     }
     return folders;
   }
@@ -1200,6 +1283,7 @@ export class DevtoolConfigure {
         restore,
         commands: commands.filter((command) => command in directory.extras),
         mcp: this.readMcpRules(`${slug}[${filesSlug}].mcp`, entry.mcp, directory.mcp, `projects.${directory.slug}.files.${filesSlug}`),
+        mcpTarget: this.mcpTarget(["projects", directory.slug, "files", filesSlug, "mcp"]),
       };
     }
     return files;

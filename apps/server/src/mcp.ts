@@ -12,7 +12,7 @@ import { environmentTools } from "./mcp-environment.js";
 import { fileTools } from "./mcp-files.js";
 import { describeTerminal, readableTerminals, terminalLog, terminalTools } from "./mcp-terminals.js";
 import { type McpCall, type McpHost, type McpTool, McpToolError } from "./mcp-tool.js";
-import type { McpUiMessage } from "./types.js";
+import type { McpLevelChange, McpUiMessage } from "./types.js";
 
 const LOCAL_HOSTNAMES = new Set(["127.0.0.1", "localhost", "[::1]"]);
 const TERMINALS_URI = "devtool://terminals";
@@ -33,6 +33,7 @@ export interface McpServerHost extends McpHost {
   readonly version: string;
   publish(type: string, data: unknown, ws?: WebSocket): Promise<void>;
   interfaces(): number;
+  setMcpLevel(change: McpLevelChange): Promise<void>;
 }
 
 interface McpSession {
@@ -193,6 +194,8 @@ export class DevtoolMcp {
       await this._sessions.get(message.data.session)?.transport.close();
     } else if (message.type === "mcpClearHistory") {
       await this.approvals.clearHistory();
+    } else if (message.type === "mcpSetLevel") {
+      await this._host.setMcpLevel(message.data);
     }
   }
 

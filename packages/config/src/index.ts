@@ -139,14 +139,45 @@ export function mergeConfig<T extends RawConfig>(a: T, b: RawConfig): T {
   }) as T;
 }
 
+/** The files declaring each setting of a configuration, by {@link configSourceKey}, in the order they are merged. */
+export type ConfigSources = Record<string, string[]>;
+
+/**
+ * Names a setting of a configuration among its sources.
+ * @param settingPath The keys leading to the setting, list indexes included.
+ * @returns The key of the setting.
+ */
+export function configSourceKey(settingPath: (string | number)[]): string {
+  return JSON.stringify(settingPath.map(String));
+}
+
+/**
+ * Records a file as declaring every setting it holds.
+ * @param value The content of the file, or of one of its settings.
+ * @param file The file.
+ * @param sources The sources receiving the file.
+ * @param prefix The keys leading to the value.
+ */
+function recordSources(value: unknown, file: string, sources: ConfigSources, prefix: string[] = []): void {
+  if (typeof value !== "object" || value === null) {
+    return;
+  }
+  for (const [key, child] of Object.entries(value)) {
+    const settingPath = [...prefix, key];
+    (sources[configSourceKey(settingPath)] ??= []).push(file);
+    recordSources(child, file, sources, settingPath);
+  }
+}
+
 /**
  * Loads a YAML config file, expands environment variables, merges its includes recursively, and normalizes relative paths.
  * @param filePath Path of the YAML config file to load.
  * @param seen Set of already loaded absolute file paths used to prevent include cycles.
  * @param baseDirectory Directory relative paths are resolved from; includes are resolved from the file directory.
+ * @param sources Receives the file declaring each setting, the file before its includes.
  * @returns The merged raw configuration object.
  */
-async function loadConfigFileInternal(filePath: string, seen: Set<string>, baseDirectory: string): Promise<RawConfig> {
+async function loadConfigFileInternal(filePath: string, seen: Set<string>, baseDirectory: string, sources: ConfigSources): Promise<RawConfig> {
   const resolvedFilePath = path.resolve(filePath);
   if (seen.has(resolvedFilePath)) {
     return {};
@@ -159,13 +190,14 @@ async function loadConfigFileInternal(filePath: string, seen: Set<string>, baseD
   const config = expandEnvVarsDeep(typeof loaded === "object" && loaded ? (loaded as RawConfig) : {}) as RawConfig;
   const cwd = path.dirname(resolvedFilePath);
   const includes = Array.isArray(config.include) ? (config.include as unknown[]).filter((item): item is string => typeof item === "string") : [];
+  recordSources({ ...config, include: undefined }, resolvedFilePath, sources);
 
   for (const include of includes) {
     const includeGlob = expandEnvVars(include);
     const files = (await glob(includeGlob, { cwd, absolute: true })).sort((a, b) => a.localeCompare(b));
 
     for (const includePath of files) {
-      mergeConfig(config, await loadConfigFileInternal(includePath, seen, baseDirectory));
+      mergeConfig(config, await loadConfigFileInternal(includePath, seen, baseDirectory, sources));
     }
   }
 
@@ -179,10 +211,11 @@ async function loadConfigFileInternal(filePath: string, seen: Set<string>, baseD
  * Loads a YAML config file and its includes.
  * @param filePath Path of the YAML config file to load.
  * @param baseDirectory Directory relative paths are resolved from, the file directory by default.
+ * @param sources Receives the file declaring each setting.
  * @returns The merged raw configuration object.
  */
-export async function loadConfigFile(filePath: string, baseDirectory = path.dirname(path.resolve(filePath))): Promise<RawConfig> {
-  return loadConfigFileInternal(filePath, new Set<string>(), baseDirectory);
+export async function loadConfigFile(filePath: string, baseDirectory = path.dirname(path.resolve(filePath)), sources: ConfigSources = {}): Promise<RawConfig> {
+  return loadConfigFileInternal(filePath, new Set<string>(), baseDirectory, sources);
 }
 
 /** The environment variable naming the configuration folder. */
@@ -222,20 +255,22 @@ export function resolveDefaultConfigPaths(folder = resolveConfigFolder()): strin
  * directory of the first file, the configuration folder, but those of the sections, `sectionPath` for the sections
  * declaring none, resolved from the `workspace` of the merged configuration and left relative without one.
  * @param configPaths Paths of the configuration files; missing files are skipped.
- * @returns The merged configuration and the files loaded.
+ * @returns The merged configuration, the files loaded, the files declaring each setting, and the personal override
+ * among the paths (`*.local.yml`, loaded last), null when none is given.
  */
-export async function loadMergedConfig(configPaths = resolveDefaultConfigPaths()): Promise<{ config: RawConfig; loadedPaths: string[] }> {
+export async function loadMergedConfig(configPaths = resolveDefaultConfigPaths()): Promise<{ config: RawConfig; loadedPaths: string[]; sources: ConfigSources; localPath: string | null }> {
   const loadedPaths: string[] = [];
+  const sources: ConfigSources = {};
   const result: RawConfig = {};
   const baseDirectory = configPaths.length ? path.dirname(path.resolve(resolveHomePath(configPaths[0]))) : process.cwd();
+  const absolutePaths = configPaths.map((configPath) => path.resolve(resolveHomePath(configPath)));
 
-  for (const configPath of configPaths) {
-    const absolutePath = path.resolve(resolveHomePath(configPath));
+  for (const absolutePath of absolutePaths) {
     if (!(await pathExists(absolutePath))) {
       continue;
     }
 
-    mergeConfig(result, await loadConfigFile(absolutePath, baseDirectory));
+    mergeConfig(result, await loadConfigFile(absolutePath, baseDirectory, sources));
     loadedPaths.push(absolutePath);
   }
   resolveSectionPaths(result, typeof result.workspace === "string" ? result.workspace : null);
@@ -243,5 +278,7 @@ export async function loadMergedConfig(configPaths = resolveDefaultConfigPaths()
   return {
     config: result,
     loadedPaths,
+    sources,
+    localPath: absolutePaths.filter((configPath) => configPath.endsWith(".local.yml")).at(-1) ?? null,
   };
 }

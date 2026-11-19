@@ -197,7 +197,7 @@ function resolveConfigPaths(configPaths: string[] | undefined): string[] {
  */
 function createConfigProvider({ serverPort, loadBalancerPort, ssl, uiPath }: ServerBootstrapOptions, configPaths: string[]): ConfigProvider {
   return async () => {
-    const { config, loadedPaths } = await loadMergedConfig(configPaths);
+    const { config, loadedPaths, sources, localPath } = await loadMergedConfig(configPaths);
     return {
       raw: createRuntimeConfig(config, {
         serverPort,
@@ -206,6 +206,7 @@ function createConfigProvider({ serverPort, loadBalancerPort, ssl, uiPath }: Ser
         uiPath: uiPath ?? null,
       }),
       loadedPaths,
+      origin: { sources, localPath, sharedPath: loadedPaths.find((loadedPath) => loadedPath !== localPath) ?? null },
     };
   };
 }
@@ -216,7 +217,8 @@ function createConfigProvider({ serverPort, loadBalancerPort, ssl, uiPath }: Ser
  * @returns The runtime configuration.
  */
 async function loadRuntimeConfig(configProvider: ConfigProvider): Promise<RuntimeConfig> {
-  const configure = new DevtoolConfigure((await configProvider()).raw);
+  const { raw, origin } = await configProvider();
+  const configure = new DevtoolConfigure(raw, origin);
   await configure.reconfigure();
   return configure.runtimeConfig;
 }

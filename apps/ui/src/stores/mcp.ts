@@ -1,5 +1,5 @@
 import { computed, shallowRef } from "vue";
-import type { CommandInputValue, McpAnswer, McpHistoryEntry, McpMessagePayload, McpRequestPayload, McpStatePayload } from "@appsys/devtool-shared";
+import type { CommandInputValue, McpAction, McpAnswer, McpHistoryEntry, McpLevel, McpMessagePayload, McpRequestPayload, McpStatePayload } from "@appsys/devtool-shared";
 import configStore from "./config";
 import notificationStore from "./notification";
 import wsStore from "./ws";
@@ -117,6 +117,17 @@ class McpStore {
    */
   clearHistory(): void {
     wsStore.send("mcpClearHistory", {});
+  }
+
+  /**
+   * Changes a level of an MCP setting of the configuration, the server reloading it once written.
+   * @param path The keys leading to the setting.
+   * @param action The action changed, null for a setting being a level itself.
+   * @param level The new level, null to inherit it.
+   * @param file Whether the personal override or the file declaring the setting is written.
+   */
+  setLevel(path: string[], action: McpAction | null, level: McpLevel | null, file: "local" | "declared"): void {
+    wsStore.send("mcpSetLevel", { path, action, level, file });
   }
 }
 

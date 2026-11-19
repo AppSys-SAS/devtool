@@ -93,6 +93,7 @@ export async function listScripts(directory: DirectoryDefinition): Promise<Direc
         killSignal: directory.killSignal,
         script: describe(await headerOf(scriptPath)),
         mcp: settings?.mcp ?? folder.mcp,
+        mcpTarget: settings?.mcpTarget ?? { path: [...folder.mcpTarget.path.slice(0, -1), "scripts", dirent.name, "mcp"], declaredIn: folder.mcpTarget.declaredIn },
       });
     }
   }

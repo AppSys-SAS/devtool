@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { type FSWatcher, watch } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { FilePayload, FileTreePayload, McpMessagePayload, RuntimeConfig } from "@appsys/devtool-shared";
@@ -7,6 +8,7 @@ import { DevtoolCdnSession } from "./cdn-session.js";
 import type { CommandAutomation } from "./command-automation.js";
 import { DevtoolCertificates } from "./certificates.js";
 import { type CommandStreamHooks, DevtoolCommandStream } from "./command-stream.js";
+import { acceptsMcpLevel, writeMcpLevel } from "./config-edit.js";
 import { DevtoolConfigure } from "./configure.js";
 import { DevtoolEnvironment } from "./environment.js";
 import { DevtoolFileSpaces, type FileSpace, isDevtoolConfig } from "./file-spaces.js";
@@ -21,6 +23,7 @@ import type {
   CommandStreamUpdatePayload,
   ConfigProvider,
   ConnectionMessage,
+  McpLevelChange,
   McpUiMessage,
 } from "./types.js";
 
@@ -127,6 +130,32 @@ export class DevtoolServer implements McpServerHost {
    */
   async notifyUser(message: McpMessagePayload): Promise<void> {
     await this.publish("mcpMessage", message);
+  }
+
+  /**
+   * Writes a level of an MCP setting changed from an interface to the personal override or to the file
+   * declaring it, then reloads the configuration; a failure is shown in the interfaces.
+   * @param change The setting, its action, its new level and the file written.
+   */
+  async setMcpLevel(change: McpLevelChange): Promise<void> {
+    try {
+      const target = this.configWrapper.findMcpTarget(change.path);
+      if (!target) {
+        throw new Error(`${change.path.join(".")} is not an MCP setting`);
+      }
+      if (change.level !== null && !acceptsMcpLevel(target.path, change.action, change.level)) {
+        throw new Error(`${change.level} does not fit ${target.path.join(".")}${change.action ? `.${change.action}` : ""}`);
+      }
+      const file = change.file === "local" ? this.configWrapper.localPath : target.declaredIn;
+      if (!file) {
+        throw new Error(change.file === "local" ? "no personal override is loaded" : "no configuration file declares it");
+      }
+      await writeMcpLevel(file, target.path, change.action, change.level);
+      await this.reconfigure();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await this.notifyUser({ id: randomUUID(), client: "devtool", message: `Permission not changed: ${message}`, level: "error", date: Date.now() });
+    }
   }
 
   /**
@@ -521,7 +550,7 @@ export class DevtoolServer implements McpServerHost {
    */
   private async loadConfig(): Promise<void> {
     const nextConfig = await this.configProvider();
-    this.configWrapper = new DevtoolConfigure(nextConfig.raw);
+    this.configWrapper = new DevtoolConfigure(nextConfig.raw, nextConfig.origin);
     await this.configWrapper.reconfigure();
     this.config = this.configWrapper.runtimeConfig;
     this.cdnSession.configure(nextConfig.raw.cdn);
