@@ -16,9 +16,9 @@ import {
   type RuntimeConfig,
 } from "@appsys/devtool-shared";
 import { z } from "zod";
-import type { DevtoolCommandStream } from "./command-stream.js";
-import { patternRule } from "./mcp-approvals.js";
-import { defineTool, McpToolError, type McpCall, type McpHost, type McpTool } from "./mcp-tool.js";
+import { patternRule } from "./approvals.js";
+import type { McpHost, McpTerminal } from "./host.js";
+import { defineTool, McpToolError, type McpCall, type McpTool } from "./tool.js";
 
 /** The bytes a named key sends to a terminal. */
 const KEYS = {
@@ -112,7 +112,7 @@ export function findCommand(config: RuntimeConfig, id: string): McpCommandTarget
  * @param client The agent acting, null when it does not matter.
  * @returns The rule.
  */
-export function terminalRule(config: RuntimeConfig, stream: DevtoolCommandStream, action: McpAction, client: string | null = null): McpRule {
+export function terminalRule(config: RuntimeConfig, stream: McpTerminal, action: McpAction, client: string | null = null): McpRule {
   if (stream.origin !== null && stream.origin === client && (action === "input" || action === "control")) {
     return { level: config.adt.mcp.ownTerminals, from: "adt.mcp.ownTerminals" };
   }
@@ -126,7 +126,7 @@ export function terminalRule(config: RuntimeConfig, stream: DevtoolCommandStream
  * @param stream The terminal.
  * @returns `<section>/<project>/<slug>`, null for any other command.
  */
-function commandIdOfStream(stream: DevtoolCommandStream): string | null {
+function commandIdOfStream(stream: McpTerminal): string | null {
   return stream.command && stream.projectSlug && stream.directorySlug ? commandIdOf(stream.projectSlug, stream.directorySlug, stream.command) : null;
 }
 
@@ -135,7 +135,7 @@ function commandIdOfStream(stream: DevtoolCommandStream): string | null {
  * @param host The server.
  * @returns The terminals.
  */
-export function readableTerminals(host: McpHost): DevtoolCommandStream[] {
+export function readableTerminals(host: McpHost): McpTerminal[] {
   return host.streams.filter((stream) => terminalRule(host.config, stream, "read").level !== "deny");
 }
 
@@ -144,7 +144,7 @@ export function readableTerminals(host: McpHost): DevtoolCommandStream[] {
  * @param stream The terminal.
  * @returns Its state.
  */
-export function describeTerminal(stream: DevtoolCommandStream): Record<string, unknown> {
+export function describeTerminal(stream: McpTerminal): Record<string, unknown> {
   return {
     terminal: stream.slug,
     name: stream.name,
@@ -171,7 +171,7 @@ export function describeTerminal(stream: DevtoolCommandStream): Record<string, u
  * @param info Whether the messages of the devtool itself, such as the command started, are kept.
  * @returns The lines, the cursor of the end of the output and whether older output was dropped.
  */
-export function terminalLog(stream: DevtoolCommandStream, since: number | undefined, lines: number, grep?: string, info = true): { text: string; cursor: number; truncated: boolean } {
+export function terminalLog(stream: McpTerminal, since: number | undefined, lines: number, grep?: string, info = true): { text: string; cursor: number; truncated: boolean } {
   const start = stream.outputStart;
   const from = Math.max(since ?? start, start);
   const text = stripVTControlCharacters(
@@ -196,7 +196,7 @@ export function terminalLog(stream: DevtoolCommandStream, since: number | undefi
  * @returns The terminal.
  * @throws {McpToolError} When there is none.
  */
-function findTerminal(host: McpHost, slug: string): DevtoolCommandStream {
+function findTerminal(host: McpHost, slug: string): McpTerminal {
   const stream = host.streams.find((item) => item.slug === slug);
   if (!stream) {
     throw new McpToolError(`No terminal ${slug}; list_terminals gives the terminals`);
@@ -210,7 +210,7 @@ function findTerminal(host: McpHost, slug: string): DevtoolCommandStream {
  * @param action The action.
  * @returns The key and whether the grant may outlive the session.
  */
-function terminalGrant(stream: DevtoolCommandStream, action: McpAction): { grantKey: string; durable: boolean } {
+function terminalGrant(stream: McpTerminal, action: McpAction): { grantKey: string; durable: boolean } {
   const id = commandIdOfStream(stream);
   return id ? { grantKey: `${action}:${id}`, durable: true } : { grantKey: `${action}:terminal:${stream.slug}`, durable: false };
 }
@@ -225,7 +225,7 @@ function terminalGrant(stream: DevtoolCommandStream, action: McpAction): { grant
  * @param details What the call does.
  * @param keys The named keys pressed.
  */
-async function authorizeTerminal(host: McpHost, call: McpCall, stream: DevtoolCommandStream, action: McpAction, title: string, details: McpDetail[] = [], keys: string[] = []): Promise<void> {
+async function authorizeTerminal(host: McpHost, call: McpCall, stream: McpTerminal, action: McpAction, title: string, details: McpDetail[] = [], keys: string[] = []): Promise<void> {
   call.describe(stream.name, stream.slug);
   const grant = terminalGrant(stream, action);
   await call.authorize({
@@ -250,7 +250,7 @@ async function authorizeTerminal(host: McpHost, call: McpCall, stream: DevtoolCo
  * @param since The cursor the output is read from.
  * @returns Why the wait ended, the output read and the cursor of its end.
  */
-function waitForOutput(stream: DevtoolCommandStream, options: { pattern?: string; exit?: boolean; timeout?: number }, since: number): Promise<Record<string, unknown>> {
+function waitForOutput(stream: McpTerminal, options: { pattern?: string; exit?: boolean; timeout?: number }, since: number): Promise<Record<string, unknown>> {
   const regex = options.pattern ? new RegExp(options.pattern, "m") : null;
   const exit = options.exit ?? !regex;
   return new Promise((resolve) => {
@@ -287,7 +287,7 @@ function waitForOutput(stream: DevtoolCommandStream, options: { pattern?: string
  * @param origin The agent starting it.
  * @returns The terminal, null for a command running outside of any terminal.
  */
-async function startCommand(host: McpHost, target: McpCommandTarget, inputs: CommandInputValue[], origin: string): Promise<DevtoolCommandStream | null> {
+async function startCommand(host: McpHost, target: McpCommandTarget, inputs: CommandInputValue[], origin: string): Promise<McpTerminal | null> {
   const { section, project, command, main } = target;
   if (main) {
     const existing = host.streams.find((stream) => stream.projectSlug === section.slug && stream.directorySlug === project.slug && stream.primary);

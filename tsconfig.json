@@ -14,6 +14,9 @@
       "path": "./packages/certs"
     },
     {
+      "path": "./packages/mcp"
+    },
+    {
       "path": "./apps/server"
     },
     {

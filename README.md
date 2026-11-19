@@ -16,6 +16,8 @@ Web-based devtool, built with:
 - `apps/ui`: web frontend
 - `packages/config`: YAML config loading/merging
 - `packages/cdn`: OpenID Connect sign-in and devtool files of the CDN (Node library, no CLI dependency)
+- `packages/mcp`: MCP server for agents (tools, approvals, history), plugged into the server through the
+  interfaces it declares (`McpServerHost`)
 - `packages/shared`: shared types/logger
 
 ## Config Resolution

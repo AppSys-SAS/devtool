@@ -1,16 +1,16 @@
 import { configFormatOf } from "@appsys/devtool-cdn";
 import type { McpDetail, McpRules } from "@appsys/devtool-shared";
 import { z } from "zod";
-import { CONFIGS_SPACE, type FileSpace, isDevtoolConfig } from "./file-spaces.js";
-import { McpRefusal } from "./mcp-approvals.js";
-import { defineTool, McpToolError, type McpCall, type McpHost, type McpTool } from "./mcp-tool.js";
+import { McpRefusal } from "./approvals.js";
+import type { McpFileSpace, McpHost } from "./host.js";
+import { defineTool, McpToolError, type McpCall, type McpTool } from "./tool.js";
 
 /** A space of files agents may see, with its rules. */
-interface McpFileSpace {
+interface AgentFileSpace {
   id: string;
   name: string;
   rules: McpRules;
-  space: FileSpace;
+  space: McpFileSpace;
 }
 
 /**
@@ -19,9 +19,9 @@ interface McpFileSpace {
  * @param host The server.
  * @returns The spaces whose reading is not refused.
  */
-function fileSpaces(host: McpHost): McpFileSpace[] {
+function fileSpaces(host: McpHost): AgentFileSpace[] {
   const declared = [
-    { id: CONFIGS_SPACE, name: "Configs of the environment", rules: host.config.adt.mcp.environment },
+    { id: host.fileSpaces.configsSpace, name: "Configs of the environment", rules: host.config.adt.mcp.environment },
     ...Object.values(host.config.projects).flatMap((section) =>
       Object.values(section.directories).flatMap((project) =>
         Object.values(project.files).map((files) => ({ id: `${section.slug}/${project.slug}/${files.slug}`, name: files.name, rules: files.mcp })),
@@ -41,7 +41,7 @@ function fileSpaces(host: McpHost): McpFileSpace[] {
  * @returns The space.
  * @throws {McpToolError} When there is none.
  */
-function findSpace(host: McpHost, id: string): McpFileSpace {
+function findSpace(host: McpHost, id: string): AgentFileSpace {
   const space = fileSpaces(host).find((item) => item.id === id);
   if (!space) {
     throw new McpToolError(`No file space ${id}; list_files gives the spaces`);
@@ -84,12 +84,13 @@ function keysOf(filePath: string, content: string): unknown {
 
 /**
  * Refuses any change of the configuration of the devtool, which holds the rules of agents.
+ * @param host The server.
  * @param space The space.
  * @param paths The paths changed.
  * @throws {McpRefusal} When one of them is the configuration of the devtool.
  */
-function refuseDevtoolConfig(space: McpFileSpace, ...paths: (string | undefined)[]): void {
-  if (space.id === CONFIGS_SPACE && paths.some((filePath) => filePath && isDevtoolConfig(filePath))) {
+function refuseDevtoolConfig(host: McpHost, space: AgentFileSpace, ...paths: (string | undefined)[]): void {
+  if (paths.some((filePath) => filePath && host.fileSpaces.holdsDevtoolConfig(space.id, filePath))) {
     throw new McpRefusal("config", "Refused: agents never change the configuration of the devtool", "devtool");
   }
 }
@@ -107,7 +108,7 @@ function refuseDevtoolConfig(space: McpFileSpace, ...paths: (string | undefined)
  */
 async function authorizeWrite(
   call: McpCall,
-  space: McpFileSpace,
+  space: AgentFileSpace,
   filePath: string,
   title: string,
   extra: { keysOnly?: boolean; details?: McpDetail[]; diff?: { path: string; before: string; after: string } } = {},
@@ -132,7 +133,7 @@ async function authorizeWrite(
  * @returns Its content, empty when it does not exist, and its last change.
  * @throws {McpToolError} When it cannot be read or holds binary data.
  */
-async function readText(space: McpFileSpace, filePath: string): Promise<{ content: string; updatedAt: string | null }> {
+async function readText(space: AgentFileSpace, filePath: string): Promise<{ content: string; updatedAt: string | null }> {
   const file = await space.space.read(filePath);
   if (file.error) {
     throw new McpToolError(file.error);
@@ -153,7 +154,7 @@ async function readText(space: McpFileSpace, filePath: string): Promise<{ conten
  * @returns Its new last change.
  * @throws {McpToolError} When it changed since or could not be written.
  */
-async function writeText(host: McpHost, space: McpFileSpace, filePath: string, content: string, baseUpdatedAt: string | null): Promise<string | null> {
+async function writeText(host: McpHost, space: AgentFileSpace, filePath: string, content: string, baseUpdatedAt: string | null): Promise<string | null> {
   const file = await space.space.write(filePath, content, baseUpdatedAt);
   if (!file.saved) {
     throw new McpToolError(file.error ?? `${filePath} was not written`);
@@ -230,7 +231,7 @@ export function fileTools(host: McpHost): McpTool[] {
       },
       run: async ({ space, path: filePath, content, baseUpdatedAt }, call) => {
         const target = findSpace(host, space);
-        refuseDevtoolConfig(target, filePath);
+        refuseDevtoolConfig(host, target, filePath);
         const current = await readText(target, filePath);
         await authorizeWrite(call, target, filePath, `Write ${filePath}`, { diff: { path: filePath, before: current.content, after: content } });
         return { path: filePath, updatedAt: await writeText(host, target, filePath, content, baseUpdatedAt === undefined ? current.updatedAt : baseUpdatedAt) };
@@ -255,7 +256,7 @@ export function fileTools(host: McpHost): McpTool[] {
       },
       run: async ({ space, path: filePath, changes }, call) => {
         const target = findSpace(host, space);
-        refuseDevtoolConfig(target, filePath);
+        refuseDevtoolConfig(host, target, filePath);
         const format = configFormatOf(filePath);
         if (!format) {
           throw new McpToolError(`${filePath} is not a file changed key by key (YAML, JSON or .env)`);
@@ -286,7 +287,7 @@ export function fileTools(host: McpHost): McpTool[] {
       },
       run: async ({ space, action, path: filePath, to, kind }, call) => {
         const target = findSpace(host, space);
-        refuseDevtoolConfig(target, filePath, to);
+        refuseDevtoolConfig(host, target, filePath, to);
         if (action === "rename" && !to) {
           throw new McpToolError("Give the new path in `to`");
         }

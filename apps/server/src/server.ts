@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { type FSWatcher, watch } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { FilePayload, FileTreePayload, McpMessagePayload, RuntimeConfig } from "@appsys/devtool-shared";
+import type { FilePayload, FileTreePayload, McpMessagePayload, PortOwner, RuntimeConfig } from "@appsys/devtool-shared";
 import { logger } from "@appsys/devtool-shared";
 import type { WebSocket } from "ws";
 import { DevtoolCdnSession } from "./cdn-session.js";
@@ -14,7 +14,8 @@ import { DevtoolEnvironment } from "./environment.js";
 import { DevtoolFileSpaces, type FileSpace, isDevtoolConfig } from "./file-spaces.js";
 import { DevtoolHttp } from "./http.js";
 import { DevtoolLB } from "./lb.js";
-import { DevtoolMcp, type McpServerHost } from "./mcp.js";
+import { DevtoolMcp, type McpLevelChange, type McpServerHost, type McpUiMessage } from "@appsys/devtool-mcp";
+import { listPortOwners } from "./ports.js";
 import type {
   CommandStreamCreatePayload,
   CommandStreamInputPayload,
@@ -23,8 +24,6 @@ import type {
   CommandStreamUpdatePayload,
   ConfigProvider,
   ConnectionMessage,
-  McpLevelChange,
-  McpUiMessage,
 } from "./types.js";
 
 const SCRIPT_CHANGE_DELAY_MS = 300;
@@ -122,6 +121,15 @@ export class DevtoolServer implements McpServerHost {
    */
   interfaces(): number {
     return this.http?.clientCount() ?? 0;
+  }
+
+  /**
+   * Lists the processes listening on a port of this machine.
+   * @param port The port.
+   * @returns Their identifiers and commands.
+   */
+  async portOwners(port: number): Promise<PortOwner[]> {
+    return listPortOwners(port);
   }
 
   /**

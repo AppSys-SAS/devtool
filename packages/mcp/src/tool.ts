@@ -1,26 +1,5 @@
-import type { McpMessagePayload, RuntimeConfig } from "@appsys/devtool-shared";
 import type { z } from "zod";
-import type { DevtoolCertificates } from "./certificates.js";
-import type { CommandStreamHooks, DevtoolCommandStream } from "./command-stream.js";
-import type { DevtoolEnvironment } from "./environment.js";
-import type { DevtoolFileSpaces, FileSpace } from "./file-spaces.js";
-import type { McpAuthorization, McpPermission } from "./mcp-approvals.js";
-import type { CommandStreamCreatePayload } from "./types.js";
-
-/** What the tools of agents use from the server. */
-export interface McpHost {
-  readonly config: RuntimeConfig;
-  readonly streams: readonly DevtoolCommandStream[];
-  readonly fileSpaces: DevtoolFileSpaces;
-  readonly environment: DevtoolEnvironment;
-  readonly certificates: DevtoolCertificates;
-  newCommandStream(data: CommandStreamCreatePayload, hooks?: CommandStreamHooks): Promise<DevtoolCommandStream>;
-  newCommandDetached(data: CommandStreamCreatePayload): Promise<void>;
-  changeFiles(spaceId: string, change: (space: FileSpace) => Promise<void>): Promise<string | null>;
-  afterFileWrite(spaceId: string, filePath: string): Promise<void>;
-  reconfigure(): Promise<void>;
-  notifyUser(message: McpMessagePayload): Promise<void>;
-}
+import type { McpAuthorization, McpPermission } from "./approvals.js";
 
 /** A call of a tool by an agent. */
 export interface McpCall {

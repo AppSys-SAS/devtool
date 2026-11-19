@@ -1,6 +1,7 @@
 import type { ConfigSources, RawConfig } from "@appsys/devtool-config";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { CommandInputValue, FileEntryPayload, McpAction, McpAnswer, McpLevel, PortConflictAction, RuntimeConfig } from "@appsys/devtool-shared";
+import type { McpUiMessage } from "@appsys/devtool-mcp";
+import type { CommandInputValue, FileEntryPayload, PortConflictAction, RuntimeConfig } from "@appsys/devtool-shared";
 import type { WebSocket } from "ws";
 import type { EnvironmentTarget } from "./environment.js";
 
@@ -169,47 +170,6 @@ export type ConnectionMessage =
       data: CommandStreamPortConflictPayload;
     }
   | McpUiMessage;
-
-/** What an interface asks about the agents: answers, grants, accepted agents, sessions, history. */
-export type McpUiMessage =
-  | {
-      type: "mcpAnswer";
-      data: { id: string; answer: McpAnswer; inputs?: CommandInputValue[] | null };
-    }
-  | {
-      type: "mcpRevoke";
-      data: { key: string | null; scope: "session" | "always"; session?: string | null };
-    }
-  | {
-      type: "mcpGrant";
-      data: { historyId: string; scope: "session" | "always" };
-    }
-  | {
-      type: "mcpClient";
-      data: { name: string; decision: "always" | "forget" };
-    }
-  | {
-      type: "mcpDisconnect";
-      data: { session: string };
-    }
-  | {
-      type: "mcpClearHistory";
-      data: Record<string, never>;
-    }
-  | {
-      type: "mcpSetLevel";
-      data: McpLevelChange;
-    };
-
-/** A level of an MCP setting changed from an interface, written to the personal override or the file declaring it. */
-export interface McpLevelChange {
-  path: string[];
-  /** The action changed, null for a setting being a level itself. */
-  action: McpAction | null;
-  /** The new level, null to remove it so that it is inherited. */
-  level: McpLevel | null;
-  file: "local" | "declared";
-}
 
 export interface ServerContextLike {
   config: RuntimeConfig;

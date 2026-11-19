@@ -2,9 +2,9 @@ import { randomUUID } from "node:crypto";
 import net from "node:net";
 import { logger, type McpRules } from "@appsys/devtool-shared";
 import { z } from "zod";
-import { maskValues } from "./mcp-files.js";
-import { defineTool, McpToolError, type McpHost, type McpTool } from "./mcp-tool.js";
-import { listPortOwners } from "./ports.js";
+import { maskValues } from "./files.js";
+import type { McpHost } from "./host.js";
+import { defineTool, McpToolError, type McpTool } from "./tool.js";
 
 const LOCAL_HOSTNAMES = new Set(["127.0.0.1", "localhost", "[::1]"]);
 const PORT_CHECK_MS = 300;
@@ -117,7 +117,7 @@ export function environmentTools(host: McpHost): McpTool[] {
       run: async ({ port }, call) => {
         call.describe(`port ${port}`);
         await call.authorize({ action: "read", rule: host.config.adt.mcp.default.read, title: `See who holds port ${port}`, grantKey: "read:ports", grantLabel: "See the holders of ports" });
-        return { port, owners: await listPortOwners(port) };
+        return { port, owners: await host.portOwners(port) };
       },
     }),
     defineTool({

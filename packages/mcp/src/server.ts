@@ -4,15 +4,13 @@ import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mc
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest, SubscribeRequestSchema, UnsubscribeRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { McpDecision, McpDetail } from "@appsys/devtool-shared";
-import { logger } from "@appsys/devtool-shared";
-import type { WebSocket } from "ws";
-import { isLoopback } from "./access.js";
-import { DevtoolApprovals, McpRefusal, type McpPermission } from "./mcp-approvals.js";
-import { environmentTools } from "./mcp-environment.js";
-import { fileTools } from "./mcp-files.js";
-import { describeTerminal, readableTerminals, terminalLog, terminalTools } from "./mcp-terminals.js";
-import { type McpCall, type McpHost, type McpTool, McpToolError } from "./mcp-tool.js";
-import type { McpLevelChange, McpUiMessage } from "./types.js";
+import { isLoopback, logger } from "@appsys/devtool-shared";
+import { DevtoolApprovals, McpRefusal, type McpPermission } from "./approvals.js";
+import { environmentTools } from "./environment.js";
+import { fileTools } from "./files.js";
+import type { McpServerHost, McpUiMessage } from "./host.js";
+import { describeTerminal, readableTerminals, terminalLog, terminalTools } from "./terminals.js";
+import { type McpCall, type McpTool, McpToolError } from "./tool.js";
 
 const LOCAL_HOSTNAMES = new Set(["127.0.0.1", "localhost", "[::1]"]);
 const TERMINALS_URI = "devtool://terminals";
@@ -27,14 +25,6 @@ const INSTRUCTIONS = [
   "Read terminals with read_terminal, passing the returned cursor as `since` to get only new output; use mode `screen` for interactive prompts, then send_input.",
   "Some calls wait for the user to accept them in the devtool interface; a refused call returns an error saying why: do not retry it unchanged.",
 ].join("\n");
-
-/** What the MCP server needs from the devtool server, beyond what its tools use. */
-export interface McpServerHost extends McpHost {
-  readonly version: string;
-  publish(type: string, data: unknown, ws?: WebSocket): Promise<void>;
-  interfaces(): number;
-  setMcpLevel(change: McpLevelChange): Promise<void>;
-}
 
 interface McpSession {
   server: McpServer;
@@ -201,11 +191,11 @@ export class DevtoolMcp {
 
   /**
    * Sends the state of the agents and their history to a new interface.
-   * @param ws The connection of the interface.
+   * @param connection The interface.
    */
-  async sendTo(ws: WebSocket): Promise<void> {
-    await this._host.publish("mcpState", this.approvals.state(), ws);
-    await this._host.publish("mcpHistory", { entries: this.approvals.history(), initial: true }, ws);
+  async sendTo(connection: unknown): Promise<void> {
+    await this._host.publish("mcpState", this.approvals.state(), connection);
+    await this._host.publish("mcpHistory", { entries: this.approvals.history(), initial: true }, connection);
   }
 
   /**

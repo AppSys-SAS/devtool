@@ -364,6 +364,9 @@ export class TreeFileSpace extends FileSpace {
 export class DevtoolFileSpaces {
   private _spaces = new Map<string, FileSpace>();
 
+  /** The identifier of the space of the configuration files of the environment. */
+  readonly configsSpace = CONFIGS_SPACE;
+
   /**
    * Builds the spaces of a configuration.
    *
@@ -393,6 +396,17 @@ export class DevtoolFileSpaces {
    */
   get(id: string): FileSpace | null {
     return this._spaces.get(id) ?? null;
+  }
+
+  /**
+   * Tells whether a file of a space is the configuration of the devtool itself.
+   *
+   * @param spaceId - The identifier of the space.
+   * @param filePath - The path of the file in the space.
+   * @returns True for the shared or personal configuration of the devtool.
+   */
+  holdsDevtoolConfig(spaceId: string, filePath: string): boolean {
+    return spaceId === CONFIGS_SPACE && isDevtoolConfig(filePath);
   }
 }
 
