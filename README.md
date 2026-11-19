@@ -225,11 +225,12 @@ environment of every project, mirrored on the devtool files of the CDN (`<path>`
 | `api/s3.gz` | snapshot of a local bucket, media types kept |
 | `devtool/session.json`, `devtool/config.local.yml` | personal, never synchronized |
 
-The `environment` section of the shared configuration declares what is synchronized:
+The `environment` section of the shared configuration declares what is synchronized, nothing else,
+the shared configuration itself included:
 
 ```yaml
 environment:
-  files: [ api/config.yml, { path: devtool/docker-compose.yml, local: false } ]
+  files: [ devtool/config.yml, api/config.yml, { path: devtool/docker-compose.yml, local: false } ]
   databases:
     - { path: api/db.gz, engine: postgres, container: postgres }
   buckets:

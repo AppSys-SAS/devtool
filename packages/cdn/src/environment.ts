@@ -10,7 +10,7 @@ import { listRedisGroups, redisDatabaseName, redisRecordGroup, restoreRedis, sna
 import { readSyncJournal, type SyncRecord, writeSyncRecord } from "./sync-journal.js";
 import { type ConfigFormat, configFormatOf, countChoices, diffConfig, type KeyChoice, type KeyDifference, mergeConfig } from "./config-merge.js";
 
-/** Path of the shared devtool configuration, always part of the environment. */
+/** Path of the shared devtool configuration, the file declaring the environment. */
 export const SHARED_CONFIG_PATH = "devtool/config.yml";
 
 const MEDIA_TYPES: Record<string, string> = {
@@ -141,8 +141,8 @@ export function readEnvironmentOptions(section: unknown): EnvironmentOptions | n
   }
 
   const record = recordOf(section);
-  const items: EnvironmentItem[] = [{ kind: "file", path: SHARED_CONFIG_PATH }];
-  const configFiles: EnvironmentConfigFile[] = [{ path: SHARED_CONFIG_PATH, display: true, local: true }];
+  const items: EnvironmentItem[] = [];
+  const configFiles: EnvironmentConfigFile[] = [];
   const autoPulls: EnvironmentAutoPull[] = [];
   const addItem = (item: EnvironmentItem, pull: unknown): void => {
     items.push(item);
@@ -156,9 +156,6 @@ export function readEnvironmentOptions(section: unknown): EnvironmentOptions | n
     const flags = [entry.display, entry.local, entry.sync];
     if (typeof entry.path !== "string" || flags.some((flag) => flag !== undefined && typeof flag !== "boolean")) {
       throw new Error(`invalid file in the environment: ${JSON.stringify(file)}`);
-    }
-    if (entry.path === SHARED_CONFIG_PATH) {
-      continue;
     }
     configFiles.push({ path: entry.path, display: entry.display !== false, local: entry.local !== false });
     if (entry.sync !== false) {
