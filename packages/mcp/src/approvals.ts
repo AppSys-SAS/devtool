@@ -144,6 +144,8 @@ export class DevtoolApprovals {
 
   private _clients = new Map<string, number>();
 
+  private readonly _titles = new Map<string, string>();
+
   private readonly _pending = new Map<string, PendingRequest>();
 
   private _history: McpHistoryEntry[] = [];
@@ -182,8 +184,12 @@ export class DevtoolApprovals {
    * @param id The session.
    * @param client The name the agent gives.
    * @param version The version it gives.
+   * @param title The display name it gives.
    */
-  async openSession(id: string, client: string, version: string | null): Promise<void> {
+  async openSession(id: string, client: string, version: string | null, title: string | null): Promise<void> {
+    if (title) {
+      this._titles.set(client, title);
+    }
     this._sessions.set(id, { id, client, version, connectedAt: Date.now(), calls: 0, status: this.clientStatus(client, "pending"), grants: new Map(), acceptance: null });
     await this.publishState();
   }
@@ -423,6 +429,7 @@ export class DevtoolApprovals {
       clients,
       pending: [...this._pending.values()].map((request) => request.payload),
       grants: [...[...this._sessions.values()].flatMap((session) => [...session.grants.values()]), ...this._grants.values()],
+      titles: Object.fromEntries(this._titles),
     };
   }
 
@@ -493,7 +500,7 @@ export class DevtoolApprovals {
       kind: "client",
       tool,
       action: null,
-      title: `New client: ${session.client}${session.version ? ` ${session.version}` : ""}`,
+      title: `New client: ${this._titles.get(session.client) ?? session.client}${session.version ? ` ${session.version}` : ""}`,
       details: [{ label: "Client", value: session.client }, ...(session.version ? [{ label: "Version", value: session.version }] : [])],
       keys: [],
       command: null,

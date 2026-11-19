@@ -748,6 +748,8 @@ export interface McpStatePayload {
   clients: McpClientPayload[];
   pending: McpRequestPayload[];
   grants: McpGrantPayload[];
+  /** The display names the agents connected since the start gave, by name. */
+  titles: Record<string, string>;
 }
 
 /** A message of an agent to the person using the devtool. */

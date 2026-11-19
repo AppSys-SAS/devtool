@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { useClipboard } from "@vueuse/core";
-import { Bot, Check, Copy, Unplug } from "@lucide/vue";
+import { Icon } from "@iconify/vue";
+import { Check, Copy, Unplug } from "@lucide/vue";
 import type { McpClientStatus } from "@appsys/devtool-shared";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -65,10 +66,16 @@ const configured = computed(() => state.value?.clients.filter((client) => client
           :key="session.id"
           class="flex flex-wrap items-center gap-3 rounded-md border px-3 py-2"
         >
-          <Bot class="size-4 shrink-0 text-muted-foreground" />
+          <Icon
+            :icon="mcpStore.clientIcon(session.client)"
+            class="size-4 shrink-0 text-muted-foreground"
+          />
           <div class="min-w-0 flex-1">
-            <p class="truncate text-sm">
-              {{ session.client }} <span
+            <p
+              class="truncate text-sm"
+              :title="session.client"
+            >
+              {{ mcpStore.clientName(session.client) }} <span
                 v-if="session.version"
                 class="text-muted-foreground"
               >{{ session.version }}</span>
@@ -83,7 +90,7 @@ const configured = computed(() => state.value?.clients.filter((client) => client
             variant="outline"
             @click="mcpStore.setClient(session.client, 'always')"
           >
-            Always accept {{ session.client }}
+            Always accept {{ mcpStore.clientName(session.client) }}
           </Button>
           <Button
             size="sm"
@@ -112,7 +119,10 @@ const configured = computed(() => state.value?.clients.filter((client) => client
           :key="`always/${client.name}`"
           class="flex items-center gap-3 rounded-md border px-3 py-2"
         >
-          <span class="min-w-0 flex-1 truncate font-mono text-sm">{{ client.name }}</span>
+          <span
+            class="min-w-0 flex-1 truncate text-sm"
+            :title="client.name"
+          >{{ mcpStore.clientName(client.name) }}</span>
           <span class="text-xs text-muted-foreground">accepted {{ client.date ? new Date(client.date).toLocaleString() : "" }}</span>
           <Button
             size="sm"

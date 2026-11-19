@@ -30,10 +30,11 @@ const terminals = computed(() => new Set(configStore.commandStreams.value.map((s
  * Lists the distinct values of a field of the history as options of a filter.
  * @param values The values.
  * @param label The label of the option matching everything.
+ * @param name Gives the label of a value.
  * @returns The options.
  */
-function options(values: string[], label: string): { label: string; value: string }[] {
-  return [{ label, value: ALL }, ...[...new Set(values)].sort().map((value) => ({ label: value, value }))];
+function options(values: string[], label: string, name: (value: string) => string = (value) => value): { label: string; value: string }[] {
+  return [{ label, value: ALL }, ...[...new Set(values)].sort().map((value) => ({ label: name(value), value }))];
 }
 
 /**
@@ -53,7 +54,7 @@ function revoke(grant: McpGrantPayload): void {
   mcpStore.revoke(grant.key, grant.scope, grant.session);
 }
 
-const clients = computed(() => options(history.value.map((entry) => entry.client), "Every client"));
+const clients = computed(() => options(history.value.map((entry) => entry.client), "Every client", (name) => mcpStore.clientName(name)));
 const tools = computed(() => options(history.value.map((entry) => entry.tool), "Every tool"));
 const decisions = [{ label: "Every decision", value: ALL }, ...Object.entries(DECISIONS).map(([value, { label }]) => ({ label, value }))];
 

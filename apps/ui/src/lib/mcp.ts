@@ -21,6 +21,34 @@ export const LEVELS: Record<McpLevel, string> = {
   deny: "border-transparent bg-destructive/15 text-destructive",
 };
 
+/** The icons of the known agents, by a pattern of their name or display name, the first match winning. */
+const AGENT_ICONS: [RegExp, string][] = [
+  [/claude/, "simple-icons:claude"],
+  [/gemini/, "simple-icons:googlegemini"],
+  [/codex|openai|chatgpt/, "simple-icons:openai"],
+  [/opencode/, "simple-icons:opencode"],
+  [/cursor/, "simple-icons:cursor"],
+  [/copilot|visual studio code|vscode/, "simple-icons:githubcopilot"],
+  [/windsurf|codeium/, "simple-icons:windsurf"],
+  [/\bzed\b/, "simple-icons:zedindustries"],
+  [/cline/, "simple-icons:cline"],
+  [/qwen/, "simple-icons:qwen"],
+  [/mistral/, "simple-icons:mistralai"],
+  [/jetbrains|junie/, "simple-icons:jetbrains"],
+  [/warp/, "simple-icons:warp"],
+  [/ollama/, "simple-icons:ollama"],
+];
+
+/**
+ * Gives the icon of an agent from what it calls itself.
+ * @param names Its name and display name.
+ * @returns The icon of a known agent, else a generic one.
+ */
+export function agentIcon(...names: string[]): string {
+  const text = names.join(" ").toLowerCase();
+  return AGENT_ICONS.find(([pattern]) => pattern.test(text))?.[1] ?? "lucide:bot";
+}
+
 /** The labels of the answers to a request. */
 export const ANSWERS: Record<McpAnswer, string> = {
   deny: "Deny",

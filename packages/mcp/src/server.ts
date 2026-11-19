@@ -261,7 +261,7 @@ export class DevtoolMcp {
     const id = session.transport.sessionId;
     const client = session.server.server.getClientVersion();
     if (id) {
-      await this.approvals.openSession(id, client?.name ?? "unknown", client?.version ?? null);
+      await this.approvals.openSession(id, client?.name ?? "unknown", client?.version ?? null, client?.title ?? null);
     }
   }
 

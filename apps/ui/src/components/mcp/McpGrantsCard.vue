@@ -29,7 +29,7 @@ function askClear(scope: "session" | "always"): void {
  * @returns The description.
  */
 function granted(grant: McpGrantPayload): string {
-  return `${grant.client ?? "any client"} · ${new Date(grant.date).toLocaleString()}`;
+  return `${grant.client ? mcpStore.clientName(grant.client) : "any client"} ·${new Date(grant.date).toLocaleString()}`;
 }
 </script>
 

@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { Bot, X } from "@lucide/vue";
+import { Icon } from "@iconify/vue";
+import { X } from "@lucide/vue";
 import { ToastClose, ToastDescription, ToastProvider, ToastRoot, ToastTitle, ToastViewport } from "reka-ui";
 import mcpStore from "@/stores/mcp";
 
@@ -32,10 +33,13 @@ function closed(id: string, open: boolean): void {
       :class="LEVEL_CLASSES[message.level]"
       @update:open="(open) => closed(message.id, open)"
     >
-      <Bot class="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+      <Icon
+        :icon="mcpStore.clientIcon(message.client)"
+        class="mt-0.5 size-4 shrink-0 text-muted-foreground"
+      />
       <div class="min-w-0 flex-1">
         <ToastTitle class="text-xs font-medium text-muted-foreground">
-          {{ message.client }}
+          {{ mcpStore.clientName(message.client) }}
         </ToastTitle>
         <ToastDescription class="text-sm whitespace-pre-wrap break-words">
           {{ message.message }}

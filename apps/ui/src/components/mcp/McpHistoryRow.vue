@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { computed, shallowRef } from "vue";
 import { RouterLink } from "vue-router";
+import { Icon } from "@iconify/vue";
 import { ChevronRight, CircleAlert, CircleCheck, Hourglass, SquareTerminal } from "@lucide/vue";
 import type { McpGrantPayload, McpHistoryEntry } from "@appsys/devtool-shared";
 import McpDetailList from "@/components/mcp/McpDetailList.vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DECISIONS } from "@/lib/mcp";
+import mcpStore from "@/stores/mcp";
 
 /** Below this, the time spent in the approvals is not worth showing. */
 const NOTABLE_WAIT_MS = 300;
@@ -51,7 +53,16 @@ function formatDuration(milliseconds: number): string {
         :class="{ 'rotate-90': expanded }"
       />
       <span class="w-16 shrink-0 tabular-nums text-muted-foreground">{{ new Date(entry.date).toLocaleTimeString() }}</span>
-      <span class="w-28 shrink-0 truncate">{{ entry.client }}</span>
+      <span
+        class="flex w-28 shrink-0 items-center gap-1.5"
+        :title="entry.client"
+      >
+        <Icon
+          :icon="mcpStore.clientIcon(entry.client)"
+          class="size-3.5 shrink-0 text-muted-foreground"
+        />
+        <span class="truncate">{{ mcpStore.clientName(entry.client) }}</span>
+      </span>
       <code class="w-36 shrink-0 truncate">{{ entry.tool }}</code>
       <span class="min-w-0 flex-1 truncate font-mono text-muted-foreground">{{ entry.target ?? "" }}</span>
       <Badge
@@ -92,7 +103,7 @@ function formatDuration(milliseconds: number): string {
         v-if="entry.acceptance"
         class="text-muted-foreground"
       >
-        {{ entry.client }} was accepted {{ entry.acceptance === "always" ? "always" : "for its session" }} during this call.
+        {{ mcpStore.clientName(entry.client) }} was accepted {{ entry.acceptance === "always" ? "always" : "for its session" }} during this call.
       </p>
       <p
         v-if="waited"

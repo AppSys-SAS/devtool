@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent } from "vue";
 import { useIntervalFn, useNow } from "@vueuse/core";
-import { Bot, Clock } from "@lucide/vue";
+import { Icon } from "@iconify/vue";
+import { Clock } from "@lucide/vue";
 import type { CommandInputValue, McpAnswer, McpRequestPayload } from "@appsys/devtool-shared";
 import CommandInputsForm from "@/components/CommandInputsForm.vue";
 import McpAnswerButtons from "@/components/mcp/McpAnswerButtons.vue";
@@ -9,6 +10,7 @@ import McpDetailList from "@/components/mcp/McpDetailList.vue";
 import { Badge } from "@/components/ui/badge";
 import { findMcpCommand } from "@/lib/mcp";
 import configStore from "@/stores/config";
+import mcpStore from "@/stores/mcp";
 
 const McpDiff = defineAsyncComponent(() => import("@/components/mcp/McpDiff.vue"));
 
@@ -29,8 +31,8 @@ const command = computed(() => (props.request.command && props.request.inputs ? 
   <div class="space-y-3">
     <div class="flex flex-wrap items-center gap-2 text-xs">
       <Badge variant="secondary">
-        <Bot />
-        {{ request.client }}
+        <Icon :icon="mcpStore.clientIcon(request.client)" />
+        {{ mcpStore.clientName(request.client) }}
       </Badge>
       <code class="text-muted-foreground">{{ request.tool }}</code>
       <Badge

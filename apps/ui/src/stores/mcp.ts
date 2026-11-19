@@ -1,6 +1,6 @@
 import { computed, shallowRef } from "vue";
 import type { CommandInputValue, McpAnswer, McpHistoryEntry, McpMessagePayload, McpRequestPayload, McpStatePayload } from "@appsys/devtool-shared";
-import type { McpLevelChange } from "@/lib/mcp";
+import { agentIcon, type McpLevelChange } from "@/lib/mcp";
 import configStore from "./config";
 import notificationStore from "./notification";
 import wsStore from "./ws";
@@ -26,6 +26,24 @@ class McpStore {
   private readonly _notified = new Map<string, Notification | null>();
 
   /**
+   * Gives the name of an agent as shown: the display name it gave, else its name.
+   * @param client The name of the agent.
+   * @returns The name shown.
+   */
+  clientName(client: string): string {
+    return this.state.value?.titles[client] ?? client;
+  }
+
+  /**
+   * Gives the icon of an agent, recognized from its name and display name.
+   * @param client The name of the agent.
+   * @returns The icon.
+   */
+  clientIcon(client: string): string {
+    return agentIcon(client, this.clientName(client));
+  }
+
+  /**
    * Takes the state sent by the server: notifies the requests not seen yet that ask for it, closes
    * the notifications of the requests no longer waiting and counts the waiting ones in the page title.
    * @param state The state.
@@ -42,7 +60,7 @@ class McpStore {
     for (const request of state.pending) {
       if (request.notify && !this._notified.has(request.id)) {
         notificationStore.askPermission();
-        this._notified.set(request.id, notificationStore.send(`${BASE_TITLE} · ${request.client}`, request.title, WAITING_ROUTE, { force: true, persistent: true }));
+        this._notified.set(request.id, notificationStore.send(`${BASE_TITLE} · ${this.clientName(request.client)}`, request.title, WAITING_ROUTE, { force: true, persistent: true }));
       }
     }
     document.title = state.pending.length ? `(${state.pending.length}) ${BASE_TITLE}` : BASE_TITLE;
@@ -66,7 +84,7 @@ class McpStore {
     this.messages.value = [...this.messages.value, message];
     if (configStore.mcp.value?.notifications) {
       notificationStore.askPermission();
-      notificationStore.send(`${BASE_TITLE} · ${message.client}`, message.message, MCP_ROUTE, { force: true });
+      notificationStore.send(`${BASE_TITLE} · ${this.clientName(message.client)}`, message.message, MCP_ROUTE, { force: true });
     }
   }
 
