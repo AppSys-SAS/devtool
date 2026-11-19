@@ -19,7 +19,6 @@ class McpStore {
 
   /** The request the dialog asks, the oldest one waiting. */
   current = computed<McpRequestPayload | null>(() => this.state.value?.pending[0] ?? null);
-
   private readonly _notified = new Set<string>();
 
   /**

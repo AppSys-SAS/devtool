@@ -9,7 +9,8 @@ import mcpStore from "@/stores/mcp";
 const route = useRoute();
 const request = mcpStore.current;
 const waiting = computed(() => mcpStore.state.value?.pending.length ?? 0);
-const open = computed(() => request.value !== null && route.name !== "agents");
+const answeredInPage = computed(() => route.name === "agents" && route.query.tab === "waiting");
+const open = computed(() => request.value !== null && !answeredInPage.value);
 
 /**
  * Answers the request shown, the next one then shown.
@@ -60,7 +61,7 @@ function escape(event: KeyboardEvent): void {
             An agent asks to make this call.
           </template>
           <RouterLink
-            :to="{ name: 'agents' }"
+            :to="{ name: 'agents', query: { tab: 'history' } }"
             class="underline-offset-4 hover:underline"
           >
             See the history

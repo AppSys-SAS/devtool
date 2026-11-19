@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import { computed, shallowRef } from "vue";
-import { ChevronRight } from "@lucide/vue";
+import { computed } from "vue";
 import { MCP_ACTIONS, type McpAction } from "@appsys/devtool-shared";
 import McpRulesRow from "@/components/mcp/McpRulesRow.vue";
 import { Badge } from "@/components/ui/badge";
@@ -13,7 +12,6 @@ const COMMAND_ACTIONS: readonly McpAction[] = ["read", "run", "input", "control"
 const FILE_ACTIONS: readonly McpAction[] = ["read", "write"];
 const CERTIFICATE_ACTIONS: readonly McpAction[] = ["read", "run"];
 
-const open = shallowRef(false);
 const settings = configStore.mcp;
 const projects = computed(() => Object.values(configStore.projects.value ?? {}));
 const granted = computed(() => new Set(mcpStore.state.value?.grants.filter((grant) => grant.scope === "always").map((grant) => grant.key)));
@@ -22,25 +20,10 @@ const granted = computed(() => new Set(mcpStore.state.value?.grants.filter((gran
 <template>
   <Card v-if="settings">
     <CardHeader>
-      <button
-        type="button"
-        class="flex items-center gap-2 text-left"
-        @click="open = !open"
-      >
-        <ChevronRight
-          class="size-4 text-muted-foreground transition-transform"
-          :class="{ 'rotate-90': open }"
-        />
-        <div class="space-y-1.5">
-          <CardTitle>Effective permissions</CardTitle>
-          <CardDescription>The level of every action as the configuration resolves it; hover a level to see where it comes from. ✓ marks a call granted always.</CardDescription>
-        </div>
-      </button>
+      <CardTitle>Effective permissions</CardTitle>
+      <CardDescription>The level of every action as the configuration resolves it. Hover a level to see where it comes from, ✓ marks a call granted always.</CardDescription>
     </CardHeader>
-    <CardContent
-      v-if="open"
-      class="space-y-3"
-    >
+    <CardContent class="space-y-3">
       <div class="space-y-1">
         <McpRulesRow
           label="adt.mcp.default"

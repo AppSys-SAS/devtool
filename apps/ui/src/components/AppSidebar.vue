@@ -617,7 +617,7 @@ function resolveStreamIcon(directory: SidebarDirectory, stream: CommandStream): 
         class="relative size-8 shrink-0"
       >
         <RouterLink
-          :to="{ name: 'agents' }"
+          :to="{ name: 'agents', query: mcpWaiting ? { tab: 'waiting' } : {} }"
           :title="mcpWaiting ? `Agents: ${mcpWaiting} waiting` : 'Agents'"
         >
           <Bot

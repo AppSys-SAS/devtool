@@ -18,17 +18,20 @@ function answer(id: string, answer: McpAnswer, inputs: CommandInputValue[] | nul
 </script>
 
 <template>
-  <Card
-    v-if="state?.pending.length"
-    class="border-amber-500/50"
-  >
+  <Card :class="{ 'border-amber-500/50': state?.pending.length }">
     <CardHeader>
       <CardTitle>Waiting for you</CardTitle>
       <CardDescription>Calls of agents waiting for an answer, the oldest first.</CardDescription>
     </CardHeader>
     <CardContent class="space-y-3">
+      <p
+        v-if="!state?.pending.length"
+        class="text-sm text-muted-foreground"
+      >
+        Nothing waiting.
+      </p>
       <div
-        v-for="request in state.pending"
+        v-for="request in state?.pending"
         :key="request.id"
         class="space-y-2 rounded-md border p-3"
       >
