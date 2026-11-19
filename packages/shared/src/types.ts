@@ -38,6 +38,12 @@ export interface McpRule {
 /** The level of every action on something of the configuration. */
 export type McpRules = Record<McpAction, McpRule>;
 
+/** The categories of `adt.mcp` refining `adt.mcp.default` for one kind of thing. */
+export type McpCategory = "commands" | "scripts" | "files" | "terminals" | "certificates" | "devtool";
+
+/** The global MCP settings an interface may change. */
+export type McpSettingName = "default" | McpCategory | "ownTerminals" | "shell" | "clients" | "environment";
+
 /** Where the `mcp` setting of something is written. */
 export interface McpTarget {
   /** The keys leading to the setting in the configuration files, list indexes included. */
@@ -62,8 +68,20 @@ export interface McpSettings {
   notifications: boolean;
   /** Seconds before a request without answer is refused. */
   timeout: number;
-  /** The rules of everything declaring none, and of the terminals a person opened. */
+  /** The rules of everything, refined by the categories below. */
   default: McpRules;
+  /** The rules of the commands of the configuration, refined by their sections and projects. */
+  commands: McpRules;
+  /** The rules of the scripts, refined by their sections, projects and folders. */
+  scripts: McpRules;
+  /** The rules of the folders of files of the projects, refined by their sections and projects. */
+  files: McpRules;
+  /** The rules of the terminals a person opened without a command of the configuration. */
+  terminals: McpRules;
+  /** The rules of the certificates of the load balancer, refined by each certificate. */
+  certificates: McpRules;
+  /** The rules of the tools about the devtool itself: the holders of a port (read), reloading the configuration (control). */
+  devtool: McpRules;
   /** The agents accepted or refused by their name, before any rule. */
   clients: McpPatterns;
   /** The level of typing into and stopping the terminals an agent started itself. */
@@ -335,9 +353,11 @@ export interface DirectoryDefinition {
   /** Whether the folder of the directory is missing, the directory then offering only its restore. */
   missing: boolean;
   restore: ProjectRestore | null;
-  /** What agents may do in the directory, inherited by what it declares. */
+  /** What agents may do in the directory, `adt.mcp.default` refined by its section and itself. */
   mcp: McpRules;
   mcpTarget: McpTarget;
+  /** The rule of running its restore, a command of the configuration. */
+  restoreRule: McpRule;
   meta?: unknown;
 }
 
@@ -358,9 +378,11 @@ export interface ProjectDefinition {
   /** Whether the folder of the project is missing, the project then having no directory. */
   missing: boolean;
   restore: ProjectRestore | null;
-  /** What agents may do in the project, inherited by its directories. */
+  /** What agents may do in the project, `adt.mcp.default` refined by itself. */
   mcp: McpRules;
   mcpTarget: McpTarget;
+  /** The rule of running its restore, a command of the configuration. */
+  restoreRule: McpRule;
   meta?: unknown;
 }
 
@@ -386,9 +408,9 @@ export interface ClientConfigPayload {
   /** The MCP server and its rules, those of the certificates by name. */
   mcp: McpSettings & {
     port: number;
-    certificates: Record<string, { rules: McpRules; target: McpTarget }>;
+    certificatesByName: Record<string, { rules: McpRules; target: McpTarget }>;
     /** Where the settings of `adt.mcp` and `environment.mcp` are written. */
-    targets: Record<"default" | "ownTerminals" | "shell" | "environment", McpTarget>;
+    targets: Record<McpSettingName, McpTarget>;
     /** The personal override changes are written to by default, null when the server loads none. */
     localFile: string | null;
   };

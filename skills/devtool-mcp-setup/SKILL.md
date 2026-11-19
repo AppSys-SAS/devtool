@@ -101,9 +101,19 @@ command above, the sessions, the history of every call, the grants and the effec
 ## Configuration reference
 
 `mcp` takes the same form everywhere, from the most general to the most precise, the most precise one
-declared winning action by action: `adt.mcp.default`, then a section, a project, a folder of scripts, a
-command or a script; `adt.mcp.default`, then a section, a project and a folder of files;
-`adt.mcp.default`, then `environment.mcp`; `adt.mcp.default`, then `loadBalancers.<name>.mcp`.
+declared winning action by action:
+
+- commands and restores: `adt.mcp.default`, `adt.mcp.commands`, section, project, command;
+- scripts: `adt.mcp.default`, `adt.mcp.scripts`, section, project, folder of scripts, script;
+- folders of files: `adt.mcp.default`, `adt.mcp.files`, section, project, folder of files;
+- terminals a person opened without a command: `adt.mcp.default`, `adt.mcp.terminals`;
+- certificates: `adt.mcp.default`, `adt.mcp.certificates`, `loadBalancers.<name>.mcp`;
+- `port_owners` (read) and `reload_config` (control): `adt.mcp.default`, `adt.mcp.devtool`;
+- configuration files and copies of the environment: `adt.mcp.default`, `environment.mcp`.
+
+`notify_user` is always allowed. The Permissions tab of the Agents page shows the level of every action
+with the setting it comes from, and its Edit mode changes them in `config.local.yml` (Personal) or in the
+file declaring each setting (Shared).
 
 ```yaml
 adt:
@@ -112,6 +122,12 @@ adt:
     notifications: true
     timeout: 120                 # seconds before a request without answer is refused
     default: { read: allow, run: ask, input: ask, control: ask, write: ask }
+    commands: { run: allow }     # commands of the configuration
+    scripts: { run: ask }        # executables of the folders of scripts
+    files: { read: keys }        # folders of files of the projects
+    terminals: { input: ask }    # terminals a person opened without a command
+    certificates: { run: ask }
+    devtool: { control: ask }    # port_owners (read), reload_config (control)
     clients: { level: ask, allow: [ claude-code ], deny: [] }
     ownTerminals: allow          # typing into and controlling the terminals an agent started itself
     shell:                       # run_shell, command lines outside the configuration

@@ -49,7 +49,7 @@ async function describeTargets(targets: string[]): Promise<{ url: string; listen
  * @returns Its rules, the default ones when it is unknown.
  */
 function certificateRules(host: McpHost, name: string): McpRules {
-  return host.config.loadBalancers[`.${name}`]?.mcp ?? host.config.adt.mcp.default;
+  return host.config.loadBalancers[`.${name}`]?.mcp ?? host.config.adt.mcp.certificates;
 }
 
 /**
@@ -116,7 +116,7 @@ export function environmentTools(host: McpHost): McpTool[] {
       readOnly: true,
       run: async ({ port }, call) => {
         call.describe(`port ${port}`);
-        await call.authorize({ action: "read", rule: host.config.adt.mcp.default.read, title: `See who holds port ${port}`, grantKey: "read:ports", grantLabel: "See the holders of ports" });
+        await call.authorize({ action: "read", rule: host.config.adt.mcp.devtool.read, title: `See who holds port ${port}`, grantKey: "read:ports", grantLabel: "See the holders of ports" });
         return { port, owners: await host.portOwners(port) };
       },
     }),
@@ -127,7 +127,7 @@ export function environmentTools(host: McpHost): McpTool[] {
       input: {},
       run: async (_input, call) => {
         call.describe("configuration");
-        await call.authorize({ action: "control", rule: host.config.adt.mcp.default.control, title: "Reload the configuration", grantKey: "control:config", grantLabel: "Reload the configuration" });
+        await call.authorize({ action: "control", rule: host.config.adt.mcp.devtool.control, title: "Reload the configuration", grantKey: "control:config", grantLabel: "Reload the configuration" });
         await host.reconfigure();
         return { warnings: host.config.warnings };
       },

@@ -1,12 +1,17 @@
 <script setup lang="ts">
 import { ChevronDown } from "@lucide/vue";
 import { DropdownMenuContent, DropdownMenuItem, DropdownMenuPortal, DropdownMenuRoot, DropdownMenuSeparator, DropdownMenuTrigger } from "reka-ui";
-import type { McpLevel, McpRule } from "@appsys/devtool-shared";
+import type { McpLevel } from "@appsys/devtool-shared";
 import { Badge } from "@/components/ui/badge";
 import { LEVELS } from "@/lib/mcp";
 
 defineProps<{
-  rule: McpRule;
+  /** The level shown, null for a level about to be inherited. */
+  level: McpLevel | null;
+  /** Where the level comes from, or that it is changed. */
+  title: string;
+  /** Whether the level is a change not written yet. */
+  staged: boolean;
   /** The levels offered. */
   levels: readonly McpLevel[];
   /** Why the level cannot be changed, null when it can. */
@@ -22,14 +27,14 @@ const emit = defineEmits<{
   <DropdownMenuRoot>
     <DropdownMenuTrigger
       :disabled="blocked !== null"
-      :title="blocked ?? `From ${rule.from}`"
+      :title="blocked ?? title"
       class="rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
     >
       <Badge
-        :class="LEVELS[rule.level]"
+        :class="[level ? LEVELS[level] : 'border-dashed text-muted-foreground', staged ? 'ring-2 ring-sky-500/70' : '']"
         class="cursor-pointer gap-0.5"
       >
-        {{ rule.level }}
+        {{ level ?? "inherit" }}
         <ChevronDown class="size-3" />
       </Badge>
     </DropdownMenuTrigger>
@@ -39,13 +44,13 @@ const emit = defineEmits<{
         class="z-50 min-w-36 rounded-md border bg-popover p-1 text-xs text-popover-foreground shadow-md"
       >
         <DropdownMenuItem
-          v-for="level in levels"
-          :key="level"
+          v-for="item in levels"
+          :key="item"
           class="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 outline-none data-[highlighted]:bg-accent"
-          @select="emit('select', level)"
+          @select="emit('select', item)"
         >
-          <Badge :class="LEVELS[level]">
-            {{ level }}
+          <Badge :class="LEVELS[item]">
+            {{ item }}
           </Badge>
         </DropdownMenuItem>
         <DropdownMenuSeparator class="my-1 h-px bg-border" />

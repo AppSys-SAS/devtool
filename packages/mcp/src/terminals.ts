@@ -105,7 +105,7 @@ export function findCommand(config: RuntimeConfig, id: string): McpCommandTarget
 /**
  * Gives the rule of an action on a terminal: the terminals an agent started itself follow
  * `ownTerminals` for typing and control, those of a command its rules, the main terminal of a project
- * its rules, any other terminal the default rules.
+ * its rules, any other terminal the rules of the terminals a person opened.
  * @param config The configuration.
  * @param stream The terminal.
  * @param action The action.
@@ -118,7 +118,7 @@ export function terminalRule(config: RuntimeConfig, stream: McpTerminal, action:
   }
   const project = stream.projectSlug && stream.directorySlug ? config.projects[stream.projectSlug]?.directories[stream.directorySlug] : undefined;
   const command = stream.command ? project?.extras[stream.command] : undefined;
-  return (command?.mcp ?? (stream.primary ? project?.mcp : undefined) ?? config.adt.mcp.default)[action];
+  return (command?.mcp ?? (stream.primary ? project?.mcp : undefined) ?? config.adt.mcp.terminals)[action];
 }
 
 /**
@@ -661,7 +661,7 @@ export function terminalTools(host: McpHost): McpTool[] {
         call.describe(project ? `${section}/${project}` : section);
         await call.authorize({
           action: "run",
-          rule: target.mcp.run,
+          rule: target.restoreRule,
           title: `${restore.name} ${target.name}`,
           details: [
             { label: "Folder", value: target.path },

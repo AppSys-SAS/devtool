@@ -1,4 +1,4 @@
-import type { DirectoryExtra, McpAnswer, McpDecision, McpLevel, ProjectDefinition } from "@appsys/devtool-shared";
+import type { DirectoryExtra, McpAction, McpAnswer, McpDecision, McpLevel, ProjectDefinition } from "@appsys/devtool-shared";
 
 /** How each decision of a call is shown. */
 export const DECISIONS: Record<McpDecision, { label: string; class: string }> = {
@@ -39,12 +39,39 @@ export function findMcpCommand(projects: Record<string, ProjectDefinition> | nul
   return projects?.[section]?.directories[project]?.extras[slug.join("/")] ?? null;
 }
 
-/** Where the permissions changed from the Agents page are written, while it is in edit mode. */
+/** A level of an MCP setting changed from the Agents page, written once the edit is done. */
+export interface McpLevelChange {
+  path: string[];
+  /** The action changed, null for a setting being a level itself. */
+  action: McpAction | null;
+  /** The new level, null to inherit it. */
+  level: McpLevel | null;
+  file: "local" | "declared";
+}
+
+/** Where the permissions changed from the Agents page are written, and the changes waiting, while it is in edit mode. */
 export interface McpEditMode {
   /** The personal override, or the file declaring each setting. */
   file: "local" | "declared";
   /** The personal override, null when the server loads none. */
   localFile: string | null;
+  /** The changes waiting, by {@link changeKey}. */
+  staged: ReadonlyMap<string, McpLevelChange>;
+  /**
+   * Keeps a change until the edit is done, replacing the one of the same setting and action.
+   * @param change The change.
+   */
+  stage(change: McpLevelChange): void;
+}
+
+/**
+ * Names the setting and action a change applies to.
+ * @param path The keys leading to the setting.
+ * @param action The action, null for a setting being a level itself.
+ * @returns The key.
+ */
+export function changeKey(path: string[], action: McpAction | null): string {
+  return `${path.join("/")}#${action ?? ""}`;
 }
 
 /**

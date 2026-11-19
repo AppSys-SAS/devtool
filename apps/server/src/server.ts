@@ -141,29 +141,32 @@ export class DevtoolServer implements McpServerHost {
   }
 
   /**
-   * Writes a level of an MCP setting changed from an interface to the personal override or to the file
-   * declaring it, then reloads the configuration; a failure is shown in the interfaces.
-   * @param change The setting, its action, its new level and the file written.
+   * Writes the levels of MCP settings changed from an interface, one after the other, to the personal
+   * override or to the file declaring each, then reloads the configuration once; each failure is shown
+   * in the interfaces.
+   * @param changes The settings, their actions, their new levels and the files written.
    */
-  async setMcpLevel(change: McpLevelChange): Promise<void> {
-    try {
-      const target = this.configWrapper.findMcpTarget(change.path);
-      if (!target) {
-        throw new Error(`${change.path.join(".")} is not an MCP setting`);
+  async setMcpLevels(changes: McpLevelChange[]): Promise<void> {
+    for (const change of changes) {
+      try {
+        const target = this.configWrapper.findMcpTarget(change.path);
+        if (!target) {
+          throw new Error(`${change.path.join(".")} is not an MCP setting`);
+        }
+        if (change.level !== null && !acceptsMcpLevel(target.path, change.action, change.level)) {
+          throw new Error(`${change.level} does not fit ${target.path.join(".")}${change.action ? `.${change.action}` : ""}`);
+        }
+        const file = change.file === "local" ? this.configWrapper.localPath : target.declaredIn;
+        if (!file) {
+          throw new Error(change.file === "local" ? "no personal override is loaded" : "no configuration file declares it");
+        }
+        await writeMcpLevel(file, target.path, change.action, change.level);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        await this.notifyUser({ id: randomUUID(), client: "devtool", message: `Permission not changed: ${message}`, level: "error", date: Date.now() });
       }
-      if (change.level !== null && !acceptsMcpLevel(target.path, change.action, change.level)) {
-        throw new Error(`${change.level} does not fit ${target.path.join(".")}${change.action ? `.${change.action}` : ""}`);
-      }
-      const file = change.file === "local" ? this.configWrapper.localPath : target.declaredIn;
-      if (!file) {
-        throw new Error(change.file === "local" ? "no personal override is loaded" : "no configuration file declares it");
-      }
-      await writeMcpLevel(file, target.path, change.action, change.level);
-      await this.reconfigure();
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      await this.notifyUser({ id: randomUUID(), client: "devtool", message: `Permission not changed: ${message}`, level: "error", date: Date.now() });
     }
+    await this.reconfigure();
   }
 
   /**

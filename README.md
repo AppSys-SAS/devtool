@@ -330,14 +330,19 @@ interface is open), `keys` (files only: their keys with the type of each value, 
 or `deny` (`read: deny` hides it from the agent). `mcp` takes a level for every action, or levels by
 action, inherited from the most general to the most precise:
 
-- `adt.mcp.default` > section > project > folder of scripts > command or script;
-- `adt.mcp.default` > section > project > folder of files;
-- `adt.mcp.default` > `environment.mcp` (the `configs` files and the `environment_*` tools);
-- `adt.mcp.default` > `loadBalancers.<name>.mcp` (certificates).
+- commands and restores: `adt.mcp.default` > `adt.mcp.commands` > section > project > command;
+- scripts: `adt.mcp.default` > `adt.mcp.scripts` > section > project > folder of scripts > script;
+- folders of files: `adt.mcp.default` > `adt.mcp.files` > section > project > folder of files;
+- terminals a person opened without a command: `adt.mcp.default` > `adt.mcp.terminals` (the terminal of a
+  command follows its command);
+- certificates: `adt.mcp.default` > `adt.mcp.certificates` > `loadBalancers.<name>.mcp`;
+- `port_owners` (read) and `reload_config` (control): `adt.mcp.default` > `adt.mcp.devtool`;
+- the `configs` files and the `environment_*` tools: `adt.mcp.default` > `environment.mcp`.
 
-Typing into and controlling the terminals an agent started itself follow `adt.mcp.ownTerminals`;
-`run_shell` follows `adt.mcp.shell` only. A push to the CDN and the pull of the shared configuration are
-always confirmed, and agents never write the devtool configuration.
+A setting of a section or project prevails over the categories, being more precise. Typing into and
+controlling the terminals an agent started itself follow `adt.mcp.ownTerminals`; `run_shell` follows
+`adt.mcp.shell` only; `notify_user` is always allowed. A push to the CDN and the pull of the shared
+configuration are always confirmed, and agents never write the devtool configuration.
 
 ```yaml
 adt:
@@ -346,6 +351,12 @@ adt:
     notifications: true
     timeout: 120
     default: { read: allow, run: ask, input: ask, control: ask, write: ask }
+    commands: { run: allow }
+    scripts: { run: ask }
+    files: { read: keys }
+    terminals: { input: ask }
+    certificates: { run: ask }
+    devtool: { control: ask }
     clients: { level: ask, allow: [ claude-code ], deny: [] }
     ownTerminals: allow
     shell: { level: ask, allow: [ "git status*", "pnpm test*" ], deny: [ "rm *" ] }
@@ -366,9 +377,10 @@ A request is answered once, for the session of the agent or always. The Agents p
 the bookmark icon of the sidebar) lists the sessions and clients, the requests waiting, the history of
 every call (allowed again from a row for the session or always), the grants (removed one by one or all)
 and the effective level of every action with the setting it comes from. Its Edit mode changes these levels
-(or removes one, Inherit), written to `config.local.yml` (Personal, loaded last, so it prevails over every
-file and include) or to the file declaring each setting (Shared: `config.yml` or the included file of a
-repository), keeping comments and layout; the configuration is then reloaded. The history (1000 calls), the
+(or removes one, Inherit); the changes wait until Done writes them all (Cancel drops them) to
+`config.local.yml` (Personal, loaded last, so it prevails over every file and include) or to the file
+declaring each setting (Shared: `config.yml` or the included file of a repository), keeping comments and
+layout, then reloads the configuration once. The history (1000 calls), the
 grants and the clients accepted always are kept in `adt.cacheDir` (`mcp-history.jsonl`,
 `mcp-grants.json`, `mcp-clients.json`); a `deny` of the configuration prevails over any grant. A session
 without request nor event stream for 30 minutes is closed; its agent starts a new one.

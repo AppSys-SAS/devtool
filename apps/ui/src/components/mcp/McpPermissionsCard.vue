@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { computed, shallowRef } from "vue";
-import { Check, Pencil } from "@lucide/vue";
-import { MCP_ACTIONS, type McpAction, type McpLevel, type McpRules } from "@appsys/devtool-shared";
+import { Check, Pencil, X } from "@lucide/vue";
+import { MCP_ACTIONS, type McpAction, type McpLevel, type McpPatterns, type McpRules, type McpTarget } from "@appsys/devtool-shared";
 import McpRulesRow from "@/components/mcp/McpRulesRow.vue";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import { shortPath, type McpEditMode } from "@/lib/mcp";
+import { changeKey, shortPath, type McpEditMode, type McpLevelChange } from "@/lib/mcp";
 import configStore from "@/stores/config";
 import mcpStore from "@/stores/mcp";
 
@@ -14,20 +14,57 @@ const COMMAND_ACTIONS: readonly McpAction[] = ["read", "run", "input", "control"
 const FILE_ACTIONS: readonly McpAction[] = ["read", "write"];
 const CERTIFICATE_ACTIONS: readonly McpAction[] = ["read", "run"];
 const OWN_TERMINAL_LEVELS: readonly McpLevel[] = ["allow", "ask"];
-const SHELL_LEVELS: readonly McpLevel[] = ["allow", "ask", "deny"];
+const PATTERN_LEVELS: readonly McpLevel[] = ["allow", "ask", "deny"];
+
+/** A global setting of `adt.mcp` or `environment`, as a row of the card. */
+interface SettingRow {
+  label: string;
+  kind: string;
+  rules: McpRules;
+  actions: readonly McpAction[];
+  target: McpTarget;
+  /** The levels of a setting being a level itself. */
+  levels?: readonly McpLevel[];
+  /** Shown in place of the action of a setting being a level itself. */
+  caption?: string;
+}
 
 const settings = configStore.mcp;
 const projects = computed(() => Object.values(configStore.projects.value ?? {}));
 const granted = computed(() => new Set(mcpStore.state.value?.grants.filter((grant) => grant.scope === "always").map((grant) => grant.key)));
 
 const editFile = shallowRef<McpEditMode["file"] | null>(null);
-const edit = computed<McpEditMode | null>(() => (editFile.value ? { file: editFile.value, localFile: settings.value?.localFile ?? null } : null));
+const staged = shallowRef<ReadonlyMap<string, McpLevelChange>>(new Map());
+const edit = computed<McpEditMode | null>(() =>
+  editFile.value
+    ? {
+        file: editFile.value,
+        localFile: settings.value?.localFile ?? null,
+        staged: staged.value,
+        stage: (change) => {
+          staged.value = new Map(staged.value).set(changeKey(change.path, change.action), change);
+        },
+      }
+    : null,
+);
 
 /**
- * Enters the edit mode, writing to the personal override when there is one, or leaves it.
+ * Enters the edit mode, writing to the personal override when there is one.
  */
-function toggleEdit(): void {
-  editFile.value = editFile.value ? null : settings.value?.localFile ? "local" : "declared";
+function startEdit(): void {
+  editFile.value = settings.value?.localFile ? "local" : "declared";
+}
+
+/**
+ * Leaves the edit mode, writing the changes waiting when they are kept.
+ * @param keep Whether the changes are written, or dropped.
+ */
+function endEdit(keep: boolean): void {
+  if (keep && staged.value.size) {
+    mcpStore.setLevels([...staged.value.values()]);
+  }
+  staged.value = new Map();
+  editFile.value = null;
 }
 
 /**
@@ -49,17 +86,57 @@ function folderName(folder: string): string {
   return folder.split("/").slice(-1)[0] ?? folder;
 }
 
-const ownTerminals = computed(() => uniformRules(settings.value?.ownTerminals ?? "allow", "adt.mcp.ownTerminals"));
-const shell = computed(() => uniformRules(settings.value?.shell.level ?? "deny", "adt.mcp.shell.level"));
-const shellKind = computed(() => {
-  const patterns = settings.value?.shell;
+/**
+ * Describes a setting made of a level and patterns overriding it.
+ * @param kind What the setting rules.
+ * @param patterns The level and its patterns.
+ * @returns The description, the patterns after it.
+ */
+function patternsKind(kind: string, patterns: McpPatterns): string {
+  return [kind, patterns.allow.length ? `allow ${patterns.allow.join(", ")}` : null, patterns.deny.length ? `deny ${patterns.deny.join(", ")}` : null].filter(Boolean).join(" · ");
+}
+
+const settingRows = computed<SettingRow[]>(() => {
+  const value = settings.value;
+  if (!value) {
+    return [];
+  }
+  const { targets } = value;
   return [
-    "command lines outside the configuration",
-    patterns?.allow.length ? `allow ${patterns.allow.join(", ")}` : null,
-    patterns?.deny.length ? `deny ${patterns.deny.join(", ")}` : null,
-  ]
-    .filter(Boolean)
-    .join(" · ");
+    {
+      label: "adt.mcp.clients",
+      kind: patternsKind("agents accepted before any rule", value.clients),
+      rules: uniformRules(value.clients.level, "adt.mcp.clients.level"),
+      actions: ["read"],
+      target: targets.clients,
+      levels: PATTERN_LEVELS,
+      caption: "accept",
+    },
+    { label: "adt.mcp.default", kind: "everything, refined below", rules: value.default, actions: MCP_ACTIONS, target: targets.default },
+    { label: "adt.mcp.commands", kind: "commands of the configuration and restores", rules: value.commands, actions: COMMAND_ACTIONS, target: targets.commands },
+    { label: "adt.mcp.scripts", kind: "executables of the folders of scripts", rules: value.scripts, actions: COMMAND_ACTIONS, target: targets.scripts },
+    { label: "adt.mcp.files", kind: "folders of files of the projects", rules: value.files, actions: FILE_ACTIONS, target: targets.files },
+    { label: "adt.mcp.terminals", kind: "terminals a person opened without a command", rules: value.terminals, actions: COMMAND_ACTIONS, target: targets.terminals },
+    {
+      label: "adt.mcp.ownTerminals",
+      kind: "the terminals an agent started itself",
+      rules: uniformRules(value.ownTerminals, "adt.mcp.ownTerminals"),
+      actions: ["input", "control"],
+      target: targets.ownTerminals,
+      levels: OWN_TERMINAL_LEVELS,
+    },
+    {
+      label: "adt.mcp.shell",
+      kind: patternsKind("command lines outside the configuration", value.shell),
+      rules: uniformRules(value.shell.level, "adt.mcp.shell.level"),
+      actions: ["run"],
+      target: targets.shell,
+      levels: PATTERN_LEVELS,
+    },
+    { label: "adt.mcp.devtool", kind: "holders of a port (read), reloading the configuration (control)", rules: value.devtool, actions: ["read", "control"], target: targets.devtool },
+    { label: "environment", kind: "configs, pulls and pushes", rules: value.environment, actions: ["read", "run", "write"], target: targets.environment },
+    { label: "adt.mcp.certificates", kind: "every certificate, refined below", rules: value.certificates, actions: CERTIFICATE_ACTIONS, target: targets.certificates },
+  ];
 });
 </script>
 
@@ -72,21 +149,37 @@ const shellKind = computed(() => {
           The level of every action as the configuration resolves it. Hover a level to see where it comes from, ✓ marks a call granted always.
         </CardDescription>
       </div>
-      <Button
-        size="sm"
-        :variant="edit ? 'default' : 'outline'"
-        class="shrink-0 gap-1.5"
-        @click="toggleEdit"
+      <div
+        v-if="edit"
+        class="flex shrink-0 items-center gap-2"
       >
-        <Check
-          v-if="edit"
-          class="size-3.5"
-        />
-        <Pencil
-          v-else
-          class="size-3.5"
-        />
-        {{ edit ? "Done" : "Edit" }}
+        <Button
+          size="sm"
+          variant="ghost"
+          class="gap-1.5"
+          @click="endEdit(false)"
+        >
+          <X class="size-3.5" />
+          Cancel
+        </Button>
+        <Button
+          size="sm"
+          class="gap-1.5"
+          @click="endEdit(true)"
+        >
+          <Check class="size-3.5" />
+          {{ staged.size ? `Done (${staged.size})` : "Done" }}
+        </Button>
+      </div>
+      <Button
+        v-else
+        size="sm"
+        variant="outline"
+        class="shrink-0 gap-1.5"
+        @click="startEdit"
+      >
+        <Pencil class="size-3.5" />
+        Edit
       </Button>
     </CardHeader>
     <CardContent class="space-y-3">
@@ -126,60 +219,35 @@ const shellKind = computed(() => {
 
       <div class="space-y-1">
         <McpRulesRow
-          label="adt.mcp.default"
-          kind="everything declaring nothing, terminals opened by you"
-          :rules="settings.default"
-          :actions="MCP_ACTIONS"
+          v-for="row in settingRows"
+          :key="row.label"
+          :label="row.label"
+          :kind="row.kind"
+          :rules="row.rules"
+          :actions="row.actions"
           :depth="0"
           :granted="granted"
-          :target="settings.targets.default"
+          :target="row.target"
+          :levels="row.levels"
+          :caption="row.caption"
           :edit="edit"
         />
         <McpRulesRow
-          label="adt.mcp.ownTerminals"
-          kind="the terminals an agent started itself"
-          :rules="ownTerminals"
-          :actions="['input', 'control']"
-          :depth="0"
-          :granted="granted"
-          :target="settings.targets.ownTerminals"
-          :levels="OWN_TERMINAL_LEVELS"
-          :edit="edit"
-        />
-        <McpRulesRow
-          label="adt.mcp.shell"
-          :kind="shellKind"
-          :rules="shell"
-          :actions="['run']"
-          :depth="0"
-          :granted="granted"
-          :target="settings.targets.shell"
-          :levels="SHELL_LEVELS"
-          :edit="edit"
-        />
-        <McpRulesRow
-          label="environment"
-          kind="configs, pulls and pushes"
-          :rules="settings.environment"
-          :actions="['read', 'run', 'write']"
-          :depth="0"
-          :granted="granted"
-          :target="settings.targets.environment"
-          :edit="edit"
-        />
-        <McpRulesRow
-          v-for="(certificate, name) in settings.certificates"
+          v-for="(certificate, name) in settings.certificatesByName"
           :key="`certificate/${name}`"
           :label="name"
           kind="certificate"
           :rules="certificate.rules"
           :actions="CERTIFICATE_ACTIONS"
-          :depth="0"
+          :depth="1"
           :grant-id="`certificate:${name}`"
           :granted="granted"
           :target="certificate.target"
           :edit="edit"
         />
+        <p class="px-2 py-1 text-xs text-muted-foreground">
+          <code>notify_user</code> is always allowed: it only shows a message in this interface. Writing the configuration of the devtool is always refused.
+        </p>
       </div>
 
       <div

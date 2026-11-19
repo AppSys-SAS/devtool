@@ -184,8 +184,8 @@ export class DevtoolMcp {
       await this._sessions.get(message.data.session)?.transport.close();
     } else if (message.type === "mcpClearHistory") {
       await this.approvals.clearHistory();
-    } else if (message.type === "mcpSetLevel") {
-      await this._host.setMcpLevel(message.data);
+    } else if (message.type === "mcpSetLevels") {
+      await this._host.setMcpLevels(message.data.changes);
     }
   }
 

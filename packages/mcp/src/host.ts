@@ -153,7 +153,7 @@ export type McpUiMessage =
   | { type: "mcpClient"; data: { name: string; decision: "always" | "forget" } }
   | { type: "mcpDisconnect"; data: { session: string } }
   | { type: "mcpClearHistory"; data: Record<string, never> }
-  | { type: "mcpSetLevel"; data: McpLevelChange };
+  | { type: "mcpSetLevels"; data: { changes: McpLevelChange[] } };
 
 /** What the MCP server needs from the devtool server, beyond what its tools use. */
 export interface McpServerHost extends McpHost {
@@ -167,6 +167,6 @@ export interface McpServerHost extends McpHost {
   publish(type: string, data: unknown, connection?: unknown): Promise<void>;
   /** Counts the open interfaces. */
   interfaces(): number;
-  /** Writes a level of an MCP setting changed from an interface. */
-  setMcpLevel(change: McpLevelChange): Promise<void>;
+  /** Writes the levels of MCP settings changed from an interface, in order. */
+  setMcpLevels(changes: McpLevelChange[]): Promise<void>;
 }

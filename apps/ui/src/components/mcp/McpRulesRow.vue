@@ -3,8 +3,7 @@ import { computed } from "vue";
 import { MCP_ACTIONS, mcpLevelsFor, type McpAction, type McpLevel, type McpRules, type McpTarget } from "@appsys/devtool-shared";
 import McpLevelSelect from "@/components/mcp/McpLevelSelect.vue";
 import { Badge } from "@/components/ui/badge";
-import { LEVELS, shortPath, type McpEditMode } from "@/lib/mcp";
-import mcpStore from "@/stores/mcp";
+import { changeKey, LEVELS, shortPath, type McpEditMode, type McpLevelChange } from "@/lib/mcp";
 
 const props = defineProps<{
   label: string;
@@ -22,6 +21,8 @@ const props = defineProps<{
   target?: McpTarget;
   /** The levels of a setting being a level itself, every action of the row changing it; absent for an `mcp` setting. */
   levels?: readonly McpLevel[];
+  /** Shown in place of the name of the action, for a setting being a level itself. */
+  caption?: string;
   /** Where changes are written while the page is in edit mode, null outside of it. */
   edit: McpEditMode | null;
 }>();
@@ -35,13 +36,22 @@ const blocked = computed(() => {
 });
 
 /**
- * Writes a new level of an action of the row.
+ * Gives the change waiting for an action of the row.
+ * @param action The action.
+ * @returns The change, undefined when the action is not changed.
+ */
+function staged(action: McpAction): McpLevelChange | undefined {
+  return props.target ? props.edit?.staged.get(changeKey(props.target.path, props.levels ? null : action)) : undefined;
+}
+
+/**
+ * Keeps a new level of an action of the row until the edit is done.
  * @param action The action.
  * @param level The level, null to inherit it.
  */
 function change(action: McpAction, level: McpLevel | null): void {
   if (props.target && props.edit) {
-    mcpStore.setLevel(props.target.path, props.levels ? null : action, level, props.edit.file);
+    props.edit.stage({ path: props.target.path, action: props.levels ? null : action, level, file: props.edit.file });
   }
 }
 </script>
@@ -70,10 +80,12 @@ function change(action: McpAction, level: McpLevel | null): void {
       :title="actions.includes(action) && !edit ? `${action}: ${rules[action].level}, from ${rules[action].from}` : undefined"
     >
       <template v-if="actions.includes(action)">
-        <span class="text-muted-foreground">{{ action }}</span>
+        <span class="text-muted-foreground">{{ caption ?? action }}</span>
         <McpLevelSelect
           v-if="edit"
-          :rule="rules[action]"
+          :level="staged(action) ? staged(action)!.level : rules[action].level"
+          :title="staged(action) ? `Changed, written to ${staged(action)!.file === 'local' ? 'the personal override' : 'the declaring file'} when done` : `From ${rules[action].from}`"
+          :staged="staged(action) !== undefined"
           :levels="levels ?? mcpLevelsFor(action)"
           :blocked="blocked"
           @select="(level) => change(action, level)"
