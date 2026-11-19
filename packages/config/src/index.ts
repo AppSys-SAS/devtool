@@ -94,23 +94,28 @@ function resolveFolderPaths(config: RawConfig, cwd: string): void {
 }
 
 /**
- * Resolves the paths of the sections from the workspace.
+ * Gives the sections declaring no path the `sectionPath` of the configuration, the workspace itself by
+ * default, then resolves the paths of the sections from the workspace, leaving them relative without one.
  * @param config The merged configuration.
- * @param cwd The workspace.
+ * @param workspace The workspace, null when none is declared.
  */
-function resolveSectionPaths(config: RawConfig, cwd: string): void {
+function resolveSectionPaths(config: RawConfig, workspace: string | null): void {
   if (typeof config.sections !== "object" || config.sections === null) {
     return;
   }
 
+  const fallback = typeof config.sectionPath === "string" ? config.sectionPath : ".";
   for (const sectionValue of Object.values(config.sections)) {
     if (typeof sectionValue !== "object" || sectionValue === null) {
       continue;
     }
 
     const section = sectionValue as Record<string, unknown>;
-    if (typeof section.path === "string") {
-      section.path = resolveConfigPath(cwd, section.path);
+    if (typeof section.path !== "string") {
+      section.path = fallback;
+    }
+    if (workspace !== null) {
+      section.path = resolveConfigPath(workspace, section.path as string);
     }
   }
 }
@@ -214,8 +219,8 @@ export function resolveDefaultConfigPaths(folder = resolveConfigFolder()): strin
 
 /**
  * Loads and merges configuration files, each overriding the previous ones. Relative paths are resolved from the
- * directory of the first file, the configuration folder, but those of the sections, resolved from the `workspace`
- * of the merged configuration and left relative without one.
+ * directory of the first file, the configuration folder, but those of the sections, `sectionPath` for the sections
+ * declaring none, resolved from the `workspace` of the merged configuration and left relative without one.
  * @param configPaths Paths of the configuration files; missing files are skipped.
  * @returns The merged configuration and the files loaded.
  */
@@ -233,9 +238,7 @@ export async function loadMergedConfig(configPaths = resolveDefaultConfigPaths()
     mergeConfig(result, await loadConfigFile(absolutePath, baseDirectory));
     loadedPaths.push(absolutePath);
   }
-  if (typeof result.workspace === "string") {
-    resolveSectionPaths(result, result.workspace);
-  }
+  resolveSectionPaths(result, typeof result.workspace === "string" ? result.workspace : null);
 
   return {
     config: result,

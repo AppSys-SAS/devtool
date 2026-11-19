@@ -36,6 +36,14 @@ It also keeps the CDN session (`session.json`) and the synchronization journal (
   proxies Vite (`$DEVTOOL_UI_PATH`, else `http://127.0.0.1:6731`).
 - Relative section paths are resolved from `workspace`, the personal folder holding the repositories
   (`workspace: ~/Workspace` in `config.local.yml`); without it they are ignored with a warning.
+- `sectionPath` (default `.`, the workspace itself) is the path of the sections declaring none, for
+  instance those of a configuration kept in a repository and brought by `include`:
+
+  ```yaml
+  workspace: ~/Workspace
+  sectionPath: acme/monorepo
+  include: [ ~/Workspace/acme/monorepo/.devtool/*.yml ]
+  ```
 - `environment.folder` is the local mirror of the CDN files, the parent of the configuration folder by
   default; the shared configuration is its `devtool/config.yml`.
 
