@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { TabsContent, TabsList, TabsRoot, TabsTrigger } from "reka-ui";
 import McpConnectionCard from "@/components/mcp/McpConnectionCard.vue";
@@ -18,9 +18,15 @@ const tab = computed({
   set: (value) => void router.replace({ query: { ...route.query, tab: value } }),
 });
 
-if (!tab.value) {
-  tab.value = mcpStore.state.value?.pending.length ? "waiting" : "connection";
-}
+watch(
+  () => route.query.tab,
+  (value) => {
+    if (typeof value !== "string") {
+      tab.value = mcpStore.state.value?.pending.length ? "waiting" : "connection";
+    }
+  },
+  { immediate: true },
+);
 
 const tabs = computed(() => [
   { value: "connection", label: "Connection", count: mcpStore.state.value?.sessions.length ?? 0 },
