@@ -1,7 +1,9 @@
 import { spawn as spawnDetached } from "node:child_process";
+import { EventEmitter } from "node:events";
 import { chmodSync, existsSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
+import xtermHeadless, { type Terminal as ScreenTerminal } from "@xterm/headless";
 import { spawn as spawnPty, type IPty } from "node-pty";
 import treeKill from "tree-kill";
 import type { CommandArg, CommandInputValue, PortConflict, PortConflictAction, StreamOutputLine, StreamUpdatePayload } from "@appsys/devtool-shared";
@@ -18,6 +20,13 @@ export interface CommandStreamHooks {
   automation?: CommandAutomation | null;
   /** Called each time the process ends, with its exit code, -1 when it was stopped. */
   onExit?: (exitCode: number) => void;
+}
+
+/** What a stream tells its listeners: each piece of output, each change of state, and its closing. */
+export interface CommandStreamEvents {
+  output: [StreamOutputLine];
+  update: [];
+  close: [];
 }
 
 const MAX_OUTPUT = 2048;
@@ -178,6 +187,17 @@ export class DevtoolCommandStream {
   /** Identifies the stream for the interface that started it. */
   public tag: string | null;
 
+  /** The agent that started the stream, null when a person did. */
+  public origin: string | null;
+
+  public readonly events = new EventEmitter<CommandStreamEvents>();
+
+  /** How many pieces of output were dropped from the start of `output`. */
+  private _outputStart = 0;
+
+  /** The screen of the terminal as a person would see it, rendered once first asked for. */
+  private _screen: ScreenTerminal | null = null;
+
   private automation: CommandAutomation | null;
 
   public args: string[];
@@ -241,6 +261,7 @@ export class DevtoolCommandStream {
     this.primary = false;
     this.name = "N/A";
     this.tag = null;
+    this.origin = null;
     this.automation = null;
     this.args = [];
     this.command = null;
@@ -355,6 +376,7 @@ export class DevtoolCommandStream {
     this.args = restoreArgs ?? (this._template ? expandCommandArgs(this._template, inputs) : args);
     this.name = name ?? this.args.join(" ");
     this.tag = typeof options.tag === "string" ? options.tag : null;
+    this.origin = typeof options.origin === "string" ? options.origin : null;
     this.automation = command && projectSlug && directorySlug ? this.server.commandAutomation(projectSlug, directorySlug, command.slug) : null;
     this.cwd = cwd;
     this.env = command?.env ?? env ?? {};
@@ -404,6 +426,52 @@ export class DevtoolCommandStream {
     }
   }
 
+  /**
+   * Whether the process of the command is running.
+   * @returns True while it runs.
+   */
+  get running(): boolean {
+    return this.proc !== null;
+  }
+
+  /**
+   * Gives the position in the whole output of the first piece still kept in `output`.
+   * @returns How many pieces were dropped before it.
+   */
+  get outputStart(): number {
+    return this._outputStart;
+  }
+
+  /**
+   * Gives the size of the terminal.
+   * @returns Its columns and rows.
+   */
+  get size(): { cols: number; rows: number } {
+    return { cols: this.cols, rows: this.rows };
+  }
+
+  /**
+   * Renders the visible screen of the terminal, the output kept so far replayed the first time.
+   * @returns The lines of the screen, trailing spaces removed.
+   */
+  async screen(): Promise<string> {
+    if (!this._screen) {
+      this._screen = new xtermHeadless.Terminal({ cols: this.cols, rows: this.rows, allowProposedApi: true });
+      for (const line of this.output) {
+        this._screen.write(line.content);
+      }
+    }
+    const screen = this._screen;
+    await new Promise<void>((resolve) => screen.write("", resolve));
+
+    const buffer = screen.buffer.active;
+    const lines: string[] = [];
+    for (let row = 0; row < screen.rows; row += 1) {
+      lines.push(buffer.getLine(buffer.viewportY + row)?.translateToString(true) ?? "");
+    }
+    return lines.join("\n").trimEnd();
+  }
+
   writeInput(data: string): void {
     if (!this.proc) {
       return;
@@ -411,6 +479,11 @@ export class DevtoolCommandStream {
     this.proc.write(data);
   }
 
+  /**
+   * Resizes the terminal, and its rendered screen when there is one.
+   * @param cols The number of columns.
+   * @param rows The number of rows.
+   */
   resize(cols: number, rows: number): void {
     if (!Number.isInteger(cols) || !Number.isInteger(rows) || cols < 1 || rows < 1) {
       return;
@@ -418,6 +491,7 @@ export class DevtoolCommandStream {
 
     this.cols = cols;
     this.rows = rows;
+    this._screen?.resize(cols, rows);
 
     if (!this.proc) {
       return;
@@ -427,7 +501,7 @@ export class DevtoolCommandStream {
   }
 
   /**
-   * Sends the state of the stream to one interface, or to every interface.
+   * Sends the state of the stream to one interface, or to every interface and its listeners.
    * @param wsInstance The connection of the interface, every connection when null.
    */
   async sendUpdate(wsInstance: WebSocket | null = null): Promise<void> {
@@ -438,6 +512,7 @@ export class DevtoolCommandStream {
       primary: this.primary,
       name: this.name,
       tag: this.tag,
+      origin: this.origin,
       command: this.command,
       args: this.args,
       env: this.env,
@@ -454,6 +529,9 @@ export class DevtoolCommandStream {
     };
 
     await this.sendToWsConnections("streamUpdate", payload, wsInstance);
+    if (!wsInstance) {
+      this.events.emit("update");
+    }
   }
 
   async sendOutput(output: StreamOutputLine | null = null, wsInstance: WebSocket | null = null): Promise<void> {
@@ -969,14 +1047,28 @@ export class DevtoolCommandStream {
     await this.start({ args });
   }
 
+  /**
+   * Removes the stopped stream from the server and the interfaces, and tells its listeners.
+   * @throws When the process still runs.
+   */
   private async close(): Promise<void> {
     if (this.proc) {
       throw new Error("Process not stopped");
     }
     await this.server.removeCommandStream(this.slug);
     await this.sendToWsConnections("streamRemove", { slug: this.slug });
+    this.events.emit("close");
+    this.events.removeAllListeners();
+    this._screen?.dispose();
+    this._screen = null;
   }
 
+  /**
+   * Keeps a piece of output, sends it to the interfaces and the listeners and renders it on the
+   * screen, dropping the oldest pieces beyond the limit.
+   * @param type The kind of output.
+   * @param content The text, information wrapped in its colors.
+   */
   private async addOutput(type: StreamOutputLine["type"], content: string): Promise<void> {
     if (type === "info") {
       content = `${ANSI_INFO_PREFIX}${content}${ANSI_RESET}`;
@@ -989,10 +1081,13 @@ export class DevtoolCommandStream {
     };
 
     this.output.push(output);
+    this._screen?.write(content);
+    this.events.emit("output", output);
     await this.sendOutput(output);
 
     while (this.output.length > MAX_OUTPUT) {
       this.output.shift();
+      this._outputStart += 1;
     }
   }
 

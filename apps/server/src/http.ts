@@ -8,6 +8,8 @@ import { serveIcons } from "./icons.js";
 import type { ServerContextLike } from "./types.js";
 import { LISTEN_ADDRESS } from "./utils.js";
 
+const MCP_PATH = "/mcp";
+
 interface WsConnection extends WebSocket {
   isAlive?: boolean;
 }
@@ -80,13 +82,26 @@ export class DevtoolHttp {
   }
 
   /**
-   * Answers an HTTP request: icons from the installed icon sets, else the files of the interface,
-   * falling back to its index page.
+   * Counts the interfaces connected.
+   * @returns The number of open connections.
+   */
+  clientCount(): number {
+    return [...this.wss.clients].filter((ws) => ws.readyState === ws.OPEN).length;
+  }
+
+  /**
+   * Answers an HTTP request: the MCP server, icons from the installed icon sets, else the files of the
+   * interface, falling back to its index page.
    * @param req The request.
    * @param res Its response.
    */
   private async onRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     try {
+      if ((req.url ?? "/").split("?")[0] === MCP_PATH) {
+        await this.context.onMcpRequest(req, res);
+        return;
+      }
+
       if (await serveIcons(req.url ?? "/", res)) {
         return;
       }

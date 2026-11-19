@@ -62,7 +62,7 @@ export interface CertificatesHost {
   /** Sends the state to every connected interface. */
   publish: (payload: CertificatePayload[]) => Promise<void>;
   /** Starts a command in a terminal of the server. */
-  run: (data: CommandStreamCreatePayload, hooks: CommandStreamHooks) => Promise<void>;
+  run: (data: CommandStreamCreatePayload, hooks: CommandStreamHooks) => Promise<unknown>;
   /** Reloads the configuration, the load balancer reading the certificates again. */
   reload: () => Promise<void>;
   /** Gives the paths of the synchronized environment files among local files. */

@@ -1,5 +1,6 @@
 import type { RawConfig } from "@appsys/devtool-config";
-import type { CommandInputValue, FileEntryPayload, PortConflictAction, RuntimeConfig } from "@appsys/devtool-shared";
+import type { IncomingMessage, ServerResponse } from "node:http";
+import type { CommandInputValue, FileEntryPayload, McpAnswer, PortConflictAction, RuntimeConfig } from "@appsys/devtool-shared";
 import type { WebSocket } from "ws";
 import type { EnvironmentTarget } from "./environment.js";
 
@@ -38,6 +39,8 @@ export interface CommandStreamCreatePayload {
     inputs?: CommandInputValue[];
     /** Runs the command of the configuration bringing back the folder of a missing project, or of its missing directory. */
     restore?: boolean;
+    /** The agent starting the command, absent for a person. */
+    origin?: string;
   };
 }
 
@@ -154,10 +157,39 @@ export type ConnectionMessage =
   | {
       type: "portConflict";
       data: CommandStreamPortConflictPayload;
+    }
+  | McpUiMessage;
+
+/** What an interface asks about the agents: answers, grants, accepted agents, sessions, history. */
+export type McpUiMessage =
+  | {
+      type: "mcpAnswer";
+      data: { id: string; answer: McpAnswer; inputs?: CommandInputValue[] | null };
+    }
+  | {
+      type: "mcpRevoke";
+      data: { key: string | null; scope: "session" | "always"; session?: string | null };
+    }
+  | {
+      type: "mcpGrant";
+      data: { historyId: string; scope: "session" | "always" };
+    }
+  | {
+      type: "mcpClient";
+      data: { name: string; decision: "always" | "forget" };
+    }
+  | {
+      type: "mcpDisconnect";
+      data: { session: string };
+    }
+  | {
+      type: "mcpClearHistory";
+      data: Record<string, never>;
     };
 
 export interface ServerContextLike {
   config: RuntimeConfig;
   onNewConnection(ws: WebSocket): Promise<void>;
   onConnectionMessage(type: string, data: unknown, ws: WebSocket): Promise<void>;
+  onMcpRequest(req: IncomingMessage, res: ServerResponse): Promise<void>;
 }

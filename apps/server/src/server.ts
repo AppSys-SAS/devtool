@@ -1,5 +1,6 @@
 import { type FSWatcher, watch } from "node:fs";
-import type { FilePayload, FileTreePayload, RuntimeConfig } from "@appsys/devtool-shared";
+import type { IncomingMessage, ServerResponse } from "node:http";
+import type { FilePayload, FileTreePayload, McpMessagePayload, RuntimeConfig } from "@appsys/devtool-shared";
 import { logger } from "@appsys/devtool-shared";
 import type { WebSocket } from "ws";
 import { DevtoolCdnSession } from "./cdn-session.js";
@@ -11,6 +12,7 @@ import { DevtoolEnvironment } from "./environment.js";
 import { DevtoolFileSpaces, type FileSpace, isDevtoolConfig } from "./file-spaces.js";
 import { DevtoolHttp } from "./http.js";
 import { DevtoolLB } from "./lb.js";
+import { DevtoolMcp, type McpServerHost } from "./mcp.js";
 import type {
   CommandStreamCreatePayload,
   CommandStreamInputPayload,
@@ -19,6 +21,7 @@ import type {
   CommandStreamUpdatePayload,
   ConfigProvider,
   ConnectionMessage,
+  McpUiMessage,
 } from "./types.js";
 
 const SCRIPT_CHANGE_DELAY_MS = 300;
@@ -33,10 +36,10 @@ function unknownSpaceFile(spaceId: string, filePath: string): FilePayload {
   return { space: spaceId, path: filePath, content: null, binary: false, updatedAt: null, saved: false, conflict: false, error: `${spaceId} is not a file space` };
 }
 
-export class DevtoolServer {
+export class DevtoolServer implements McpServerHost {
   private readonly configProvider: ConfigProvider;
 
-  private readonly version: string;
+  readonly version: string;
 
   private configWrapper: DevtoolConfigure;
 
@@ -50,11 +53,13 @@ export class DevtoolServer {
 
   private readonly cdnSession: DevtoolCdnSession;
 
-  private readonly environment: DevtoolEnvironment;
+  readonly environment: DevtoolEnvironment;
 
-  private readonly certificates: DevtoolCertificates;
+  readonly certificates: DevtoolCertificates;
 
-  private readonly fileSpaces = new DevtoolFileSpaces();
+  readonly fileSpaces = new DevtoolFileSpaces();
+
+  private readonly mcp: DevtoolMcp;
 
   private _scriptWatchers: FSWatcher[] = [];
 
@@ -87,6 +92,50 @@ export class DevtoolServer {
       reload: () => this.reconfigure(),
       synchronizedPaths: (files) => this.environment.synchronizedPaths(files),
     });
+    this.mcp = new DevtoolMcp(this);
+  }
+
+  /**
+   * Gives the terminals of the server.
+   * @returns The command streams, in the order they were started.
+   */
+  get streams(): readonly DevtoolCommandStream[] {
+    return this.commandStreams;
+  }
+
+  /**
+   * Sends a payload to one interface, or to every interface.
+   * @param type The type of the payload.
+   * @param data The payload.
+   * @param ws The connection of the interface, every connection when absent.
+   */
+  async publish(type: string, data: unknown, ws?: WebSocket): Promise<void> {
+    await this.http?.sendToWsConnections(type, data, ws ?? null);
+  }
+
+  /**
+   * Counts the open interfaces.
+   * @returns Their number.
+   */
+  interfaces(): number {
+    return this.http?.clientCount() ?? 0;
+  }
+
+  /**
+   * Shows a message of an agent in every interface.
+   * @param message The message.
+   */
+  async notifyUser(message: McpMessagePayload): Promise<void> {
+    await this.publish("mcpMessage", message);
+  }
+
+  /**
+   * Answers a request of an agent to the MCP server.
+   * @param req The request.
+   * @param res Its response.
+   */
+  async onMcpRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    await this.mcp.handle(req, res);
   }
 
   /**
@@ -116,7 +165,7 @@ export class DevtoolServer {
 
   /**
    * Sends a new interface the configuration, the CDN sign-in state, the development environment, the
-   * certificates and the command streams.
+   * certificates, the command streams and the agents.
    * @param ws The connection of the interface.
    */
   async onNewConnection(ws: WebSocket): Promise<void> {
@@ -128,6 +177,7 @@ export class DevtoolServer {
       await stream.sendUpdate(ws);
       await stream.sendOutput(null, ws);
     }
+    await this.mcp.sendTo(ws);
   }
 
   /**
@@ -138,6 +188,11 @@ export class DevtoolServer {
    */
   async onConnectionMessage(type: string, data: unknown, ws: WebSocket): Promise<void> {
     const message = { type, data } as ConnectionMessage;
+
+    if (message.type.startsWith("mcp")) {
+      await this.mcp.onMessage(message as McpUiMessage);
+      return;
+    }
 
     if (message.type === "reconfigure") {
       await this.reconfigure();
@@ -209,21 +264,14 @@ export class DevtoolServer {
       return;
     }
 
-    if (message.type === "fileCreate") {
-      const { path, kind } = message.data;
-      await this.changeFiles(message.data.space, ws, (space) => space.create(path, kind));
-      return;
-    }
-
-    if (message.type === "fileRemove") {
-      const { path } = message.data;
-      await this.changeFiles(message.data.space, ws, (space) => space.remove(path));
-      return;
-    }
-
-    if (message.type === "fileRename") {
-      const { from, to } = message.data;
-      await this.changeFiles(message.data.space, ws, (space) => space.rename(from, to));
+    if (message.type === "fileCreate" || message.type === "fileRemove" || message.type === "fileRename") {
+      const { data } = message;
+      const error = await this.changeFiles(data.space, (space) =>
+        "kind" in data ? space.create(data.path, data.kind) : "from" in data ? space.rename(data.from, data.to) : space.remove(data.path),
+      );
+      if (error) {
+        await this.sendFileTree(data.space, ws, error);
+      }
       return;
     }
 
@@ -297,35 +345,41 @@ export class DevtoolServer {
     const space = this.fileSpaces.get(spaceId);
     const file = space ? await space.write(filePath, content, baseUpdatedAt) : unknownSpaceFile(spaceId, filePath);
     await this.http.sendToWsConnections("file", file, ws);
-    if (!space || !file.saved) {
-      return;
+    if (file.saved) {
+      await this.afterFileWrite(spaceId, filePath);
     }
-
-    await this.sendFileTree(spaceId);
-    await space.afterWrite?.(filePath);
   }
 
   /**
-   * Changes the files and folders of a space, then sends its files to every interface, or why the
-   * change was refused to the interface that asked.
+   * Sends the files of a space to every interface once one of them was written, then runs what the
+   * space does after a write.
    * @param spaceId The identifier of the space.
-   * @param ws The connection of the interface.
-   * @param change Changes the files of the space.
+   * @param filePath The path of the file written.
    */
-  private async changeFiles(spaceId: string, ws: WebSocket, change: (space: FileSpace) => Promise<void>): Promise<void> {
+  async afterFileWrite(spaceId: string, filePath: string): Promise<void> {
+    await this.sendFileTree(spaceId);
+    await this.fileSpaces.get(spaceId)?.afterWrite?.(filePath);
+  }
+
+  /**
+   * Changes the files and folders of a space, then sends its files to every interface.
+   * @param spaceId The identifier of the space.
+   * @param change Changes the files of the space.
+   * @returns Why the change was refused, null once done.
+   */
+  async changeFiles(spaceId: string, change: (space: FileSpace) => Promise<void>): Promise<string | null> {
     const space = this.fileSpaces.get(spaceId);
     if (!space) {
-      await this.sendFileTree(spaceId, ws);
-      return;
+      return `${spaceId} is not a file space`;
     }
 
     try {
       await change(space);
     } catch (error) {
-      await this.sendFileTree(spaceId, ws, error instanceof Error ? error.message : String(error));
-      return;
+      return error instanceof Error ? error.message : String(error);
     }
     await this.sendFileTree(spaceId);
+    return null;
   }
 
   /**
@@ -380,15 +434,20 @@ export class DevtoolServer {
     return this.configWrapper.automations[`${projectSlug}/${directorySlug}/${commandSlug}`] ?? null;
   }
 
+  /**
+   * Forgets a closed terminal.
+   * @param streamSlug The slug of the terminal.
+   */
   async removeCommandStream(streamSlug: string): Promise<void> {
     this.commandStreams = this.commandStreams.filter((stream) => stream.slug !== streamSlug);
+    this.mcp.streamsChanged();
   }
 
   /**
    * Reloads the configuration, applies it to the load balancer when it runs in this process and sends it
    * to the interfaces.
    */
-  private async reconfigure(): Promise<void> {
+  async reconfigure(): Promise<void> {
     await this.loadConfig();
     if (this.lb && (await this.lb.reload(this.config))) {
       await this.lb.recreate();
@@ -401,13 +460,20 @@ export class DevtoolServer {
    * Starts a command in a terminal and keeps it among the streams of the server.
    * @param data The command.
    * @param hooks What the server adds to a command it starts itself.
+   * @returns The terminal.
    */
-  private async newCommandStream(data: CommandStreamCreatePayload, hooks: CommandStreamHooks = {}): Promise<void> {
+  async newCommandStream(data: CommandStreamCreatePayload, hooks: CommandStreamHooks = {}): Promise<DevtoolCommandStream> {
     const stream = await DevtoolCommandStream.create(this, data, false, hooks);
     this.commandStreams.push(stream);
+    this.mcp.streamsChanged();
+    return stream;
   }
 
-  private async newCommandDetached(data: CommandStreamCreatePayload): Promise<void> {
+  /**
+   * Starts a command outside of any terminal, leaving it running on its own.
+   * @param data The command.
+   */
+  async newCommandDetached(data: CommandStreamCreatePayload): Promise<void> {
     await DevtoolCommandStream.create(this, data, true);
   }
 
@@ -450,8 +516,8 @@ export class DevtoolServer {
   }
 
   /**
-   * Loads the configuration and hands it to the CDN session, the environment, the certificates and the
-   * file spaces, then watches its folders of scripts.
+   * Loads the configuration and hands it to the CDN session, the environment, the certificates, the
+   * file spaces and the MCP server, then watches its folders of scripts.
    */
   private async loadConfig(): Promise<void> {
     const nextConfig = await this.configProvider();
@@ -462,6 +528,7 @@ export class DevtoolServer {
     this.environment.configure(nextConfig.raw);
     await this.certificates.configure(this.config, this.configWrapper.automations);
     this.fileSpaces.configure(nextConfig.raw, this.config.projects, (filePath) => this.afterConfigWrite(filePath));
+    await this.mcp.configure();
     this.watchScriptFolders();
 
     if (nextConfig.loadedPaths.length) {

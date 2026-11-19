@@ -49,6 +49,14 @@ const isRunning = computed(() => props.stream.status === 'RUNNING')
       class="size-3.5 shrink-0 text-muted-foreground"
     />
     <span class="min-w-0 flex-1 truncate">{{ label }}</span>
+    <Badge
+      v-if="stream.origin"
+      variant="outline"
+      class="px-1 py-0 text-[10px] text-muted-foreground"
+      :title="`Started by ${stream.origin}`"
+    >
+      agent
+    </Badge>
     <div class="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
       <Button
         v-if="!isRunning"

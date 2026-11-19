@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { RouterLink, useRouter } from "vue-router";
+import { RouterLink, useRoute, useRouter } from "vue-router";
 import { useColorMode } from "@vueuse/core";
 import { Icon } from "@iconify/vue";
-import { ArrowDownUp, Bookmark, Circle, Download, FileCog, FolderTree, FolderX, Monitor, Moon, Play, RefreshCw, RotateCcw, Square, Sun } from '@lucide/vue'
+import { ArrowDownUp, Bookmark, Bot, Circle, Download, FileCog, FolderTree, FolderX, Monitor, Moon, Play, RefreshCw, RotateCcw, Square, Sun } from '@lucide/vue'
 import CdnSession from "@/components/CdnSession.vue";
 import SidebarStreamItem from "@/components/SidebarStreamItem.vue";
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,7 @@ import { iconFromMeta, startSection, stopSection } from "@/lib/directory-command
 import bookmarkStore from "@/stores/bookmark";
 import commandRunsStore from "@/stores/command-runs";
 import configStore from "@/stores/config";
+import mcpStore from "@/stores/mcp";
 import wsStore from "@/stores/ws";
 import type { CommandStream } from "@/types";
 
@@ -57,6 +58,8 @@ interface SidebarProject {
 }
 
 const router = useRouter();
+const route = useRoute();
+const mcpWaiting = computed(() => mcpStore.state.value?.pending.length ?? 0);
 const bookmarkedOnly = ref(false);
 const appVersion = window.devtool?.version ?? "0.0.0";
 const colorMode = useColorMode({
@@ -605,6 +608,28 @@ function resolveStreamIcon(directory: SidebarDirectory, stream: CommandStream): 
           class="size-3.5"
           :class="{ 'fill-current': bookmarkedOnly }"
         />
+      </Button>
+      <Button
+        v-if="configStore.mcp.value?.enabled"
+        as-child
+        size="icon"
+        variant="ghost"
+        class="relative size-8 shrink-0"
+      >
+        <RouterLink
+          :to="{ name: 'agents' }"
+          :title="mcpWaiting ? `Agents: ${mcpWaiting} waiting` : 'Agents'"
+        >
+          <Bot
+            class="size-3.5"
+            :class="{ 'text-primary': route.name === 'agents' }"
+            :stroke-width="route.name === 'agents' ? 2.5 : 2"
+          />
+          <span
+            v-if="mcpWaiting"
+            class="absolute -top-0.5 -right-0.5 flex size-4 items-center justify-center rounded-full bg-amber-500 text-[10px] font-semibold text-white"
+          >{{ mcpWaiting }}</span>
+        </RouterLink>
       </Button>
       <Button
         size="icon"

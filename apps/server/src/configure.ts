@@ -1,8 +1,8 @@
 import path from "node:path";
 import fs from "node:fs/promises";
 import net from "node:net";
-import type { CertificateAcme, ClientConfigPayload, CommandArg, CommandChoice, CommandForm, CommandInput, CommandInputValue, DirectoryDefinition, DirectoryFiles, DirectoryScripts, ScriptSettings, AdtDefinition, DirectoryDefaultAction, DirectoryShortcut, DnsDefinition, DnsRecord, HostAccess, IntegrationDefinition, LoadBalancerCertificate, PassthroughRule, ProjectDefinition, ProjectRestore, RuntimeConfig, SidebarSettings } from "@appsys/devtool-shared";
-import { logger } from "@appsys/devtool-shared";
+import type { CertificateAcme, ClientConfigPayload, CommandArg, CommandChoice, CommandForm, CommandInput, CommandInputValue, DirectoryDefinition, DirectoryFiles, DirectoryScripts, ScriptSettings, AdtDefinition, DirectoryDefaultAction, DirectoryShortcut, DnsDefinition, DnsRecord, HostAccess, IntegrationDefinition, LoadBalancerCertificate, McpPatterns, McpRules, McpSettings, PassthroughRule, ProjectDefinition, ProjectRestore, RuntimeConfig, SidebarSettings } from "@appsys/devtool-shared";
+import { defaultMcpRules, isMcpLevel, logger, readMcpRules } from "@appsys/devtool-shared";
 import { type LegoOptionValue, legoRunArgs } from "@appsys/devtool-certs";
 import { resolveCacheFolder } from "@appsys/devtool-config";
 import { type CommandAnswer, type CommandAutomation, findInvalidValueBlocks } from "./command-automation.js";
@@ -42,6 +42,27 @@ function defaultAdt(): AdtDefinition {
     hosts: [],
     access: "local",
     sidebar: { environment: false, configs: false, login: false },
+    mcp: defaultMcpSettings(true),
+  };
+}
+
+/**
+ * Gives the MCP server settings before the configuration is read: off, unknown agents asked for, the
+ * command lines outside the configuration refused.
+ * @param notifications Whether the interfaces notify the requests of agents.
+ * @returns The default settings.
+ */
+function defaultMcpSettings(notifications: boolean): McpSettings {
+  const rules = defaultMcpRules("default");
+  return {
+    enabled: false,
+    notifications,
+    timeout: 120,
+    default: rules,
+    clients: { level: "ask", allow: [], deny: [] },
+    ownTerminals: "allow",
+    shell: { level: "deny", allow: [], deny: [] },
+    environment: rules,
   };
 }
 const SIGNAL_REGEXP = /^SIG[A-Z0-9]+$/;
@@ -108,6 +129,11 @@ export class DevtoolConfigure {
       integrations: this.integrations,
       projects: this.projects,
       sidebar: this.adt.sidebar,
+      mcp: {
+        ...this.adt.mcp,
+        port: this.adt.ports.server,
+        certificates: Object.fromEntries(Object.entries(this.loadBalancers).map(([domain, certificate]) => [domain.replace(/^\./, ""), certificate.mcp])),
+      },
     };
   }
 
@@ -129,6 +155,7 @@ export class DevtoolConfigure {
     } catch (error) {
       this.addWarning("adt", error instanceof Error ? error.message : "Unknown adt error");
     }
+    this.adt.mcp = this.readMcp(toRecord(this.initialConfig.adt).mcp);
 
     try {
       await this.reconfigureLoadBalancers();
@@ -209,6 +236,90 @@ export class DevtoolConfigure {
     }
   }
 
+  /**
+   * Reads the MCP server settings, `adt.mcp`, and the rules of the environment, `environment.mcp`.
+   * @param value The raw `adt.mcp`.
+   * @returns The settings, defaults for what is missing or invalid.
+   */
+  private readMcp(value: unknown): McpSettings {
+    const settings = defaultMcpSettings(this.adt.notifications);
+    const mcp = toRecord(value);
+    for (const key of ["enabled", "notifications"] as const) {
+      if (mcp[key] === true || mcp[key] === false) {
+        settings[key] = mcp[key];
+      } else if (mcp[key] !== undefined) {
+        this.addWarning(`adt.mcp.${key}`, "is not a boolean");
+      }
+    }
+    if (mcp.timeout !== undefined) {
+      if (Number.isInteger(mcp.timeout) && (mcp.timeout as number) > 0) {
+        settings.timeout = mcp.timeout as number;
+      } else {
+        this.addWarning("adt.mcp.timeout", "must be a positive number of seconds");
+      }
+    }
+    if (mcp.ownTerminals === "allow" || mcp.ownTerminals === "ask") {
+      settings.ownTerminals = mcp.ownTerminals;
+    } else if (mcp.ownTerminals !== undefined) {
+      this.addWarning("adt.mcp.ownTerminals", "must be allow or ask");
+    }
+    settings.default = this.readMcpRules("adt.mcp.default", mcp.default, settings.default, "adt.mcp.default");
+    settings.clients = this.readMcpPatterns("adt.mcp.clients", mcp.clients, settings.clients);
+    settings.shell = this.readMcpPatterns("adt.mcp.shell", mcp.shell, settings.shell);
+    settings.environment = this.readMcpRules("environment.mcp", toRecord(this.initialConfig.environment).mcp, settings.default, "environment");
+    return settings;
+  }
+
+  /**
+   * Reads the `mcp` setting of something of the configuration, warning about what is invalid.
+   * @param slug Names the setting in warnings.
+   * @param value The raw setting.
+   * @param inherited The rules of what holds it.
+   * @param from Names the setting in the rules it declares.
+   * @returns The rules.
+   */
+  private readMcpRules(slug: string, value: unknown, inherited: McpRules, from: string): McpRules {
+    const { rules, problems } = readMcpRules(value, inherited, from);
+    for (const problem of problems) {
+      this.addWarning(slug, problem);
+    }
+    return rules;
+  }
+
+  /**
+   * Reads a level and the patterns overriding it, `{ level, allow, deny }`.
+   * @param slug Names the setting in warnings.
+   * @param value The raw setting.
+   * @param defaults The settings when nothing is declared.
+   * @returns The level and patterns.
+   */
+  private readMcpPatterns(slug: string, value: unknown, defaults: McpPatterns): McpPatterns {
+    if (value === undefined) {
+      return defaults;
+    }
+    const raw = toRecord(value);
+    const patterns: McpPatterns = { ...defaults };
+    if (raw.level !== undefined) {
+      if (isMcpLevel(raw.level) && raw.level !== "keys") {
+        patterns.level = raw.level;
+      } else {
+        this.addWarning(`${slug}.level`, "must be allow, ask or deny");
+      }
+    }
+    for (const key of ["allow", "deny"] as const) {
+      if (raw[key] === undefined) {
+        continue;
+      }
+      const list = toStringArray(raw[key]);
+      if (list) {
+        patterns[key] = list;
+      } else {
+        this.addWarning(`${slug}.${key}`, "must be an array of patterns");
+      }
+    }
+    return patterns;
+  }
+
   private async reconfigureLoadBalancers(): Promise<void> {
     const loadBalancers = toRecord(this.initialConfig.loadBalancers);
     for (const [key, value] of Object.entries(loadBalancers)) {
@@ -237,6 +348,7 @@ export class DevtoolConfigure {
         key: options.key as string,
         warn: Number.isInteger(warn) && (warn as number) > 0 ? (warn as number) : 30,
         acme: options.acme === undefined ? null : this.readAcme(`loadBalancers[${key}].acme`, domain.slice(1), options),
+        mcp: this.readMcpRules(`loadBalancers[${key}].mcp`, options.mcp, this.adt.mcp.default, `loadBalancers.${key}`),
       };
 
       logger.info("Config", "LoadBalancer", domain);
@@ -345,6 +457,7 @@ export class DevtoolConfigure {
       notifications: project.notifications === false ? false : this.adt.notifications,
       missing: false,
       restore: this.readRestore(`${slug}.restore`, project.restore),
+      mcp: this.readMcpRules(`${slug}.mcp`, project.mcp, this.adt.mcp.default, `sections.${projectSlug}`),
       meta: project.meta,
     };
 
@@ -433,6 +546,7 @@ export class DevtoolConfigure {
       killSignal: null,
       missing: false,
       restore: this.readRestore(`${slug}.restore`, directory.restore),
+      mcp: this.readMcpRules(`${slug}.mcp`, directory.mcp, projectDefinition.mcp, `projects.${directorySlug}`),
       meta: directory.meta,
     };
 
@@ -563,11 +677,12 @@ export class DevtoolConfigure {
           extra.killSignal ?? extra.killsignal,
         ),
         script: null,
+        mcp: this.readMcpRules(`${slug}.extras[${extraSlug}].mcp`, extra.mcp, directoryDefinition.mcp, `projects.${directorySlug}.commands.${extraSlug}`),
         meta: extra.meta,
       };
     }
 
-    directoryDefinition.scripts = await this.readScripts(`${slug}.scripts`, directoryPath, directory.scripts);
+    directoryDefinition.scripts = await this.readScripts(`${slug}.scripts`, directoryPath, directory.scripts, directoryDefinition.mcp, `projects.${directorySlug}.scripts`);
     const scripts = await listScripts(directoryDefinition).catch((error: unknown) => {
       this.addWarning(`${slug}.scripts`, error instanceof Error ? error.message : String(error));
       return [];
@@ -840,13 +955,15 @@ export class DevtoolConfigure {
 
   /**
    * Reads the folders whose executables a directory offers as scripts, each given as its path or as
-   * `{ path, prompt, form, only, scripts }`.
+   * `{ path, prompt, form, only, mcp, scripts }`.
    * @param slug Names the setting in warnings.
    * @param directoryPath Absolute path of the directory, relative folders are resolved from it.
    * @param value The raw setting.
+   * @param inherited The MCP rules of the directory.
+   * @param from Names the setting in the MCP rules the folders declare.
    * @returns The existing folders.
    */
-  private async readScripts(slug: string, directoryPath: string, value: unknown): Promise<DirectoryScripts[]> {
+  private async readScripts(slug: string, directoryPath: string, value: unknown, inherited: McpRules, from: string): Promise<DirectoryScripts[]> {
     if (value === undefined) {
       return [];
     }
@@ -867,6 +984,7 @@ export class DevtoolConfigure {
         continue;
       }
 
+      const mcp = this.readMcpRules(`${slug}[${index}].mcp`, folder.mcp, inherited, `${from}[${index}]`);
       const scripts: Record<string, ScriptSettings> = {};
       for (const [name, settingsRaw] of Object.entries(toRecord(folder.scripts))) {
         const settings = toRecord(settingsRaw);
@@ -874,13 +992,14 @@ export class DevtoolConfigure {
           prompt: typeof settings.prompt === "boolean" ? settings.prompt : null,
           args: settings.args === undefined ? null : this.readCommandArgs(`${slug}[${index}].scripts[${name}].args`, settings.args),
           form: this.readForm(`${slug}[${index}].scripts[${name}].form`, settings.form),
+          mcp: this.readMcpRules(`${slug}[${index}].scripts[${name}].mcp`, settings.mcp, mcp, `${from}[${index}].scripts.${name}`),
         };
       }
       const only = folder.only === undefined ? null : toStringArray(folder.only);
       if (folder.only !== undefined && !only) {
         this.addWarning(`${slug}[${index}].only`, "must be an array of glob patterns");
       }
-      folders.push({ path: folderPath, prompt: folder.prompt === true, form: this.readForm(`${slug}[${index}].form`, folder.form) ?? "inline", only, scripts });
+      folders.push({ path: folderPath, prompt: folder.prompt === true, form: this.readForm(`${slug}[${index}].form`, folder.form) ?? "inline", only, scripts, mcp });
     }
     return folders;
   }
@@ -1080,6 +1199,7 @@ export class DevtoolConfigure {
         path: this.pathFrom(directory.path, entry.path as string),
         restore,
         commands: commands.filter((command) => command in directory.extras),
+        mcp: this.readMcpRules(`${slug}[${filesSlug}].mcp`, entry.mcp, directory.mcp, `projects.${directory.slug}.files.${filesSlug}`),
       };
     }
     return files;

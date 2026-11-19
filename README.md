@@ -303,6 +303,69 @@ login:
     - { match: OTP, value: "{{ op://vault/item/otp?attribute=otp }}" }
 ```
 
+## Agents (MCP server)
+
+With `adt.mcp.enabled: true`, the server answers MCP clients of this machine over Streamable HTTP at
+`http://127.0.0.1:<adt.ports.server>/mcp` (never through the load balancer nor for web pages of other
+hosts). Claude Code connects with `claude mcp add --transport http devtool http://127.0.0.1:6730/mcp`; the
+[`skills`](skills/README.md) folder holds agent skills to install next to it.
+
+Tools: `list_projects`, `list_commands`, `list_terminals`, `read_terminal` (plain text from a cursor, or
+the screen), `wait_for_output`, `search_terminals`, `run_command`, `run_shell`, `send_input`,
+`control_terminal`, `resize_terminal`, `resolve_port_conflict`, `port_owners`, `start_section`,
+`stop_section`, `restore_folder`, `list_files`, `read_file`, `write_file`, `update_keys`, `change_files`,
+`environment_status`, `environment_keys`, `environment_tables`, `environment_sync`, `pull_shared_config`,
+`list_certificates`, `renew_certificate`, `reload_config`, `notify_user`; the terminals are also resources
+an agent may subscribe to (`devtool://terminals`, `devtool://terminal/<slug>`).
+
+A new client is accepted first, by `adt.mcp.clients` or by the user. Then each call follows the level of
+its action on what it acts on: `read` (see), `run` (start), `input` (type), `control` (stop, restart,
+resize, free a port, reload) and `write` (files). A level is `allow`, `ask` (a dialog in the interface,
+notified when `adt.mcp.notifications` is on, refused after `adt.mcp.timeout` seconds or at once when no
+interface is open), `keys` (files only: their keys with the type of each value, `update_keys` for writing)
+or `deny` (`read: deny` hides it from the agent). `mcp` takes a level for every action, or levels by
+action, inherited from the most general to the most precise:
+
+- `adt.mcp.default` > section > project > folder of scripts > command or script;
+- `adt.mcp.default` > section > project > folder of files;
+- `adt.mcp.default` > `environment.mcp` (the `configs` files and the `environment_*` tools);
+- `adt.mcp.default` > `loadBalancers.<name>.mcp` (certificates).
+
+Typing into and controlling the terminals an agent started itself follow `adt.mcp.ownTerminals`;
+`run_shell` follows `adt.mcp.shell` only. A push to the CDN and the pull of the shared configuration are
+always confirmed, and agents never write the devtool configuration.
+
+```yaml
+adt:
+  mcp:
+    enabled: true
+    notifications: true
+    timeout: 120
+    default: { read: allow, run: ask, input: ask, control: ask, write: ask }
+    clients: { level: ask, allow: [ claude-code ], deny: [] }
+    ownTerminals: allow
+    shell: { level: ask, allow: [ "git status*", "pnpm test*" ], deny: [ "rm *" ] }
+projects:
+  web:
+    mcp: { input: deny }
+    commands:
+      dev: { name: Dev server, args: [ pnpm, dev ], mcp: { run: allow, control: allow } }
+    scripts:
+      - { path: scripts, mcp: { run: ask }, scripts: { deploy.sh: { mcp: deny } } }
+    files:
+      settings: { path: config, mcp: { read: keys, write: keys } }
+environment:
+  mcp: { read: keys, run: ask }
+```
+
+A request is answered once, for the session of the agent or always. The Agents page (robot icon next to
+the bookmark icon of the sidebar) lists the sessions and clients, the requests waiting, the history of
+every call (allowed again from a row for the session or always), the grants (removed one by one or all)
+and the effective level of every action with the setting it comes from. The history (1000 calls), the
+grants and the clients accepted always are kept in `adt.cacheDir` (`mcp-history.jsonl`,
+`mcp-grants.json`, `mcp-clients.json`); a `deny` of the configuration prevails over any grant. A session
+without request nor event stream for 30 minutes is closed; its agent starts a new one.
+
 ## Development environment
 
 The environment folder (`environment.folder`, `~/.config/appsys` by default) is the development

@@ -4,6 +4,8 @@ import { RouterView } from "vue-router";
 import AppSidebar from "@/components/AppSidebar.vue";
 import CommandDialog from "@/components/CommandDialog.vue";
 import CommandInputsDialog from "@/components/CommandInputsDialog.vue";
+import McpRequestDialog from "@/components/mcp/McpRequestDialog.vue";
+import McpToasts from "@/components/mcp/McpToasts.vue";
 import commandRunsStore from "@/stores/command-runs";
 import layoutStore from "@/stores/layout";
 import wsStore from "@/stores/ws";
@@ -59,5 +61,7 @@ onMounted(() => {
       @closed="commandRunsStore.close()"
     />
     <CommandInputsDialog />
+    <McpRequestDialog />
+    <McpToasts />
   </div>
 </template>

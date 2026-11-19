@@ -10,14 +10,21 @@ import { cn } from "@/lib/utils";
 
 const props = defineProps<{
   command: DirectoryExtra;
+  /** The values the inputs start with, their defaults when absent. */
+  initial?: CommandInputValue[] | null;
 }>();
 
 const emit = defineEmits<{
   run: [inputs: CommandInputValue[]];
 }>();
 
+defineSlots<{
+  /** Shown under the form in place of its run button, given the values of the inputs and whether a required one is missing. */
+  actions?: (props: { inputs: CommandInputValue[]; missing: boolean }) => unknown;
+}>();
+
 const fields = computed(() => commandInputs(props.command.args));
-const values = shallowRef<CommandInputValue[]>(defaultCommandInputs(props.command.args));
+const values = shallowRef<CommandInputValue[]>(props.initial ?? defaultCommandInputs(props.command.args));
 const inputs = computed(() => fields.value.map((_, index) => values.value[index] ?? ""));
 
 const preview = computed(() => expandCommandArgs(props.command.args, inputs.value).map((arg) => (/[\s"']/.test(arg) ? JSON.stringify(arg) : arg)).join(" "));
@@ -126,6 +133,7 @@ function pick(index: number, field: CommandInput, choice: string): void {
         :title="preview"
       >{{ preview }}</code>
       <Button
+        v-if="!$slots.actions"
         type="submit"
         size="sm"
         class="h-8"
@@ -143,5 +151,10 @@ function pick(index: number, field: CommandInput, choice: string): void {
         Run
       </Button>
     </div>
+    <slot
+      name="actions"
+      :inputs="inputs"
+      :missing="missing"
+    />
   </form>
 </template>

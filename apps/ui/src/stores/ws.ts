@@ -4,6 +4,7 @@ import configStore from "./config";
 import filesStore from "./files";
 import certificatesStore from "./certificates";
 import environmentStore from "./environment";
+import mcpStore from "./mcp";
 import sessionStore from "./session";
 
 class WsStore {
@@ -74,6 +75,15 @@ class WsStore {
             break;
           case "streamRemove":
             configStore.streamRemove(payload.data as never);
+            break;
+          case "mcpState":
+            mcpStore.load(payload.data as never);
+            break;
+          case "mcpHistory":
+            mcpStore.loadHistory(payload.data as never);
+            break;
+          case "mcpMessage":
+            mcpStore.addMessage(payload.data as never);
             break;
           default:
             break;

@@ -1,6 +1,6 @@
 import { ref } from "vue";
 import router from "@/router";
-import type { IntegrationDefinition, ProjectDefinition, SidebarSettings, StreamUpdatePayload } from "@appsys/devtool-shared";
+import type { ClientConfigPayload, IntegrationDefinition, ProjectDefinition, SidebarSettings, StreamUpdatePayload } from "@appsys/devtool-shared";
 import { CommandStreamStore } from "./command-stream";
 import { CommandStreamOutputStore } from "./command-stream-output";
 import type { WsConfigPayload } from "@/types";
@@ -18,6 +18,9 @@ class ConfigStore {
 
   sidebar = ref<SidebarSettings>({ ...HIDDEN_SIDEBAR });
 
+  /** The MCP server and the rules of agents, null before the configuration is received. */
+  mcp = ref<ClientConfigPayload["mcp"] | null>(null);
+
   commandStreams = ref<CommandStreamStore[]>([]);
 
   commandStreamsOutput: Record<string, CommandStreamOutputStore> = {};
@@ -29,6 +32,7 @@ class ConfigStore {
       this.integrations.value = [];
       this.projects.value = null;
       this.sidebar.value = { ...HIDDEN_SIDEBAR };
+      this.mcp.value = null;
       return;
     }
 
@@ -37,6 +41,7 @@ class ConfigStore {
     this.integrations.value = config.integrations;
     this.projects.value = config.projects;
     this.sidebar.value = config.sidebar;
+    this.mcp.value = config.mcp;
   }
 
   reset(): void {

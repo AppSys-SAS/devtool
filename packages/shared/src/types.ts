@@ -18,6 +18,52 @@ export interface AdtDefinition {
   /** Who reaches the interface of the devtool. */
   access: HostAccess;
   sidebar: SidebarSettings;
+  /** What agents may do through the MCP server of the devtool. */
+  mcp: McpSettings;
+}
+
+/** How an agent may do something: freely, after asking, on the keys of a file only, or never. */
+export type McpLevel = "allow" | "ask" | "keys" | "deny";
+
+/** What an agent does: see, start, type, stop or restart, change files. */
+export type McpAction = "read" | "run" | "input" | "control" | "write";
+
+/** The level of one action and the setting of the configuration it comes from. */
+export interface McpRule {
+  level: McpLevel;
+  /** The setting declaring it, such as `projects.web.commands.dev`. */
+  from: string;
+}
+
+/** The level of every action on something of the configuration. */
+export type McpRules = Record<McpAction, McpRule>;
+
+/** A level and the names or command lines matching patterns that override it. */
+export interface McpPatterns {
+  level: McpLevel;
+  /** Patterns allowed without asking, `*` standing for anything. */
+  allow: string[];
+  /** Patterns always refused, prevailing over `allow`. */
+  deny: string[];
+}
+
+/** The MCP server of the devtool and what agents may do through it. */
+export interface McpSettings {
+  enabled: boolean;
+  /** Whether the interfaces notify the requests waiting for an answer. */
+  notifications: boolean;
+  /** Seconds before a request without answer is refused. */
+  timeout: number;
+  /** The rules of everything declaring none, and of the terminals a person opened. */
+  default: McpRules;
+  /** The agents accepted or refused by their name, before any rule. */
+  clients: McpPatterns;
+  /** The level of typing into and stopping the terminals an agent started itself. */
+  ownTerminals: McpLevel;
+  /** The command lines an agent may run outside the commands of the configuration. */
+  shell: McpPatterns;
+  /** The rules of the files and copies of the environment. */
+  environment: McpRules;
 }
 
 /** The optional parts of the sidebar, each hidden unless enabled. */
@@ -62,6 +108,8 @@ export interface LoadBalancerCertificate {
   warn: number;
   /** How the certificate is renewed, null when it is not. */
   acme: CertificateAcme | null;
+  /** What agents may do with the certificate: see it, renew it. */
+  mcp: McpRules;
 }
 
 /** When a certificate is renewed: from its button, on its own before it expires, or both. */
@@ -163,6 +211,8 @@ export interface DirectoryExtra {
   killSignal: string | null;
   /** What the heading comment of a script tells, null for a command of the configuration. */
   script: ScriptDescription | null;
+  /** What agents may do with the command and its terminals. */
+  mcp: McpRules;
   meta?: unknown;
 }
 
@@ -211,6 +261,8 @@ export interface ScriptSettings {
   args: CommandArg[] | null;
   /** Where its page asks for its inputs, null to follow its folder. */
   form: CommandForm | null;
+  /** What agents may do with the script. */
+  mcp: McpRules;
 }
 
 /** A folder whose executables a directory offers as scripts. */
@@ -225,6 +277,8 @@ export interface DirectoryScripts {
   only: string[] | null;
   /** Settings of some scripts, by file name. */
   scripts: Record<string, ScriptSettings>;
+  /** What agents may do with its scripts. */
+  mcp: McpRules;
 }
 
 /** A folder of editable files declared by a directory. */
@@ -237,6 +291,8 @@ export interface DirectoryFiles {
   commands: string[];
   /** The extra of the directory bringing the folder back when it is missing, null when there is none. */
   restore: string | null;
+  /** What agents may do with the files. */
+  mcp: McpRules;
 }
 
 export interface DirectoryDefinition {
@@ -266,6 +322,8 @@ export interface DirectoryDefinition {
   /** Whether the folder of the directory is missing, the directory then offering only its restore. */
   missing: boolean;
   restore: ProjectRestore | null;
+  /** What agents may do in the directory, inherited by what it declares. */
+  mcp: McpRules;
   meta?: unknown;
 }
 
@@ -286,6 +344,8 @@ export interface ProjectDefinition {
   /** Whether the folder of the project is missing, the project then having no directory. */
   missing: boolean;
   restore: ProjectRestore | null;
+  /** What agents may do in the project, inherited by its directories. */
+  mcp: McpRules;
   meta?: unknown;
 }
 
@@ -308,6 +368,8 @@ export interface ClientConfigPayload {
   integrations: IntegrationDefinition[];
   projects: Record<string, ProjectDefinition>;
   sidebar: SidebarSettings;
+  /** The MCP server and its rules, those of the certificates by name. */
+  mcp: McpSettings & { port: number; certificates: Record<string, McpRules> };
 }
 
 export interface StreamOutputLine {
@@ -324,6 +386,8 @@ export interface StreamUpdatePayload {
   name: string;
   /** Identifies the stream for the interface that started it. */
   tag: string | null;
+  /** The agent that started the stream, null when a person did. */
+  origin: string | null;
   /** The command of the directory the stream runs, null for any other command. */
   command: string | null;
   args: string[];
@@ -519,4 +583,128 @@ export interface WsPayloadMap {
   streamRemove: {
     slug: string;
   };
+  mcpState: McpStatePayload;
+  mcpHistory: {
+    entries: McpHistoryEntry[];
+    /** Whether the entries replace the whole history rather than follow it. */
+    initial: boolean;
+  };
+  mcpMessage: McpMessagePayload;
+}
+
+/** How a call of an agent was decided. */
+export type McpDecision = "auto" | "once" | "session" | "always" | "denied" | "config" | "timeout" | "noUi";
+
+/** Whether an agent is accepted: waiting for an answer, for its session, always, by the configuration, or refused. */
+export type McpClientStatus = "pending" | "session" | "always" | "config" | "denied";
+
+/** What an answer to a request of an agent grants. */
+export type McpAnswer = "deny" | "once" | "session" | "always";
+
+/** A labelled value describing a call of an agent. */
+export interface McpDetail {
+  label: string;
+  value: string;
+  /** Whether the value is shown in a request only, never kept in the history. */
+  secret?: boolean;
+}
+
+/** A session of an agent connected to the MCP server. */
+export interface McpSessionPayload {
+  id: string;
+  client: string;
+  version: string | null;
+  connectedAt: number;
+  calls: number;
+  status: McpClientStatus;
+}
+
+/** An agent accepted or refused by name, by the configuration or always. */
+export interface McpClientPayload {
+  name: string;
+  source: "allow" | "deny" | "always";
+  /** When it was accepted always, null for the configuration. */
+  date: number | null;
+}
+
+/** A request of an agent waiting for an answer of a person. */
+export interface McpRequestPayload {
+  id: string;
+  /** `client` asks to accept the agent itself, `permission` to let it make a call. */
+  kind: "client" | "permission";
+  session: string;
+  client: string;
+  tool: string;
+  action: McpAction | null;
+  title: string;
+  details: McpDetail[];
+  /** Named keys the call presses in a terminal. */
+  keys: string[];
+  /** The command of the configuration it runs, `<section>/<project>/<slug>`, whose inputs may be changed. */
+  command: string | null;
+  /** The values of the inputs of that command, in order. */
+  inputs: CommandInputValue[] | null;
+  /** The content of a file before and after the call. */
+  diff: { path: string; before: string; after: string } | null;
+  notify: boolean;
+  createdAt: number;
+  expiresAt: number;
+  /** Names what an answer for the session or always grants, null when only this call can be granted. */
+  grantKey: string | null;
+  /** Whether the call may be granted for the session, and always. */
+  grantable: { session: boolean; always: boolean };
+}
+
+/** A call an agent may make without asking again, for its session or always. */
+export interface McpGrantPayload {
+  key: string;
+  label: string;
+  scope: "session" | "always";
+  /** The session granted, null for always. */
+  session: string | null;
+  client: string | null;
+  date: number;
+}
+
+/** A call made by an agent, as the history keeps it. */
+export interface McpHistoryEntry {
+  id: string;
+  date: number;
+  session: string;
+  client: string;
+  tool: string;
+  /** What the call acted on, null when nothing in particular. */
+  target: string | null;
+  action: McpAction | null;
+  details: McpDetail[];
+  grantKey: string | null;
+  grantLabel: string | null;
+  decision: McpDecision;
+  /** The setting refusing the call, for a refusal by the configuration. */
+  reason: string | null;
+  ok: boolean;
+  /** The error, or a short summary of the result. */
+  message: string | null;
+  duration: number;
+  /** The terminal the call acted on or started. */
+  terminal: string | null;
+}
+
+/** The MCP server as the interfaces show it. */
+export interface McpStatePayload {
+  enabled: boolean;
+  port: number;
+  sessions: McpSessionPayload[];
+  clients: McpClientPayload[];
+  pending: McpRequestPayload[];
+  grants: McpGrantPayload[];
+}
+
+/** A message of an agent to the person using the devtool. */
+export interface McpMessagePayload {
+  id: string;
+  client: string;
+  message: string;
+  level: "info" | "warning" | "error";
+  date: number;
 }

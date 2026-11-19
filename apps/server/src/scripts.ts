@@ -92,6 +92,7 @@ export async function listScripts(directory: DirectoryDefinition): Promise<Direc
         shell: directory.shell,
         killSignal: directory.killSignal,
         script: describe(await headerOf(scriptPath)),
+        mcp: settings?.mcp ?? folder.mcp,
       });
     }
   }

@@ -14,6 +14,11 @@ const router = createRouter({
       component: () => import("@/views/EnvironmentView.vue"),
     },
     {
+      name: "agents",
+      path: "/agents",
+      component: () => import("@/views/McpView.vue"),
+    },
+    {
       name: "configs",
       path: "/configs",
       component: () => import("@/views/FileSpaceView.vue"),
