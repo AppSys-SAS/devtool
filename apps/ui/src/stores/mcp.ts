@@ -5,7 +5,9 @@ import configStore from "./config";
 import notificationStore from "./notification";
 import wsStore from "./ws";
 
-const MCP_ROUTE = { name: "agents", params: {} };
+const MCP_ROUTE = { name: "agents" };
+const WAITING_ROUTE = { name: "agents", query: { tab: "waiting" } };
+const BASE_TITLE = document.title;
 
 /**
  * The agents using the MCP server: their sessions, the requests waiting for an answer, the grants,
@@ -20,21 +22,30 @@ class McpStore {
 
   /** The request the dialog asks, the oldest one waiting. */
   current = computed<McpRequestPayload | null>(() => this.state.value?.pending[0] ?? null);
-  private readonly _notified = new Set<string>();
+
+  private readonly _notified = new Map<string, Notification | null>();
 
   /**
-   * Takes the state sent by the server, notifying the requests not seen yet that ask for it.
+   * Takes the state sent by the server: notifies the requests not seen yet that ask for it, closes
+   * the notifications of the requests no longer waiting and counts the waiting ones in the page title.
    * @param state The state.
    */
   load(state: McpStatePayload): void {
     this.state.value = state;
-    for (const request of state.pending) {
-      if (request.notify && !this._notified.has(request.id)) {
-        this._notified.add(request.id);
-        notificationStore.askPermission();
-        notificationStore.send(`${request.client}: ${request.title}`, request.details.map((detail) => `${detail.label}: ${detail.value}`).join("\n"), MCP_ROUTE, true);
+    const waiting = new Set(state.pending.map((request) => request.id));
+    for (const [id, notification] of this._notified) {
+      if (!waiting.has(id)) {
+        notification?.close();
+        this._notified.delete(id);
       }
     }
+    for (const request of state.pending) {
+      if (request.notify && !this._notified.has(request.id)) {
+        notificationStore.askPermission();
+        this._notified.set(request.id, notificationStore.send(`${BASE_TITLE} · ${request.client}`, request.title, WAITING_ROUTE, { force: true, persistent: true }));
+      }
+    }
+    document.title = state.pending.length ? `(${state.pending.length}) ${BASE_TITLE}` : BASE_TITLE;
   }
 
   /**
@@ -55,7 +66,7 @@ class McpStore {
     this.messages.value = [...this.messages.value, message];
     if (configStore.mcp.value?.notifications) {
       notificationStore.askPermission();
-      notificationStore.send(message.client, message.message, MCP_ROUTE, true);
+      notificationStore.send(`${BASE_TITLE} · ${message.client}`, message.message, MCP_ROUTE, { force: true });
     }
   }
 
