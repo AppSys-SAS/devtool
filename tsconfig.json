@@ -11,6 +11,9 @@
       "path": "./packages/cdn"
     },
     {
+      "path": "./packages/certs"
+    },
+    {
       "path": "./apps/server"
     },
     {

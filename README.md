@@ -144,6 +144,17 @@ projects:
           deploy.sh: { prompt: true, args: [ { name: env, choices: [ prd, pre ] } ] }
 ```
 
+## Sidebar
+
+`adt.sidebar` shows the optional parts of the sidebar, all hidden by default: the links to the
+`environment` and `configs` pages, and the CDN sign-in state, `login`. The pages stay reachable by
+their address.
+
+```yaml
+adt:
+  sidebar: { environment: true, configs: true, login: true }
+```
+
 ## Integrations
 
 External tools reachable over HTTP, declared at the root of the configuration (rows under Environment
@@ -216,6 +227,46 @@ dns:
   records:
     dev: { names: [ example.dev, "*.example.dev" ], address: auto }
 ```
+
+## Certificates
+
+`loadBalancers.<name>` serves the certificate `crt` with its key `key`, files or PEM texts. A certificate
+whose `crt` and `key` are files may declare `acme` to be renewed; the Server page lists the certificates
+with their expiry, and `devtool cert renew [names...]` renews them from a terminal.
+
+```yaml
+loadBalancers:
+  example.dev:
+    crt: certs/example.dev.crt
+    key: certs/example.dev.key
+    warn: 30                    # days before the expiry from which the Server page warns (default 30)
+    acme:
+      trigger: both             # button (default), auto or both
+      before: 30                # days before the expiry from which auto renews (default 30)
+      env: { INFOMANIAK_ACCESS_TOKEN: "{{ op://vault/infomaniak/token }}" }
+      lego:
+        domains: [ example.dev, "*.example.dev" ]
+        email: certs@example.dev
+        dns: infomaniak
+```
+
+- `lego` holds the options of `lego run` without their dashes: a value gives `--name value`, a list
+  repeats the option, `true` gives it alone. The devtool sets `path` (its cache), `cert.name`,
+  `accept-tos` and the renewal options itself. `env` gives lego and its DNS provider their variables.
+- The devtool runs lego `5.6.0`, downloaded from the lego releases the first time a certificate is
+  renewed with it, its checksum checked, for macOS and Linux on arm64 and x64; a newer devtool installs
+  its own version and removes the others. Its account and certificates stay in the cache folder.
+- `command` replaces `lego` for any other tool: `[ ./renew.sh, "%{ADT:CRT}", "%{ADT:KEY}" ]`, run in the
+  folder of the certificate, writes the certificate and its key at those paths.
+- `button` renews from the Server page, forced even when not due. `auto` renews when the server starts
+  and twice a day once the certificate expires within `before` days, at most once a day. The load
+  balancer serves the new certificate right away. When `crt` and `key` are synchronized files of the
+  environment, the Server page then offers to push them to the CDN.
+- The Server page warns from `warn` days before the expiry for a certificate renewed by its button or
+  not renewed at all; for one renewed on its own, from `before` days, once its automatic renewal should
+  have happened.
+- Value blocks are read as in commands, with `opAccount`, `unless` and `answers`. `opAccount` accepts the
+  sign-in address of the 1Password account, the same for a whole team.
 
 ## Command automation
 

@@ -17,6 +17,17 @@ export interface AdtDefinition {
   hosts: string[];
   /** Who reaches the interface of the devtool. */
   access: HostAccess;
+  sidebar: SidebarSettings;
+}
+
+/** The optional parts of the sidebar, each hidden unless enabled. */
+export interface SidebarSettings {
+  /** The link to the Environment page. */
+  environment: boolean;
+  /** The link to the Configs page. */
+  configs: boolean;
+  /** The sign-in state of the CDN. */
+  login: boolean;
 }
 
 /** Names the local DNS answers itself. */
@@ -47,6 +58,46 @@ export interface PassthroughRule {
 export interface LoadBalancerCertificate {
   crt: string;
   key: string;
+  /** Days before the expiry from which the interface warns, unless the certificate renews on its own. */
+  warn: number;
+  /** How the certificate is renewed, null when it is not. */
+  acme: CertificateAcme | null;
+}
+
+/** When a certificate is renewed: from its button, on its own before it expires, or both. */
+export type CertificateTrigger = "button" | "auto" | "both";
+
+/** How a certificate is renewed: by the embedded lego, or by a command writing its files. */
+export interface CertificateAcme {
+  trigger: CertificateTrigger;
+  /** Days before the expiry from which an automatic renewal runs. */
+  before: number;
+  /** Environment of the renewal, value blocks read when it starts. */
+  env: Record<string, string>;
+  /** Options of `lego run` by name without their dashes, null when a command renews the certificate. */
+  lego: Record<string, string | number | boolean | (string | number)[]> | null;
+  /** The command writing the certificate and its key, `%{ADT:CRT}` and `%{ADT:KEY}` standing for their paths; null with lego. */
+  command: string[] | null;
+}
+
+/** A certificate of the load balancer as the interface shows it. */
+export interface CertificatePayload {
+  /** Its name in the configuration. */
+  name: string;
+  /** End of its validity, ISO date, null when it cannot be read. */
+  expiresAt: string | null;
+  /** Common name of its issuer, null when it cannot be read. */
+  issuer: string | null;
+  /** Why it cannot be read, or why its last renewal failed. */
+  error: string | null;
+  /** When it is renewed, null when it is not. */
+  trigger: CertificateTrigger | null;
+  /** Days before the expiry from which the interface warns: its `warn`, or its `before` when it renews on its own. */
+  warnDays: number;
+  /** What its renewal is doing, null when none runs. */
+  renewal: "installing" | "running" | null;
+  /** Paths of the environment holding the certificate and its key, offered for a push once renewed. */
+  push: string[];
 }
 
 /** An external tool reachable from the interface, shown in the devtool or opened in a new tab. */
@@ -256,6 +307,7 @@ export interface ClientConfigPayload {
   loadBalancers: string[];
   integrations: IntegrationDefinition[];
   projects: Record<string, ProjectDefinition>;
+  sidebar: SidebarSettings;
 }
 
 export interface StreamOutputLine {
@@ -452,6 +504,7 @@ export interface WsPayloadMap {
   file: FilePayload;
   cdnSession: CdnSessionPayload;
   environment: EnvironmentPayload;
+  certificates: CertificatePayload[];
   environmentTables: EnvironmentTablesPayload;
   environmentKeys: EnvironmentKeysPayload;
   streamUpdate: StreamUpdatePayload;

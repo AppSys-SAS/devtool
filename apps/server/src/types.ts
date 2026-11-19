@@ -80,6 +80,10 @@ export type ConnectionMessage =
       data: Record<string, never>;
     }
   | {
+      type: "certificateRenew";
+      data: { name: string; tag: string | null };
+    }
+  | {
       type: "envRefresh";
       data: Record<string, never>;
     }

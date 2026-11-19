@@ -28,6 +28,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { expiryClass, expiryLabel } from "@/lib/expiry";
 import { formatBytes, formatRelativeDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import environmentStore from "@/stores/environment";
@@ -185,31 +186,6 @@ function describeItem(item: EnvironmentItemPayload): string {
       }
       return item.pem?.kind === "privateKey" ? "private key" : "file";
   }
-}
-
-const EXPIRY_WARNING_MS = 30 * 24 * 60 * 60 * 1000;
-
-/**
- * Says when a certificate expires, or expired.
- * @param expiresAt The end of its validity, in ISO format.
- * @returns The label.
- */
-function expiryLabel(expiresAt: string): string {
-  const date = new Date(expiresAt).toLocaleDateString(undefined, { dateStyle: "medium" });
-  return new Date(expiresAt).getTime() < Date.now() ? `expired ${date}` : `expires ${date}`;
-}
-
-/**
- * Colors the expiry of a certificate: red once expired, amber within 30 days.
- * @param expiresAt The end of its validity, in ISO format.
- * @returns The classes.
- */
-function expiryClass(expiresAt: string): string {
-  const left = new Date(expiresAt).getTime() - Date.now();
-  if (left < 0) {
-    return "text-destructive";
-  }
-  return left < EXPIRY_WARNING_MS ? "text-amber-600 dark:text-amber-400" : "";
 }
 
 /**

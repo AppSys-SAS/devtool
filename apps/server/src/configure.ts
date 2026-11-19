@@ -1,14 +1,26 @@
 import path from "node:path";
 import fs from "node:fs/promises";
 import net from "node:net";
-import type { ClientConfigPayload, CommandArg, CommandChoice, CommandForm, CommandInput, CommandInputValue, DirectoryDefinition, DirectoryFiles, DirectoryScripts, ScriptSettings, AdtDefinition, DirectoryDefaultAction, DirectoryShortcut, DnsDefinition, DnsRecord, HostAccess, IntegrationDefinition, LoadBalancerCertificate, PassthroughRule, ProjectDefinition, ProjectRestore, RuntimeConfig } from "@appsys/devtool-shared";
+import type { CertificateAcme, ClientConfigPayload, CommandArg, CommandChoice, CommandForm, CommandInput, CommandInputValue, DirectoryDefinition, DirectoryFiles, DirectoryScripts, ScriptSettings, AdtDefinition, DirectoryDefaultAction, DirectoryShortcut, DnsDefinition, DnsRecord, HostAccess, IntegrationDefinition, LoadBalancerCertificate, PassthroughRule, ProjectDefinition, ProjectRestore, RuntimeConfig, SidebarSettings } from "@appsys/devtool-shared";
 import { logger } from "@appsys/devtool-shared";
+import { type LegoOptionValue, legoRunArgs } from "@appsys/devtool-certs";
 import { resolveCacheFolder } from "@appsys/devtool-config";
 import { type CommandAnswer, type CommandAutomation, findInvalidValueBlocks } from "./command-automation.js";
 import { listScripts } from "./scripts.js";
 import { isObject, toCommandArgsArray, toRecord, toStringArray, toStringRecord } from "./utils.js";
 
 const SLUG_REGEXP = /^[a-zA-Z0-9\-\/_.]+$/i;
+/** Options of `lego run` the devtool sets itself. */
+const LEGO_OWNED_OPTIONS = ["path", "cert.name", "accept-tos", "renew-force", "renew-days", "no-random-sleep"];
+
+/**
+ * Names the automation of the renewal of a certificate among the automations of the configuration.
+ * @param name The name of the certificate in the configuration.
+ * @returns The key of its automation.
+ */
+export function certificateAutomationKey(name: string): string {
+  return `loadBalancers/${name}/acme`;
+}
 const HOST_PATTERN_REGEXP = /^(\*\.)?[a-z0-9-]+(\.[a-z0-9-]+)*$/;
 const DEFAULT_INTEGRATION_ICON = "lucide:app-window";
 
@@ -29,6 +41,7 @@ function defaultAdt(): AdtDefinition {
     notifications: true,
     hosts: [],
     access: "local",
+    sidebar: { environment: false, configs: false, login: false },
   };
 }
 const SIGNAL_REGEXP = /^SIG[A-Z0-9]+$/;
@@ -94,6 +107,7 @@ export class DevtoolConfigure {
       loadBalancers: Object.keys(this.loadBalancers),
       integrations: this.integrations,
       projects: this.projects,
+      sidebar: this.adt.sidebar,
     };
   }
 
@@ -134,7 +148,8 @@ export class DevtoolConfigure {
   }
 
   /**
-   * Reads the settings of the devtool itself, `adt`: its host, interface, cache, shell, ports and access.
+   * Reads the settings of the devtool itself, `adt`: its host, interface, cache, shell, ports, access and
+   * the optional parts of its sidebar.
    */
   private async reconfigureAdt(): Promise<void> {
     const adt = toRecord(this.initialConfig.adt);
@@ -183,6 +198,15 @@ export class DevtoolConfigure {
     if (hosts) {
       this.adt.hosts = hosts;
     }
+
+    const sidebar = toRecord(adt.sidebar);
+    for (const key of Object.keys(this.adt.sidebar) as (keyof SidebarSettings)[]) {
+      if (sidebar[key] === true || sidebar[key] === false) {
+        this.adt.sidebar[key] = sidebar[key];
+      } else if (sidebar[key] !== undefined) {
+        this.addWarning(`adt.sidebar.${key}`, "is not a boolean");
+      }
+    }
   }
 
   private async reconfigureLoadBalancers(): Promise<void> {
@@ -203,13 +227,86 @@ export class DevtoolConfigure {
         continue;
       }
 
+      const warn = options.warn ?? 30;
+      if (!Number.isInteger(warn) || (warn as number) < 1) {
+        this.addWarning(`loadBalancers[${key}].warn`, "must be a positive number of days");
+      }
+
       this.loadBalancers[domain] = {
         crt: options.crt as string,
         key: options.key as string,
+        warn: Number.isInteger(warn) && (warn as number) > 0 ? (warn as number) : 30,
+        acme: options.acme === undefined ? null : this.readAcme(`loadBalancers[${key}].acme`, domain.slice(1), options),
       };
 
       logger.info("Config", "LoadBalancer", domain);
     }
+  }
+
+  /**
+   * Reads how a certificate of the load balancer is renewed, `{ trigger, before, env, opAccount, unless,
+   * answers, lego | command }`, its automation kept under {@link certificateAutomationKey}.
+   * @param slug Names the setting in warnings.
+   * @param name The name of the certificate in the configuration.
+   * @param certificate The raw certificate, whose `crt` and `key` must be files.
+   * @returns The renewal, null when invalid.
+   */
+  private readAcme(slug: string, name: string, certificate: Record<string, unknown>): CertificateAcme | null {
+    const acme = toRecord(certificate.acme);
+    if ([certificate.crt, certificate.key].some((file) => String(file).trimStart().startsWith("-----BEGIN "))) {
+      this.addWarning(slug, "needs crt and key to be files, not PEM texts");
+      return null;
+    }
+    if ((acme.lego === undefined) === (acme.command === undefined)) {
+      this.addWarning(slug, "needs either lego or command");
+      return null;
+    }
+    const trigger = acme.trigger ?? "button";
+    if (trigger !== "button" && trigger !== "auto" && trigger !== "both") {
+      this.addWarning(`${slug}.trigger`, "must be button, auto or both");
+      return null;
+    }
+    const before = acme.before ?? 30;
+    if (!Number.isInteger(before) || (before as number) < 1) {
+      this.addWarning(`${slug}.before`, "must be a positive number of days");
+      return null;
+    }
+
+    const lego = acme.lego === undefined ? null : this.readLegoOptions(`${slug}.lego`, acme.lego);
+    const command = acme.command === undefined ? null : toCommandArgsArray(acme.command);
+    if (acme.command !== undefined && !command?.length) {
+      this.addWarning(`${slug}.command`, "must be a non-empty array of strings or numbers");
+      return null;
+    }
+    const env = toStringRecord(acme.env) ?? {};
+    const automation = this.readAutomation(slug, acme, command ?? legoRunArgs(lego ?? {}), env);
+    if (automation) {
+      this.automations[certificateAutomationKey(name)] = automation;
+    }
+    return { trigger, before: before as number, env, lego, command };
+  }
+
+  /**
+   * Reads the options of `lego run`, the ones the devtool sets itself left out.
+   * @param slug Names the setting in warnings.
+   * @param value The raw options, by name without their dashes.
+   * @returns The valid options.
+   */
+  private readLegoOptions(slug: string, value: unknown): Record<string, LegoOptionValue> {
+    const options: Record<string, LegoOptionValue> = {};
+    for (const [name, option] of Object.entries(toRecord(value))) {
+      const valid =
+        ["string", "number", "boolean"].includes(typeof option) ||
+        (Array.isArray(option) && option.every((item) => typeof item === "string" || typeof item === "number"));
+      if (LEGO_OWNED_OPTIONS.includes(name)) {
+        this.addWarning(`${slug}.${name}`, "is set by the devtool");
+      } else if (!valid) {
+        this.addWarning(`${slug}.${name}`, "must be a string, a number, a boolean or a list of strings or numbers");
+      } else {
+        options[name] = option as LegoOptionValue;
+      }
+    }
+    return options;
   }
 
   private async reconfigureProjects(): Promise<void> {

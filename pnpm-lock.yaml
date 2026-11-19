@@ -218,6 +218,9 @@ importers:
       '@appsys/devtool-cdn':
         specifier: workspace:*
         version: link:../../packages/cdn
+      '@appsys/devtool-certs':
+        specifier: workspace:*
+        version: link:../../packages/certs
       '@appsys/devtool-config':
         specifier: workspace:*
         version: link:../../packages/config
@@ -409,6 +412,8 @@ importers:
       yaml:
         specifier: ^2.9.1
         version: 2.9.1
+
+  packages/certs: {}
 
   packages/config:
     dependencies:

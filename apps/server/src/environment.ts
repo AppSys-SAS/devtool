@@ -14,7 +14,7 @@ import {
   redisDatabaseName,
   SHARED_CONFIG_PATH,
 } from "@appsys/devtool-cdn";
-import { X509Certificate } from "node:crypto";
+import { readCertificate } from "@appsys/devtool-certs";
 import fs from "node:fs/promises";
 import type { RawConfig } from "@appsys/devtool-config";
 import { logger } from "@appsys/devtool-shared";
@@ -48,7 +48,6 @@ function copyPayload(copy: CopyInfo): EnvironmentCopyPayload {
 }
 
 const PEM_MAX_BYTES = 1024 * 1024;
-const CERTIFICATE_BLOCK = /-----BEGIN CERTIFICATE-----[\s\S]+?-----END CERTIFICATE-----/;
 
 /**
  * Tells what a local PEM file holds: its first certificate, with the end of its validity, or a private key.
@@ -62,13 +61,9 @@ async function readPem(filePath: string, size: number): Promise<EnvironmentPemPa
     return null;
   }
   const content = await fs.readFile(filePath, "utf-8").catch(() => "");
-  const certificate = CERTIFICATE_BLOCK.exec(content)?.[0];
+  const certificate = readCertificate(content);
   if (certificate) {
-    try {
-      return { kind: "certificate", expiresAt: new Date(new X509Certificate(certificate).validTo).toISOString() };
-    } catch {
-      return null;
-    }
+    return { kind: "certificate", expiresAt: certificate.expiresAt };
   }
   return /-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(content) ? { kind: "privateKey" } : null;
 }
@@ -150,6 +145,20 @@ export class DevtoolEnvironment {
   state(): EnvironmentPayload {
     const error = [this._error, ...this._scheduleErrors].filter(Boolean).join("; ") || null;
     return { configured: this._cdn !== null && this._options !== null, items: this._items, error, run: this._run };
+  }
+
+  /**
+   * Gives the files of the environment synchronized with the CDN among some local files.
+   *
+   * @param files - Absolute paths of local files.
+   * @returns The paths in the environment of those it synchronizes.
+   */
+  synchronizedPaths(files: string[]): string[] {
+    const options = this._options;
+    if (!options) {
+      return [];
+    }
+    return options.items.filter((item) => item.kind === "file" && files.includes(localPathOf(options.folder, item.path))).map((item) => item.path);
   }
 
   /**

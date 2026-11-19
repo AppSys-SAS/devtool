@@ -31,7 +31,7 @@ import {
 } from "@appsys/devtool-cdn";
 import { CONFIG_FOLDER_VARIABLE, loadMergedConfig, resolveCacheFolder, resolveDefaultConfigPaths } from "@appsys/devtool-config";
 import runProxy from "@appsys/devtool-proxy";
-import runServer, { relaunchUnderApp } from "@appsys/devtool-server";
+import runServer, { relaunchUnderApp, renewCertificates } from "@appsys/devtool-server";
 import { logger, type LogLevel } from "@appsys/devtool-shared";
 import pkg from "../package.json" with { type: "json" };
 
@@ -376,6 +376,15 @@ async function main(): Promise<void> {
     .option("-i, --interactive", "choose items, tables and key groups")
     .action(async (targets: string[], flags: { interactive?: boolean }) => {
       await syncEnvironment("push", targets, flags);
+    });
+
+  program
+    .command("cert")
+    .description("Certificates of the load balancer")
+    .command("renew [names...]")
+    .description("Renew certificates declaring acme now, every one without name, and write them where they are served")
+    .action(async (names: string[]) => {
+      await renewCertificates(names);
     });
 
   await program.parseAsync();

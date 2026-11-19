@@ -97,6 +97,7 @@ watch(
 );
 
 const allStreams = computed(() => configStore.commandStreams.value);
+const sidebarSettings = computed(() => configStore.sidebar.value);
 
 const sidebarData = computed(() => {
   const projects: SidebarProject[] = [];
@@ -328,8 +329,12 @@ function resolveStreamIcon(directory: SidebarDirectory, stream: CommandStream): 
         </RouterLink>
 
         <div class="space-y-1">
-          <div class="flex items-center gap-1 rounded-md p-1">
+          <div
+            v-if="sidebarSettings.environment || sidebarSettings.configs"
+            class="flex items-center gap-1 rounded-md p-1"
+          >
             <Button
+              v-if="sidebarSettings.environment"
               as-child
               size="sm"
               variant="ghost"
@@ -341,6 +346,7 @@ function resolveStreamIcon(directory: SidebarDirectory, stream: CommandStream): 
               </RouterLink>
             </Button>
             <Button
+              v-if="sidebarSettings.configs"
               as-child
               size="sm"
               variant="ghost"
@@ -579,7 +585,7 @@ function resolveStreamIcon(directory: SidebarDirectory, stream: CommandStream): 
       </div>
     </ScrollArea>
     <Separator />
-    <CdnSession />
+    <CdnSession v-if="sidebarSettings.login" />
     <div class="flex items-center justify-between gap-2 px-3 py-2">
       <RouterLink
         :to="{ name: 'dashboard' }"

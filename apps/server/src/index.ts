@@ -1,9 +1,13 @@
+import { execFile, spawn } from "node:child_process";
 import { existsSync, watch } from "node:fs";
 import path from "node:path";
+import { promisify } from "node:util";
 import { loadMergedConfig, type RawConfig, resolveDefaultConfigPaths } from "@appsys/devtool-config";
 import { logger, type RuntimeConfig } from "@appsys/devtool-shared";
 import pkg from "../package.json" with { type: "json" };
-import { DevtoolConfigure } from "./configure.js";
+import { prepareRenewal } from "./certificates.js";
+import { CommandSecrets } from "./command-automation.js";
+import { certificateAutomationKey, DevtoolConfigure } from "./configure.js";
 import { DevtoolLB } from "./lb.js";
 import { DevtoolServer } from "./server.js";
 import { mergeDeep, toRecord, toStringArray } from "./utils.js";
@@ -12,6 +16,7 @@ import type { ConfigProvider, LoadBalancerContext, ServerBootstrapOptions } from
 export { relaunchUnderApp } from "./app-launcher.js";
 
 const CONFIG_CHANGE_DELAY_MS = 200;
+const execFileAsync = promisify(execFile);
 
 function readKillSignal(record: Record<string, unknown>): unknown {
   return record.killSignal ?? record.killsignal;
@@ -217,8 +222,8 @@ async function loadRuntimeConfig(configProvider: ConfigProvider): Promise<Runtim
 }
 
 /**
- * Calls a listener shortly after any of the configuration files changes, including when it is replaced.
- * @param configPaths Paths of the configuration files.
+ * Calls a listener shortly after any of some files changes, including when it is replaced.
+ * @param configPaths Paths of the files.
  * @param onChange Called once per burst of changes.
  */
 function watchConfigFiles(configPaths: string[], onChange: () => void): void {
@@ -254,7 +259,59 @@ export default async function runServer(options: ServerBootstrapOptions = {}): P
 }
 
 /**
- * Starts the load balancer on its own, reloading its configuration whenever a configuration file changes.
+ * Renews certificates of the configuration now, their output in this terminal, each written where it is
+ * served once its renewal succeeded.
+ * @param names Names of the certificates in the configuration, every renewed one when empty.
+ * @param configPaths Configuration files, the default ones when empty.
+ * @throws When a certificate is unknown or its renewal fails.
+ */
+export async function renewCertificates(names: string[], configPaths: string[] = []): Promise<void> {
+  const configure = new DevtoolConfigure((await createConfigProvider({}, resolveConfigPaths(configPaths))()).raw);
+  await configure.reconfigure();
+  const certificates = Object.fromEntries(
+    Object.entries(configure.runtimeConfig.loadBalancers)
+      .map(([domain, certificate]) => [domain.replace(/^\./, ""), certificate] as const)
+      .filter(([, certificate]) => certificate.acme),
+  );
+  const unknown = names.filter((name) => !certificates[name]);
+  if (unknown.length) {
+    throw new Error(`no renewed certificate named ${unknown.join(", ")} (renewed: ${Object.keys(certificates).join(", ") || "none"})`);
+  }
+
+  for (const name of names.length ? names : Object.keys(certificates)) {
+    const certificate = certificates[name];
+    const renewal = await prepareRenewal(name, certificate, configure.runtimeConfig.adt.cacheDir, true, (line) => logger.info("Certificates", name, line));
+    const automation = configure.automations[certificateAutomationKey(name)];
+    const secrets = new CommandSecrets(automation?.opAccount ?? null, async (command) => (await execFileAsync("/bin/sh", ["-c", command])).stdout.replace(/\n+$/, ""));
+    try {
+      const env: Record<string, string> = {};
+      for (const [key, value] of Object.entries(certificate.acme?.env ?? {})) {
+        env[key] = await secrets.resolve(value);
+      }
+      const args: string[] = [];
+      for (const arg of renewal.args) {
+        args.push(await secrets.resolve(arg));
+      }
+      logger.info("Certificates", name, `Renewing in ${renewal.cwd}`);
+      const exitCode = await new Promise<number>((resolve, reject) => {
+        spawn(args[0], args.slice(1), { cwd: renewal.cwd, env: { ...process.env, ...env }, stdio: "inherit" })
+          .on("error", reject)
+          .on("exit", (code) => resolve(code ?? 1));
+      });
+      if (exitCode !== 0) {
+        throw new Error(`renewal of ${name} exited with code ${exitCode}`);
+      }
+      await renewal.finish();
+      logger.info("Certificates", name, `Renewed: ${certificate.crt}`);
+    } finally {
+      secrets.close();
+    }
+  }
+}
+
+/**
+ * Starts the load balancer on its own, reloading its configuration whenever a configuration file, or a
+ * certificate or key file it serves, changes.
  * @param options Ports, SSL domain, UI path and configuration files of the load balancer.
  * @returns The running load balancer.
  */
@@ -265,7 +322,10 @@ export async function runLoadBalancer(options: ServerBootstrapOptions = {}): Pro
   const lb = await DevtoolLB.create(context);
   await lb.listen();
 
-  watchConfigFiles(configPaths, () => {
+  const certificateFiles = Object.values(context.config.loadBalancers)
+    .flatMap((certificate) => [certificate.crt, certificate.key])
+    .filter((file) => !file.trimStart().startsWith("-----BEGIN "));
+  watchConfigFiles([...configPaths, ...certificateFiles], () => {
     void (async () => {
       context.config = await loadRuntimeConfig(configProvider);
       if (await lb.reload(context.config)) {

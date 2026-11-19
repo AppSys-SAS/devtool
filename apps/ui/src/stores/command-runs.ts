@@ -39,9 +39,20 @@ class CommandRunsStore {
    * @param options The command.
    */
   start(options: CommandRunOptions): void {
-    const tag = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const tag = this.show(options.name, options.onFinished ?? null);
     wsStore.newCommandStream(options.projectSlug, options.directorySlug, false, options.args, options.env, options.killSignal, options.notifications, options.name, { tag, command: options.command, inputs: options.inputs, restore: options.restore });
-    this.current.value = { tag, title: options.name, onFinished: options.onFinished ?? null };
+  }
+
+  /**
+   * Shows in the dialog the command a request about to be sent starts.
+   * @param title The title of the dialog.
+   * @param onFinished Runs once the command is finished.
+   * @returns The tag identifying the command, to send with the request.
+   */
+  show(title: string, onFinished: (() => void) | null = null): string {
+    const tag = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    this.current.value = { tag, title, onFinished };
+    return tag;
   }
 
   /**

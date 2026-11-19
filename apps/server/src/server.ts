@@ -4,7 +4,8 @@ import { logger } from "@appsys/devtool-shared";
 import type { WebSocket } from "ws";
 import { DevtoolCdnSession } from "./cdn-session.js";
 import type { CommandAutomation } from "./command-automation.js";
-import { DevtoolCommandStream } from "./command-stream.js";
+import { DevtoolCertificates } from "./certificates.js";
+import { type CommandStreamHooks, DevtoolCommandStream } from "./command-stream.js";
 import { DevtoolConfigure } from "./configure.js";
 import { DevtoolEnvironment } from "./environment.js";
 import { DevtoolFileSpaces, type FileSpace, isDevtoolConfig } from "./file-spaces.js";
@@ -51,6 +52,8 @@ export class DevtoolServer {
 
   private readonly environment: DevtoolEnvironment;
 
+  private readonly certificates: DevtoolCertificates;
+
   private readonly fileSpaces = new DevtoolFileSpaces();
 
   private _scriptWatchers: FSWatcher[] = [];
@@ -76,6 +79,14 @@ export class DevtoolServer {
         this.refreshEnvironment();
       }
     });
+    this.certificates = new DevtoolCertificates({
+      publish: async (payload) => {
+        await this.http?.sendToWsConnections("certificates", payload);
+      },
+      run: (data, hooks) => this.newCommandStream(data, hooks),
+      reload: () => this.reconfigure(),
+      synchronizedPaths: (files) => this.environment.synchronizedPaths(files),
+    });
   }
 
   /**
@@ -93,6 +104,7 @@ export class DevtoolServer {
       await instance.createLB();
     }
     await instance.listen();
+    instance.certificates.start();
     instance.environment
       .refresh()
       .then(() => instance.environment.pullAtStartup())
@@ -103,14 +115,15 @@ export class DevtoolServer {
   }
 
   /**
-   * Sends a new interface the configuration, the CDN sign-in state, the development environment and
-   * the command streams.
+   * Sends a new interface the configuration, the CDN sign-in state, the development environment, the
+   * certificates and the command streams.
    * @param ws The connection of the interface.
    */
   async onNewConnection(ws: WebSocket): Promise<void> {
     await this.http.sendToWsConnections("config", this.configWrapper.getForClient(this.version), ws);
     await this.http.sendToWsConnections("cdnSession", await this.cdnSession.status(), ws);
     await this.http.sendToWsConnections("environment", this.environment.state(), ws);
+    await this.http.sendToWsConnections("certificates", this.certificates.state(), ws);
     for (const stream of this.commandStreams) {
       await stream.sendUpdate(ws);
       await stream.sendOutput(null, ws);
@@ -138,6 +151,11 @@ export class DevtoolServer {
 
     if (message.type === "cdnLogout") {
       await this.cdnSession.logout();
+      return;
+    }
+
+    if (message.type === "certificateRenew") {
+      await this.certificates.renew(message.data.name, message.data.tag);
       return;
     }
 
@@ -379,8 +397,13 @@ export class DevtoolServer {
     await this.cdnSession.publish();
   }
 
-  private async newCommandStream(data: CommandStreamCreatePayload): Promise<void> {
-    const stream = await DevtoolCommandStream.create(this, data, false);
+  /**
+   * Starts a command in a terminal and keeps it among the streams of the server.
+   * @param data The command.
+   * @param hooks What the server adds to a command it starts itself.
+   */
+  private async newCommandStream(data: CommandStreamCreatePayload, hooks: CommandStreamHooks = {}): Promise<void> {
+    const stream = await DevtoolCommandStream.create(this, data, false, hooks);
     this.commandStreams.push(stream);
   }
 
@@ -427,8 +450,8 @@ export class DevtoolServer {
   }
 
   /**
-   * Loads the configuration and hands it to the CDN session, the environment and the file spaces,
-   * then watches its folders of scripts.
+   * Loads the configuration and hands it to the CDN session, the environment, the certificates and the
+   * file spaces, then watches its folders of scripts.
    */
   private async loadConfig(): Promise<void> {
     const nextConfig = await this.configProvider();
@@ -437,6 +460,7 @@ export class DevtoolServer {
     this.config = this.configWrapper.runtimeConfig;
     this.cdnSession.configure(nextConfig.raw.cdn);
     this.environment.configure(nextConfig.raw);
+    await this.certificates.configure(this.config, this.configWrapper.automations);
     this.fileSpaces.configure(nextConfig.raw, this.config.projects, (filePath) => this.afterConfigWrite(filePath));
     this.watchScriptFolders();
 

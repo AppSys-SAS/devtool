@@ -12,6 +12,14 @@ import { killPortOwners, PortConflictWatcher } from "./ports.js";
 import type { CommandStreamCreatePayload } from "./types.js";
 import type { DevtoolServer } from "./server.js";
 
+/** What the server adds to a command it starts itself, never asked for by an interface. */
+export interface CommandStreamHooks {
+  /** The automation of the command, its value blocks read when it starts. */
+  automation?: CommandAutomation | null;
+  /** Called each time the process ends, with its exit code, -1 when it was stopped. */
+  onExit?: (exitCode: number) => void;
+}
+
 const MAX_OUTPUT = 2048;
 const LOCAL_HOSTNAMES = new Set(["127.0.0.1", "localhost", "[::1]"]);
 const STOP_TIMEOUT_MS = 10_000;
@@ -183,6 +191,9 @@ export class DevtoolCommandStream {
   /** The values typed for the inputs of the template, in order. */
   private _inputs: CommandInputValue[];
 
+  /** Called each time the process ends, with its exit code, -1 when it was stopped. */
+  private _onExit: ((exitCode: number) => void) | null = null;
+
   public cwd: string;
 
   public env: Record<string, string>;
@@ -259,9 +270,21 @@ export class DevtoolCommandStream {
     this.rows = 30;
   }
 
-  static async create(server: DevtoolServer, data: CommandStreamCreatePayload, detached = false): Promise<DevtoolCommandStream> {
+  /**
+   * Creates a command and starts it, in a terminal or detached.
+   * @param server The server running the command.
+   * @param data The command.
+   * @param detached Whether it runs outside of any terminal.
+   * @param hooks What the server adds to a command it starts itself.
+   * @returns The command.
+   */
+  static async create(server: DevtoolServer, data: CommandStreamCreatePayload, detached = false, hooks: CommandStreamHooks = {}): Promise<DevtoolCommandStream> {
     const instance = new DevtoolCommandStream(server);
+    instance._onExit = hooks.onExit ?? null;
     await instance.create(data);
+    if (hooks.automation) {
+      instance.automation = hooks.automation;
+    }
 
     if (detached) {
       await instance.startDetached();
@@ -638,8 +661,9 @@ export class DevtoolCommandStream {
     this.exited = new Promise<void>((resolve) => {
       proc.onExit(({ exitCode }) => {
         secrets.close();
+        const killed = this.stoppedDate !== null;
         this.exitCode = exitCode;
-        if (this.stoppedDate) {
+        if (killed) {
           this.exitCode = 0;
           void this.addOutput("info", "Process killed");
         } else if (exitCode) {
@@ -654,6 +678,7 @@ export class DevtoolCommandStream {
         this.runningArgs = null;
 
         void this.sendUpdate();
+        this._onExit?.(killed ? -1 : exitCode);
         resolve();
       });
     });

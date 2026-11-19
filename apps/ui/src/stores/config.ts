@@ -1,9 +1,11 @@
 import { ref } from "vue";
 import router from "@/router";
-import type { IntegrationDefinition, ProjectDefinition, StreamUpdatePayload } from "@appsys/devtool-shared";
+import type { IntegrationDefinition, ProjectDefinition, SidebarSettings, StreamUpdatePayload } from "@appsys/devtool-shared";
 import { CommandStreamStore } from "./command-stream";
 import { CommandStreamOutputStore } from "./command-stream-output";
 import type { WsConfigPayload } from "@/types";
+
+const HIDDEN_SIDEBAR: SidebarSettings = { environment: false, configs: false, login: false };
 
 class ConfigStore {
   warnings = ref<string[]>([]);
@@ -13,6 +15,8 @@ class ConfigStore {
   integrations = ref<IntegrationDefinition[]>([]);
 
   projects = ref<Record<string, ProjectDefinition> | null>(null);
+
+  sidebar = ref<SidebarSettings>({ ...HIDDEN_SIDEBAR });
 
   commandStreams = ref<CommandStreamStore[]>([]);
 
@@ -24,6 +28,7 @@ class ConfigStore {
       this.loadBalancers.value = [];
       this.integrations.value = [];
       this.projects.value = null;
+      this.sidebar.value = { ...HIDDEN_SIDEBAR };
       return;
     }
 
@@ -31,6 +36,7 @@ class ConfigStore {
     this.loadBalancers.value = config.loadBalancers;
     this.integrations.value = config.integrations;
     this.projects.value = config.projects;
+    this.sidebar.value = config.sidebar;
   }
 
   reset(): void {

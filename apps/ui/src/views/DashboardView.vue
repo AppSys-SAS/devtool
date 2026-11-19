@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { TriangleAlert } from "@lucide/vue";
+import CertificatesCard from "@/components/CertificatesCard.vue";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import configStore from "@/stores/config";
@@ -9,7 +10,7 @@ const version = window.devtool?.version ?? "0.0.0";
 </script>
 
 <template>
-  <div class="h-full overflow-auto p-6">
+  <div class="h-full space-y-6 overflow-auto p-6">
     <Card class="max-w-3xl">
       <CardHeader>
         <CardTitle>Server <sup>{{ version }}</sup></CardTitle>
@@ -43,5 +44,6 @@ const version = window.devtool?.version ?? "0.0.0";
         </p>
       </CardContent>
     </Card>
+    <CertificatesCard />
   </div>
 </template>

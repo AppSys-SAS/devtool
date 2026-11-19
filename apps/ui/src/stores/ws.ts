@@ -2,6 +2,7 @@ import { ref } from "vue";
 import type { EnvironmentKeyChoicePayload, FileEntryPayload, PortConflictAction } from "@appsys/devtool-shared";
 import configStore from "./config";
 import filesStore from "./files";
+import certificatesStore from "./certificates";
 import environmentStore from "./environment";
 import sessionStore from "./session";
 
@@ -52,6 +53,9 @@ class WsStore {
             break;
           case "environment":
             environmentStore.load(payload.data as never);
+            break;
+          case "certificates":
+            certificatesStore.load(payload.data as never);
             break;
           case "environmentKeys":
             environmentStore.loadKeys(payload.data as never);
@@ -179,6 +183,15 @@ class WsStore {
   }
 
   /**
+   * Asks the server to renew a certificate now.
+   * @param name The name of the certificate in the configuration.
+   * @param tag Identifies the renewal command for this interface.
+   */
+  certificateRenew(name: string, tag: string): void {
+    this.send("certificateRenew", { name, tag });
+  }
+
+  /**
    * Asks the server to describe the development environment again.
    */
   envRefresh(): void {
@@ -284,6 +297,7 @@ class WsStore {
     configStore.reset();
     sessionStore.load(null);
     environmentStore.load(null);
+    certificatesStore.load([]);
   }
 }
 
