@@ -309,10 +309,12 @@ login:
 
 With `adt.mcp.enabled: true`, the server answers MCP clients of this machine over Streamable HTTP at
 `http://127.0.0.1:<adt.ports.server>/mcp` (never through the load balancer nor for web pages of other
-hosts). Claude Code connects with `claude mcp add --transport http devtool http://127.0.0.1:6730/mcp`;
-[the setup skill](skills/devtool-mcp-setup/SKILL.md#agent-configurations) gives the configuration of
-Codex CLI, opencode, Gemini CLI, Cursor and VS Code, and the [`skills`](skills/README.md) folder holds
-agent skills to install next to it.
+hosts). Claude Code connects with
+`claude mcp add --scope user --transport http devtool http://127.0.0.1:6730/mcp`; the Connection tab of
+the Agents page and [the setup skill](skills/devtool-mcp-setup/SKILL.md#agent-configurations) give the
+configuration of the other agents (Claude Desktop, Codex, Gemini CLI, opencode, Cursor, GitHub Copilot,
+Windsurf, Zed, Cline, Qwen Code, Mistral Vibe, Junie, JetBrains AI Assistant, Warp), and the
+[`skills`](skills/README.md) folder holds agent skills to install next to it.
 
 Tools: `list_projects`, `list_commands`, `list_terminals`, `read_terminal` (plain text from a cursor, or
 the screen), `wait_for_output`, `search_terminals`, `run_command`, `run_shell`, `send_input`,

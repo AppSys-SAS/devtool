@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import type { HTMLAttributes } from "vue"
+import { computed, type HTMLAttributes } from "vue"
+import { Icon } from "@iconify/vue"
 import { Check, ChevronDown } from "@lucide/vue"
 import {
   SelectContent,
@@ -16,12 +17,13 @@ import {
 import { cn } from "@/lib/utils"
 
 const props = defineProps<{
-  options: { label: string; value: string }[]
+  options: { label: string; value: string; icon?: string }[]
   placeholder?: string
   class?: HTMLAttributes["class"]
 }>()
 
 const model = defineModel<string>()
+const selected = computed(() => props.options.find((option) => option.value === model.value))
 </script>
 
 <template>
@@ -36,8 +38,15 @@ const model = defineModel<string>()
     >
       <SelectValue
         :placeholder="placeholder"
-        class="truncate"
-      />
+        class="flex min-w-0 items-center gap-2"
+      >
+        <Icon
+          v-if="selected?.icon"
+          :icon="selected.icon"
+          class="size-3.5 shrink-0"
+        />
+        <span class="truncate">{{ selected?.label }}</span>
+      </SelectValue>
       <SelectIcon as-child>
         <ChevronDown class="size-3.5 shrink-0 opacity-50" />
       </SelectIcon>
@@ -56,6 +65,11 @@ const model = defineModel<string>()
             :value="option.value"
             class="focus:bg-accent focus:text-accent-foreground relative flex w-full cursor-default items-center rounded-sm py-1.5 pr-8 pl-2 text-xs outline-none select-none"
           >
+            <Icon
+              v-if="option.icon"
+              :icon="option.icon"
+              class="mr-2 size-3.5 shrink-0"
+            />
             <SelectItemText>{{ option.label }}</SelectItemText>
             <SelectItemIndicator class="absolute right-2 flex items-center">
               <Check class="size-3.5" />

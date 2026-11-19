@@ -1,13 +1,12 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { useClipboard } from "@vueuse/core";
 import { Icon } from "@iconify/vue";
-import { Check, Copy, Unplug } from "@lucide/vue";
+import { Unplug } from "@lucide/vue";
 import type { McpClientStatus } from "@appsys/devtool-shared";
+import McpSetupGuide from "@/components/mcp/McpSetupGuide.vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { mcpAddCommand } from "@/lib/mcp";
 import mcpStore from "@/stores/mcp";
 
 const STATUSES: Record<McpClientStatus, string> = {
@@ -19,8 +18,6 @@ const STATUSES: Record<McpClientStatus, string> = {
 };
 
 const state = mcpStore.state;
-const command = computed(() => mcpAddCommand(state.value?.port ?? 6730));
-const { copy, copied } = useClipboard({ copiedDuring: 1500 });
 const remembered = computed(() => state.value?.clients.filter((client) => client.source === "always") ?? []);
 const configured = computed(() => state.value?.clients.filter((client) => client.source !== "always") ?? []);
 </script>
@@ -29,27 +26,10 @@ const configured = computed(() => state.value?.clients.filter((client) => client
   <Card>
     <CardHeader>
       <CardTitle>Connection</CardTitle>
-      <CardDescription>Agents running on this machine connect over Streamable HTTP. To add the devtool to Claude Code, run this command.</CardDescription>
+      <CardDescription>Agents running on this machine connect over Streamable HTTP. Pick an agent to declare the devtool for all your projects.</CardDescription>
     </CardHeader>
     <CardContent class="space-y-4">
-      <div class="flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-2">
-        <code class="min-w-0 flex-1 truncate text-xs">{{ command }}</code>
-        <Button
-          size="icon-sm"
-          variant="ghost"
-          title="Copy"
-          @click="copy(command)"
-        >
-          <Check
-            v-if="copied"
-            class="size-3.5"
-          />
-          <Copy
-            v-else
-            class="size-3.5"
-          />
-        </Button>
-      </div>
+      <McpSetupGuide :port="state?.port ?? 6730" />
 
       <div class="space-y-2">
         <h3 class="text-sm font-medium">

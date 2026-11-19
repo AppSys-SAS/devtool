@@ -30,57 +30,47 @@ relayed by its load balancer or sent by web pages of other hosts are refused.
 
 ## Agent configurations
 
-Claude Code:
+Each one declares the server for every project of the user. The Connection tab of the Agents page gives
+the same configurations, with the port of the running devtool.
 
-```bash
-claude mcp add --transport http devtool http://127.0.0.1:6730/mcp
-```
+| Agent | Command, or file and configuration |
+| --- | --- |
+| Claude Code | `claude mcp add --scope user --transport http devtool http://127.0.0.1:6730/mcp` |
+| Codex | `codex mcp add devtool --url http://127.0.0.1:6730/mcp` |
+| Gemini CLI | `gemini mcp add -s user -t http devtool http://127.0.0.1:6730/mcp` |
+| opencode | `opencode mcp add devtool --global --url http://127.0.0.1:6730/mcp` |
+| GitHub Copilot (VS Code, CLI) | `copilot mcp add --transport http devtool http://127.0.0.1:6730/mcp` |
+| Cline | `cline mcp add devtool http://127.0.0.1:6730/mcp --transport http --yes` |
+| Qwen Code | `qwen mcp add --scope user --transport http devtool http://127.0.0.1:6730/mcp` |
+| Cursor | `~/.cursor/mcp.json`: `{ "mcpServers": { "devtool": { "url": "http://127.0.0.1:6730/mcp" } } }` |
+| Windsurf | `~/.config/devin/mcp_config.json` (or the file Cascade opens with Open MCP config file): `{ "mcpServers": { "devtool": { "serverUrl": "http://127.0.0.1:6730/mcp" } } }` |
+| Zed | `~/.config/zed/settings.json`: `{ "context_servers": { "devtool": { "url": "http://127.0.0.1:6730/mcp" } } }` |
+| Junie | `~/.junie/mcp/mcp.json`: `{ "mcpServers": { "devtool": { "url": "http://127.0.0.1:6730/mcp" } } }` |
+| JetBrains AI Assistant | Settings > Tools > AI Assistant > Model Context Protocol (MCP) > Add, global, Streamable HTTP: `{ "mcpServers": { "devtool": { "url": "http://127.0.0.1:6730/mcp" } } }` |
+| Warp | `~/.warp/.mcp.json`: `{ "mcpServers": { "devtool": { "url": "http://127.0.0.1:6730/mcp" } } }` |
 
-Codex CLI (OpenAI), with `codex mcp add devtool --url http://127.0.0.1:6730/mcp` or in
-`~/.codex/config.toml` (`.codex/config.toml` for a trusted project); older releases also need
-`experimental_use_rmcp_client = true` at the top of the file:
+Mistral Vibe, in `~/.vibe/config.toml` (`vibe mcp add` registers the server with OAuth):
 
 ```toml
-[mcp_servers.devtool]
+[[mcp_servers]]
+name = "devtool"
+transport = "streamable-http"
 url = "http://127.0.0.1:6730/mcp"
 ```
 
-opencode, in `opencode.json` of the project or `~/.config/opencode/opencode.json`:
+Claude Desktop only runs local stdio servers: in
+`~/Library/Application Support/Claude/claude_desktop_config.json`, through the `mcp-remote` bridge, then
+restart it:
 
 ```json
-{
-  "$schema": "https://opencode.ai/config.json",
-  "mcp": {
-    "devtool": { "type": "remote", "url": "http://127.0.0.1:6730/mcp", "enabled": true }
-  }
-}
+{ "mcpServers": { "devtool": { "command": "npx", "args": ["-y", "mcp-remote", "http://127.0.0.1:6730/mcp", "--transport", "http-only"] } } }
 ```
 
-Gemini CLI, in `~/.gemini/settings.json` or `.gemini/settings.json` (`httpUrl`, not `url`, which means
-SSE):
-
-```json
-{ "mcpServers": { "devtool": { "httpUrl": "http://127.0.0.1:6730/mcp" } } }
-```
-
-Cursor, in `~/.cursor/mcp.json` or `.cursor/mcp.json`:
-
-```json
-{ "mcpServers": { "devtool": { "url": "http://127.0.0.1:6730/mcp" } } }
-```
-
-VS Code (GitHub Copilot), in `.vscode/mcp.json` (`servers` and `type: http`):
-
-```json
-{ "servers": { "devtool": { "type": "http", "url": "http://127.0.0.1:6730/mcp" } } }
-```
-
-An agent speaking stdio only goes through a bridge, such as `npx mcp-remote http://127.0.0.1:6730/mcp`.
 The formats change between releases of the agents: check their documentation when a server does not
 show up.
 
-The Agents page of the interface (robot icon next to the bookmark icon of the sidebar) shows the
-command above, the sessions, the history of every call, the grants and the effective permissions.
+The Agents page of the interface (robot icon next to the bookmark icon of the sidebar) shows these
+configurations, the sessions, the history of every call, the grants and the effective permissions.
 
 ## How calls are decided
 
