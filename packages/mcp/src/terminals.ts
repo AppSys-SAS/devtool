@@ -279,6 +279,21 @@ function waitForOutput(stream: McpTerminal, options: { pattern?: string; exit?: 
 }
 
 /**
+ * Describes a terminal just started, once the wait asked for is over, so that its state is the one
+ * after the wait.
+ * @param stream The terminal.
+ * @param wait What to wait for, absent to describe it at once.
+ * @param wait.pattern A regular expression awaited in the output.
+ * @param wait.exit Whether the end of the process ends the wait.
+ * @param wait.timeout Seconds before giving up.
+ * @returns The state of the terminal, with the result of the wait.
+ */
+async function describeStarted(stream: McpTerminal, wait?: { pattern?: string; exit?: boolean; timeout?: number }): Promise<Record<string, unknown>> {
+  const waited = wait ? await waitForOutput(stream, wait, stream.outputStart) : null;
+  return { ...describeTerminal(stream), ...(waited ? { wait: waited } : {}) };
+}
+
+/**
  * Starts a command of the configuration as the sidebar does: the main command of a project in its
  * main terminal, started again when it exists, any other command in a new terminal.
  * @param host The server.
@@ -489,8 +504,7 @@ export function terminalTools(host: McpHost): McpTool[] {
           return { detached: true, command };
         }
         call.describe(command, stream.slug);
-        const cursor = stream.outputStart;
-        return { ...describeTerminal(stream), ...(wait ? { wait: await waitForOutput(stream, wait, cursor) } : {}) };
+        return describeStarted(stream, wait);
       },
     }),
     defineTool({
@@ -526,7 +540,7 @@ export function terminalTools(host: McpHost): McpTool[] {
           options: { cwd: folder.path, origin: call.client },
         });
         call.describe(command, stream.slug);
-        return { ...describeTerminal(stream), ...(wait ? { wait: await waitForOutput(stream, wait, stream.outputStart) } : {}) };
+        return describeStarted(stream, wait);
       },
     }),
     defineTool({
