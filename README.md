@@ -55,9 +55,9 @@ A new developer writes `config.local.yml` with `workspace` and `cdn`, then runs 
 
 ## Missing folders
 
-A section whose folder is missing shows greyed in the sidebar when it declares `restore`, a command run
-in the parent folder, `%{ADT:PATH}` standing for the missing folder; the configuration is reloaded once
-it ends. A folder of files names one of its commands instead:
+A section or a project whose folder is missing shows greyed in the sidebar when it declares `restore`, a
+command run in the parent folder, `%{ADT:PATH}` standing for the missing folder; the configuration is
+reloaded once it ends. A folder of files names one of its commands instead:
 
 ```yaml
 sections:
@@ -65,6 +65,10 @@ sections:
     path: api
     restore: { name: Clone, args: [ git, clone, git@github.com:example/api.git, "%{ADT:PATH}" ] }
 projects:
+  desktop:
+    section: api
+    path: ../desktop
+    restore: { name: Clone, args: [ git, clone, git@github.com:example/desktop.git, "%{ADT:PATH}" ] }
   secrets:
     files:
       secrets: { path: ~/secrets, restore: secrets-pull }
@@ -100,6 +104,44 @@ projects:
     default: { action: command:dev }
     commands:
       dev: { name: Vite dev, args: [ pnpm, dev ], startWithSection: true }
+```
+
+## Scripts and inputs
+
+`scripts` lists folders whose executables become commands of the project, their slug being their
+path from the project (`scripts/deploy.sh`), listed again when a file is added or removed:
+`{ path, prompt, only, scripts }`, `only` keeping the file names matching its glob patterns, `scripts`
+setting `prompt` and `args` per file name. The comment heading a script (`#` lines after the shebang)
+describes it, its `Usage:` line and the indented lines that follow shown with it.
+
+An entry of `args`, of a command or of a script (after its path), is a value or an input asked when
+the command starts, replaced by what is typed:
+
+- `{ name, choices, optional, display }`: one of the choices, required unless `optional`, picked
+  from `buttons` (default) or a `dropdown`; a choice is a value, or `{ label, value }` to show a label;
+- `{ name, flag: true }`: the name when ticked;
+- `{ name, text: true }`: free text, split like a shell does.
+
+Any input may give a `default` value: one of its choices, a boolean for a flag, a text. Clicking the
+command asks for its inputs, their default values already filled in. Started on its own, as the
+`default` of its project or with its section, it runs with its default values, and asks only when a
+required choice has none. A script without `args` asks for free text, and value blocks are never read
+in what is typed.
+
+On the page of the project, `form` sets where a command asks for its inputs: `dialog` (default of a
+command) or `inline`, in its row unfolded with its description (default of a script). A folder of
+scripts gives the `form` of its scripts, each script its own. The sidebar always asks in a dialog.
+
+```yaml
+projects:
+  e2e:
+    commands:
+      run-project:
+        args: [ yarn, test:e2e, { name: project, choices: [ admin, { label: Shared files, value: shared-files } ], default: admin, display: dropdown }, { name: --headed, flag: true } ]
+    scripts:
+      - path: scripts
+        scripts:
+          deploy.sh: { prompt: true, args: [ { name: env, choices: [ prd, pre ] } ] }
 ```
 
 ## Integrations

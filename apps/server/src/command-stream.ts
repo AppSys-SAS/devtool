@@ -4,8 +4,8 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { spawn as spawnPty, type IPty } from "node-pty";
 import treeKill from "tree-kill";
-import type { PortConflict, PortConflictAction, StreamOutputLine, StreamUpdatePayload } from "@appsys/devtool-shared";
-import { logger } from "@appsys/devtool-shared";
+import type { CommandArg, CommandInputValue, PortConflict, PortConflictAction, StreamOutputLine, StreamUpdatePayload } from "@appsys/devtool-shared";
+import { expandCommandArgs, logger, missingCommandInputs } from "@appsys/devtool-shared";
 import type { WebSocket } from "ws";
 import { AnswerMatcher, type CommandAutomation, CommandSecrets } from "./command-automation.js";
 import { killPortOwners, PortConflictWatcher } from "./ports.js";
@@ -98,7 +98,7 @@ function getShellArgs(shell: string, command: string): string[] {
  * @param right The arguments of the second command.
  * @returns True when both commands exist with the same arguments.
  */
-function areArgsEqual(left: string[] | null, right: string[]): boolean {
+function areArgsEqual(left: CommandArg[] | null, right: string[]): boolean {
   if (!left || left.length !== right.length) {
     return false;
   }
@@ -174,6 +174,15 @@ export class DevtoolCommandStream {
 
   public args: string[];
 
+  /** The command of the directory in the configuration the stream runs, null for any other command. */
+  public command: string | null;
+
+  /** The arguments of the command of the configuration, its inputs not yet replaced; null for any other command. */
+  private _template: CommandArg[] | null;
+
+  /** The values typed for the inputs of the template, in order. */
+  private _inputs: CommandInputValue[];
+
   public cwd: string;
 
   public env: Record<string, string>;
@@ -223,6 +232,9 @@ export class DevtoolCommandStream {
     this.tag = null;
     this.automation = null;
     this.args = [];
+    this.command = null;
+    this._template = null;
+    this._inputs = [];
     this.cwd = process.cwd();
     this.env = {};
     this.shell = null;
@@ -267,8 +279,10 @@ export class DevtoolCommandStream {
 
   /**
    * Describes the command of the stream; a command of the configuration brings its own arguments,
-   * environment and automation, and the restore of a missing project runs in the parent of its folder.
+   * its inputs replaced by the values typed, environment and automation, and the restore of a
+   * missing project or directory runs in the parent of its folder.
    * @param data The command asked for by the interface.
+   * @throws When a choice the command needs has no valid value.
    */
   async create({
     projectSlug,
@@ -296,16 +310,26 @@ export class DevtoolCommandStream {
     }
 
     const command = projectSlug && directorySlug && typeof options.command === "string" ? this.server.config.projects[projectSlug]?.directories[directorySlug]?.extras[options.command] : undefined;
-    const missingProject = projectSlug && options.restore === true ? this.server.config.projects[projectSlug] : undefined;
-    const restoreArgs = missingProject?.missing && missingProject.restore ? missingProject.restore.args.map((arg) => arg.replaceAll("%{ADT:PATH}", missingProject.path)) : null;
-    if (restoreArgs && missingProject) {
-      cwd = path.dirname(missingProject.path);
+    const restoredProject = projectSlug && options.restore === true ? this.server.config.projects[projectSlug] : undefined;
+    const missingFolder = directorySlug ? restoredProject?.directories[directorySlug] : restoredProject;
+    const restoreArgs = missingFolder?.missing && missingFolder.restore ? missingFolder.restore.args.map((arg) => arg.replaceAll("%{ADT:PATH}", missingFolder.path)) : null;
+    if (restoreArgs && missingFolder) {
+      cwd = path.dirname(missingFolder.path);
+    }
+
+    const inputs = (Array.isArray(options.inputs) ? options.inputs : []).map((value: unknown) => (typeof value === "string" || typeof value === "boolean" ? value : ""));
+    const missing = command && !restoreArgs ? missingCommandInputs(command.args, inputs) : [];
+    if (missing.length) {
+      throw new Error(`${command?.slug}: no value for ${missing.join(", ")}`);
     }
 
     this.projectSlug = projectSlug ?? null;
     this.directorySlug = directorySlug ?? null;
     this.primary = primary;
-    this.args = restoreArgs ?? command?.args ?? args;
+    this.command = restoreArgs ? null : (command?.slug ?? null);
+    this._template = restoreArgs ? null : (command?.args ?? null);
+    this._inputs = inputs;
+    this.args = restoreArgs ?? (this._template ? expandCommandArgs(this._template, inputs) : args);
     this.name = name ?? this.args.join(" ");
     this.tag = typeof options.tag === "string" ? options.tag : null;
     this.automation = command && projectSlug && directorySlug ? this.server.commandAutomation(projectSlug, directorySlug, command.slug) : null;
@@ -323,7 +347,7 @@ export class DevtoolCommandStream {
    * Starts, stops, restarts or closes the command.
    * @param update The update.
    * @param update.action What to do.
-   * @param update.options.args The arguments to start with, ignored for a command automated by the
+   * @param update.options.args The arguments to start with, ignored for a command of the
    * configuration, which keeps its own.
    */
   async update({
@@ -338,7 +362,7 @@ export class DevtoolCommandStream {
     logger.info("Command", `${this.projectSlug ?? "global"}/${this.directorySlug ?? "-"}`, `${action}: ${this.args.join(" ")}`);
 
     if (action === "start") {
-      await this.start({ args: this.automation ? this.args : (options.args ?? this.args) });
+      await this.start({ args: options.args ?? this.args });
       return;
     }
 
@@ -391,6 +415,7 @@ export class DevtoolCommandStream {
       primary: this.primary,
       name: this.name,
       tag: this.tag,
+      command: this.command,
       args: this.args,
       env: this.env,
       shell: this.shell,
@@ -420,14 +445,23 @@ export class DevtoolCommandStream {
     );
   }
 
-  private convertArgs(args: string[]): string[] {
+  /**
+   * Replaces `%{ADT:CWD}` by the folder of the command in its fixed arguments.
+   * @param args The arguments.
+   * @returns The arguments, inputs left untouched.
+   */
+  private convertArgs<T extends CommandArg>(args: T[]): T[] {
     // noinspection RegExpRedundantEscape
-    return args.map((item) => item.replace(/%\{ADT:CWD\}/g, this.cwd));
+    return args.map((item) => (typeof item === "string" ? (item.replace(/%\{ADT:CWD\}/g, this.cwd) as T) : item));
   }
 
+  /**
+   * Starts the command outside of any terminal, leaving it running on its own.
+   * @throws When no shell can start it.
+   */
   private async startDetached(): Promise<void> {
     ensureNodePtySpawnHelperExecutable();
-    const finalArgs = this.convertArgs(this.args);
+    const finalArgs = expandCommandArgs(this.convertArgs(this._template ?? this.args), this._inputs);
     const env = { ...process.env, ...this.defaultEnv, ...this.env };
     let child = null as ReturnType<typeof spawnDetached> | null;
     const spawnErrors: string[] = [];
@@ -477,10 +511,11 @@ export class DevtoolCommandStream {
   }
 
   /**
-   * Starts the process in a terminal and follows its output and exit.
+   * Starts the process in a terminal and follows its output and exit. The value blocks of the
+   * configuration are read in its own arguments only, never in the values typed for its inputs.
    * @param options What to start.
    * @param options.withUpdate Whether the new state is sent to the interfaces once started.
-   * @param options.args The arguments of the command.
+   * @param options.args The arguments of the command, ignored for a command of the configuration.
    * @param options.notifications Whether the interfaces notify the end of the process.
    */
   private async start({
@@ -493,7 +528,8 @@ export class DevtoolCommandStream {
     notifications?: boolean;
   } = {}): Promise<void> {
     ensureNodePtySpawnHelperExecutable();
-    const finalArgs = this.convertArgs(args);
+    const template = this.convertArgs(this._template ?? args);
+    const finalArgs = expandCommandArgs(template, this._inputs);
     if (this.proc) {
       throw new Error("Command already running");
     }
@@ -508,10 +544,11 @@ export class DevtoolCommandStream {
       }
 
       try {
-        resolvedArgs = [];
-        for (const arg of finalArgs) {
-          resolvedArgs.push(await secrets.resolve(arg));
+        const resolvedTemplate: CommandArg[] = [];
+        for (const arg of template) {
+          resolvedTemplate.push(typeof arg === "string" ? await secrets.resolve(arg) : arg);
         }
+        resolvedArgs = expandCommandArgs(resolvedTemplate, this._inputs);
         resolvedEnv = {};
         for (const [key, value] of Object.entries(this.env)) {
           resolvedEnv[key] = await secrets.resolve(value);

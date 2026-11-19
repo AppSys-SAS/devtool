@@ -4,12 +4,11 @@ import { Icon } from "@iconify/vue";
 import { Bookmark, FolderTree } from "@lucide/vue";
 import { RouterLink, RouterView } from "vue-router";
 import type { DirectoryExtra } from "@appsys/devtool-shared";
-import ScriptList from "@/components/ScriptList.vue";
+import CommandItem from "@/components/CommandItem.vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { commandName, iconFromMeta, runDirectoryCommand } from "@/lib/directory-commands";
 import { integrationRoute } from "@/lib/shortcuts";
 import bookmarkStore from "@/stores/bookmark";
 import configStore from "@/stores/config";
@@ -32,8 +31,6 @@ type DirectoryCommand =
   | {
       type: "command";
       name: string;
-      icon: string;
-      description: string;
       command: DirectoryExtra;
     };
 
@@ -42,6 +39,7 @@ const directory = computed(() => directoryDefinition.value?.directory ?? null);
 const projectName = computed(() => directoryDefinition.value?.project.name ?? props.projectSlug);
 const directoryName = computed(() => directoryDefinition.value?.directory.name ?? props.directorySlug);
 const directoryDescription = computed(() => directoryDefinition.value?.directory.description ?? null);
+const scripts = computed(() => Object.values(directory.value?.extras ?? {}).filter((extra) => extra.script));
 
 const commands = computed<DirectoryCommand[]>(() => {
   const directory = directoryDefinition.value?.directory;
@@ -66,14 +64,8 @@ const commands = computed<DirectoryCommand[]>(() => {
     });
   }
 
-  for (const command of Object.values(directory.extras)) {
-    nextCommands.push({
-      type: "command",
-      name: commandName(command),
-      icon: iconFromMeta(command.meta),
-      description: command.args.join(" "),
-      command,
-    });
+  for (const command of Object.values(directory.extras).filter((extra) => !extra.script)) {
+    nextCommands.push({ type: "command", name: command.slug, command });
   }
 
   return nextCommands;
@@ -145,21 +137,12 @@ const handleOpenLinkInNewTab = (href: string) => {
                   <span class="block truncate text-xs text-muted-foreground">{{ command.href }}</span>
                 </span>
               </button>
-              <button
+              <CommandItem
                 v-else
-                type="button"
-                class="flex w-full items-start gap-2 rounded-md border px-3 py-2 text-left text-sm transition-colors hover:bg-accent/60"
-                @click="runDirectoryCommand(projectSlug, directorySlug, command.command)"
-              >
-                <Icon
-                  :icon="command.icon"
-                  class="mt-0.5 size-4 shrink-0 text-muted-foreground"
-                />
-                <span class="min-w-0 flex-1">
-                  <strong class="block truncate">{{ command.name }}</strong>
-                  <span class="block truncate text-xs text-muted-foreground">{{ command.description }}</span>
-                </span>
-              </button>
+                :project-slug="projectSlug"
+                :directory-slug="directorySlug"
+                :command="command.command"
+              />
             </template>
           </CardContent>
         </Card>
@@ -219,7 +202,7 @@ const handleOpenLinkInNewTab = (href: string) => {
         </Card>
 
         <Card
-          v-if="directory?.scripts.length"
+          v-if="scripts.length"
           class="mt-3"
         >
           <CardHeader class="pb-3">
@@ -227,10 +210,13 @@ const handleOpenLinkInNewTab = (href: string) => {
               Scripts
             </CardTitle>
           </CardHeader>
-          <CardContent>
-            <ScriptList
+          <CardContent class="space-y-1">
+            <CommandItem
+              v-for="script in scripts"
+              :key="script.slug"
               :project-slug="projectSlug"
-              :directory="directory"
+              :directory-slug="directorySlug"
+              :command="script"
             />
           </CardContent>
         </Card>

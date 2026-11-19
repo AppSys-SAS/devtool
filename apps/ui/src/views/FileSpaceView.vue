@@ -10,7 +10,7 @@ import FileHeader from "@/components/files/FileHeader.vue";
 import PromptDialog from "@/components/PromptDialog.vue";
 import SidebarToggle from "@/components/SidebarToggle.vue";
 import { useEditedFile } from "@/composables/useEditedFile";
-import commandRunsStore from "@/stores/command-runs";
+import { runDirectoryCommand } from "@/lib/directory-commands";
 import configStore from "@/stores/config";
 import filesStore from "@/stores/files";
 import wsStore from "@/stores/ws";
@@ -165,17 +165,9 @@ function remove(): void {
  */
 function run(command: DirectoryExtra): void {
   const space = props.space;
-  commandRunsStore.start({
-    projectSlug: props.projectSlug,
-    directorySlug: props.directorySlug,
-    args: command.args,
-    env: command.env,
-    killSignal: command.killSignal,
-    notifications: command.notifications,
-    name: command.name,
-    command: command.slug,
-    onFinished: () => wsStore.filesList(space),
-  });
+  if (props.projectSlug && props.directorySlug) {
+    runDirectoryCommand(props.projectSlug, props.directorySlug, command, { onFinished: () => wsStore.filesList(space) });
+  }
 }
 
 onBeforeRouteLeave(guardLeave);

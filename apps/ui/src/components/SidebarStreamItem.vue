@@ -36,7 +36,7 @@ const isRunning = computed(() => props.stream.status === 'RUNNING')
   >
     <span
       v-if="stream.unread"
-      class="pointer-events-none absolute -right-0.5 -top-0.5 z-[100]"
+      class="pointer-events-none absolute -right-0.5 -top-0.5 z-10"
     >
       <span class="relative flex size-3">
         <span

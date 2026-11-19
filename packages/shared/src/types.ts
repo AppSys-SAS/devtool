@@ -91,13 +91,17 @@ export interface DirectoryLoadBalancerRule {
   access: HostAccess;
 }
 
+/** A command of a directory: one the configuration declares, or an executable of a folder of scripts. */
 export interface DirectoryExtra {
   slug: string;
   name: string;
-  args: string[];
+  /** Its arguments, the inputs among them replaced by what is typed when it starts. */
+  args: CommandArg[];
   detached: boolean;
   /** Whether the command runs in the background, its questions answered in a dialog. */
   prompt: boolean;
+  /** Where its page asks for its inputs. */
+  form: CommandForm;
   /** Whether the server skips it or answers its questions on its own, as the configuration declares. */
   automated: boolean;
   /** Whether the start button of its section starts it. */
@@ -106,25 +110,56 @@ export interface DirectoryExtra {
   env: Record<string, string>;
   shell: string | null;
   killSignal: string | null;
+  /** What the heading comment of a script tells, null for a command of the configuration. */
+  script: ScriptDescription | null;
   meta?: unknown;
 }
 
-/** An argument of a script: one value among choices, a flag, or free text split like a shell does. */
-export interface ScriptArgument {
+/** What the comment heading a script tells about it. */
+export interface ScriptDescription {
+  /** Its first paragraph. */
+  summary: string | null;
+  /** Its usage lines. */
+  usage: string | null;
+}
+
+/** An argument typed when a command starts: one value among choices, a flag, or free text split like a shell does. */
+export interface CommandInput {
   name: string;
   kind: "choice" | "flag" | "text";
   /** The values of a choice. */
-  choices: string[];
+  choices: CommandChoice[];
+  /** How a choice is picked. */
+  display: "buttons" | "dropdown";
   /** Whether a choice may be left out. */
   optional: boolean;
+  /** The value given before anything is typed, null for none. */
+  default: CommandInputValue | null;
 }
+
+/** A value of a choice and the text shown for it. */
+export interface CommandChoice {
+  label: string;
+  value: string;
+}
+
+/** Where the page of a directory asks for the inputs of a command: in a dialog, or in its row. */
+export type CommandForm = "dialog" | "inline";
+
+/** An argument of a command: a fixed value, or an input typed when it starts. */
+export type CommandArg = string | CommandInput;
+
+/** The value typed for an input: the value of a choice or a text, whether a flag is set. */
+export type CommandInputValue = string | boolean;
 
 /** What the configuration declares about one script. */
 export interface ScriptSettings {
   /** Whether the script runs in the background, null to follow its folder. */
   prompt: boolean | null;
-  /** Its arguments, null to type them freely. */
-  args: ScriptArgument[] | null;
+  /** Its arguments after its path, null for one free text input. */
+  args: CommandArg[] | null;
+  /** Where its page asks for its inputs, null to follow its folder. */
+  form: CommandForm | null;
 }
 
 /** A folder whose executables a directory offers as scripts. */
@@ -133,6 +168,8 @@ export interface DirectoryScripts {
   path: string;
   /** Whether its scripts run in the background, their questions answered in a dialog. */
   prompt: boolean;
+  /** Where the page of its scripts asks for their inputs. */
+  form: CommandForm;
   /** Glob patterns of the file names offered, null for every executable. */
   only: string[] | null;
   /** Settings of some scripts, by file name. */
@@ -157,8 +194,8 @@ export interface DirectoryDefinition {
   description?: string | null;
   path: string;
   loadBalancer: Record<string, DirectoryLoadBalancerRule>;
-  /** Arguments of the default command, null when the directory has none. */
-  args: string[] | null;
+  /** Arguments of the default command, its inputs included, null when the directory has none. */
+  args: CommandArg[] | null;
   extras: Record<string, DirectoryExtra>;
   /** The folders whose executables are offered as scripts. */
   scripts: DirectoryScripts[];
@@ -175,6 +212,9 @@ export interface DirectoryDefinition {
   env: Record<string, string>;
   shell: string | null;
   killSignal: string | null;
+  /** Whether the folder of the directory is missing, the directory then offering only its restore. */
+  missing: boolean;
+  restore: ProjectRestore | null;
   meta?: unknown;
 }
 
@@ -232,6 +272,8 @@ export interface StreamUpdatePayload {
   name: string;
   /** Identifies the stream for the interface that started it. */
   tag: string | null;
+  /** The command of the directory the stream runs, null for any other command. */
+  command: string | null;
   args: string[];
   env: Record<string, string>;
   shell: string | null;
@@ -404,34 +446,10 @@ export interface FilePayload {
   error: string | null;
 }
 
-/** An executable script offered by a directory. */
-export interface ScriptPayload {
-  /** Path of the script relative to the directory. */
-  path: string;
-  name: string;
-  /** First paragraph of the comment heading the script. */
-  summary: string | null;
-  /** Usage lines of the comment heading the script. */
-  usage: string | null;
-  /** Whether the script runs in the background, its questions answered in a dialog. */
-  prompt: boolean;
-  /** Its declared arguments, null to type them freely. */
-  args: ScriptArgument[] | null;
-}
-
-/** The scripts of a directory. */
-export interface ScriptsPayload {
-  projectSlug: string;
-  directorySlug: string;
-  scripts: ScriptPayload[];
-  error: string | null;
-}
-
 export interface WsPayloadMap {
   config: ClientConfigPayload;
   fileTree: FileTreePayload;
   file: FilePayload;
-  scripts: ScriptsPayload;
   cdnSession: CdnSessionPayload;
   environment: EnvironmentPayload;
   environmentTables: EnvironmentTablesPayload;

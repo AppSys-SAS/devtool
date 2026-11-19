@@ -6,7 +6,7 @@ import pkg from "../package.json" with { type: "json" };
 import { DevtoolConfigure } from "./configure.js";
 import { DevtoolLB } from "./lb.js";
 import { DevtoolServer } from "./server.js";
-import { mergeDeep, toCommandArgsArray, toRecord, toStringArray } from "./utils.js";
+import { mergeDeep, toRecord, toStringArray } from "./utils.js";
 import type { ConfigProvider, LoadBalancerContext, ServerBootstrapOptions } from "./types.js";
 
 export { relaunchUnderApp } from "./app-launcher.js";
@@ -58,7 +58,7 @@ function normalizeProjectsShape(config: RawConfig): RawConfig {
       section.path = ".";
     }
 
-    let args: string[] | null = null;
+    let args: unknown = null;
     let env: unknown = project.env;
     let shell: unknown = readShell(project);
     let killSignal: unknown = readKillSignal(project);
@@ -66,7 +66,7 @@ function normalizeProjectsShape(config: RawConfig): RawConfig {
     const defaultCommandSlug = typeof action === "string" && action.startsWith("command:") ? action.slice("command:".length) : null;
     if (defaultCommandSlug && defaultCommandSlug in commands) {
       const defaultCommand = toRecord(commands[defaultCommandSlug]);
-      args = toCommandArgsArray(defaultCommand.args);
+      args = defaultCommand.args;
       if ("env" in defaultCommand) {
         env = defaultCommand.env;
       }

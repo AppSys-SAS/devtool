@@ -1,9 +1,10 @@
 import { isUtf8 } from "node:buffer";
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { DirectoryDefinition, ScriptPayload } from "@appsys/devtool-shared";
+import type { CommandInput, DirectoryDefinition, DirectoryExtra } from "@appsys/devtool-shared";
 
 const HEADER_BYTES = 8192;
+const FREE_ARGUMENTS: CommandInput = { name: "arguments", kind: "text", choices: [], display: "buttons", optional: true, default: null };
 
 /**
  * Reads the comment heading a script: the `#` lines that follow its shebang.
@@ -58,14 +59,15 @@ function describe(header: string[]): { summary: string | null; usage: string | n
 }
 
 /**
- * Lists the scripts of a directory: the executable files of its script folders matching their
- * patterns, hidden ones left out, with what the configuration declares about them.
+ * Lists the scripts of a directory as its commands: the executable files of its script folders
+ * matching their patterns, hidden ones left out, with what the configuration declares about them.
  *
- * @param directory - The directory.
- * @returns The scripts, sorted by path, their paths relative to the directory and runnable from it.
+ * @param directory - The directory, its environment, shell and notifications given to its scripts.
+ * @returns The commands, sorted by slug, the path of a script relative to the directory, which runs
+ * it with its declared arguments or one free text input.
  */
-export async function listScripts(directory: DirectoryDefinition): Promise<ScriptPayload[]> {
-  const scripts: ScriptPayload[] = [];
+export async function listScripts(directory: DirectoryDefinition): Promise<DirectoryExtra[]> {
+  const scripts: DirectoryExtra[] = [];
   for (const folder of directory.scripts) {
     for (const dirent of await fs.readdir(folder.path, { withFileTypes: true })) {
       const scriptPath = path.join(folder.path, dirent.name);
@@ -77,13 +79,21 @@ export async function listScripts(directory: DirectoryDefinition): Promise<Scrip
       const relativePath = path.relative(directory.path, scriptPath);
       const settings = folder.scripts[dirent.name];
       scripts.push({
-        path: relativePath.startsWith("..") ? relativePath : `./${relativePath}`,
+        slug: relativePath,
         name: dirent.name,
-        ...describe(await headerOf(scriptPath)),
+        args: [relativePath.startsWith("..") ? relativePath : `./${relativePath}`, ...(settings?.args ?? [FREE_ARGUMENTS])],
+        detached: false,
         prompt: settings?.prompt ?? folder.prompt,
-        args: settings?.args ?? null,
+        form: settings?.form ?? folder.form,
+        automated: false,
+        startWithSection: false,
+        notifications: directory.notifications,
+        env: directory.env,
+        shell: directory.shell,
+        killSignal: directory.killSignal,
+        script: describe(await headerOf(scriptPath)),
       });
     }
   }
-  return scripts.sort((a, b) => a.path.localeCompare(b.path));
+  return scripts.sort((a, b) => a.slug.localeCompare(b.slug));
 }

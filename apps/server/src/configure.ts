@@ -1,10 +1,11 @@
 import path from "node:path";
 import fs from "node:fs/promises";
 import net from "node:net";
-import type { ClientConfigPayload, DirectoryDefinition, DirectoryFiles, DirectoryScripts, ScriptArgument, ScriptSettings, AdtDefinition, DirectoryDefaultAction, DirectoryShortcut, DnsDefinition, DnsRecord, HostAccess, IntegrationDefinition, LoadBalancerCertificate, PassthroughRule, ProjectDefinition, ProjectRestore, RuntimeConfig } from "@appsys/devtool-shared";
+import type { ClientConfigPayload, CommandArg, CommandChoice, CommandForm, CommandInput, CommandInputValue, DirectoryDefinition, DirectoryFiles, DirectoryScripts, ScriptSettings, AdtDefinition, DirectoryDefaultAction, DirectoryShortcut, DnsDefinition, DnsRecord, HostAccess, IntegrationDefinition, LoadBalancerCertificate, PassthroughRule, ProjectDefinition, ProjectRestore, RuntimeConfig } from "@appsys/devtool-shared";
 import { logger } from "@appsys/devtool-shared";
 import { resolveCacheFolder } from "@appsys/devtool-config";
 import { type CommandAnswer, type CommandAutomation, findInvalidValueBlocks } from "./command-automation.js";
+import { listScripts } from "./scripts.js";
 import { isObject, toCommandArgsArray, toRecord, toStringArray, toStringRecord } from "./utils.js";
 
 const SLUG_REGEXP = /^[a-zA-Z0-9\-\/_.]+$/i;
@@ -287,7 +288,8 @@ export class DevtoolConfigure {
   }
 
   /**
-   * Reads a directory of a project: its commands, services, scripts, files and integrations.
+   * Reads a directory of a project: its commands, services, scripts, files and integrations, its main
+   * command being the command its default action names, else its own `args`.
    * @param slug Names the directory in warnings.
    * @param projectDefinition The project receiving the directory.
    * @param directorySlug The slug of the directory.
@@ -307,13 +309,10 @@ export class DevtoolConfigure {
     const relativePath = this.checkString(`${slug}.path`, directory.path) ? (directory.path as string) : directorySlug;
     const directoryPath = this.pathFrom(projectDefinition.path, relativePath);
 
-    if (!(await this.checkDirectory(`${slug}.path`, directoryPath))) {
-      return;
-    }
-
-    const args = directory.args === undefined || directory.args === null ? null : toCommandArgsArray(directory.args);
-    if (directory.args !== undefined && directory.args !== null && !args) {
-      this.addWarning(`${slug}.args`, "must be an array of strings or numbers");
+    const action = toRecord(directory.default).action;
+    const mainCommand = typeof action === "string" && action.startsWith("command:") ? action.slice("command:".length) : null;
+    const args = mainCommand || directory.args === undefined || directory.args === null ? null : this.readCommandArgs(`${slug}.args`, directory.args);
+    if (!mainCommand && directory.args !== undefined && directory.args !== null && !args) {
       return;
     }
 
@@ -335,8 +334,19 @@ export class DevtoolConfigure {
       env: {},
       shell: this.adt.shell,
       killSignal: null,
+      missing: false,
+      restore: this.readRestore(`${slug}.restore`, directory.restore),
       meta: directory.meta,
     };
+
+    const exists = await fs.stat(directoryPath).then((stat) => stat.isDirectory(), () => false);
+    if (!exists && directoryDefinition.restore) {
+      projectDefinition.directories[directorySlug] = { ...directoryDefinition, missing: true };
+      return;
+    }
+    if (!(await this.checkDirectory(`${slug}.path`, directoryPath))) {
+      return;
+    }
 
     if (directory.notifications === true || directory.notifications === false) {
       directoryDefinition.notifications = directory.notifications;
@@ -424,9 +434,8 @@ export class DevtoolConfigure {
         continue;
       }
       const extra = toRecord(extraRaw);
-      const extraArgs = toCommandArgsArray(extra.args);
+      const extraArgs = this.readCommandArgs(`${slug}.extras[${extraSlug}].args`, extra.args);
       if (!extraArgs) {
-        this.addWarning(`${slug}.extras[${extraSlug}].args`, "must be an array of strings or numbers");
         continue;
       }
 
@@ -443,6 +452,7 @@ export class DevtoolConfigure {
         args: extraArgs,
         detached: extra.detached === true,
         prompt: extra.prompt === true,
+        form: this.readForm(`${slug}.extras[${extraSlug}].form`, extra.form) ?? "dialog",
         automated: automation !== null,
         startWithSection: extra.startWithSection === true,
         notifications: extra.notifications === false ? false : directoryDefinition.notifications,
@@ -455,11 +465,26 @@ export class DevtoolConfigure {
           `${slug}.extras[${extraSlug}].killSignal`,
           extra.killSignal ?? extra.killsignal,
         ),
+        script: null,
         meta: extra.meta,
       };
     }
 
     directoryDefinition.scripts = await this.readScripts(`${slug}.scripts`, directoryPath, directory.scripts);
+    const scripts = await listScripts(directoryDefinition).catch((error: unknown) => {
+      this.addWarning(`${slug}.scripts`, error instanceof Error ? error.message : String(error));
+      return [];
+    });
+    for (const script of scripts) {
+      if (script.slug in directoryDefinition.extras) {
+        this.addWarning(`${slug}.scripts`, `${script.slug} is hidden by the command of the same slug`);
+        continue;
+      }
+      directoryDefinition.extras[script.slug] = script;
+    }
+    if (mainCommand) {
+      directoryDefinition.args = directoryDefinition.extras[mainCommand]?.args ?? null;
+    }
     directoryDefinition.files = this.readFiles(`${slug}.files`, directoryDefinition, directory.files);
     directoryDefinition.integrations = this.readIntegrations(`${slug}.integrations`, directory.integrations);
     directoryDefinition.defaultAction = this.readDefaultAction(`${slug}.default`, directoryDefinition, directory.default);
@@ -673,13 +698,13 @@ export class DevtoolConfigure {
    * arguments, environment and answers, `{{ op://… }}` read from `opAccount` or `{{ $(…) }}`.
    * @param slug Names the command in warnings.
    * @param command The raw command.
-   * @param args The arguments of the command.
+   * @param args The arguments of the command, whose inputs hold no value block.
    * @param env The environment of the command.
    * @returns The automation, null when the command declares none.
    */
-  private readAutomation(slug: string, command: Record<string, unknown>, args: string[], env: Record<string, string>): CommandAutomation | null {
+  private readAutomation(slug: string, command: Record<string, unknown>, args: CommandArg[], env: Record<string, string>): CommandAutomation | null {
     const values = [
-      ...args.map((arg, index) => ({ slug: `${slug}.args[${index}]`, text: arg })),
+      ...args.flatMap((arg, index) => (typeof arg === "string" ? [{ slug: `${slug}.args[${index}]`, text: arg }] : [])),
       ...Object.entries(env).map(([key, value]) => ({ slug: `${slug}.env.${key}`, text: value })),
       ...(Array.isArray(command.answers) ? command.answers : []).map((raw, index) => ({ slug: `${slug}.answers[${index}].value`, text: String(toRecord(raw).value ?? "") })),
     ];
@@ -718,7 +743,7 @@ export class DevtoolConfigure {
 
   /**
    * Reads the folders whose executables a directory offers as scripts, each given as its path or as
-   * `{ path, prompt, only, scripts }`.
+   * `{ path, prompt, form, only, scripts }`.
    * @param slug Names the setting in warnings.
    * @param directoryPath Absolute path of the directory, relative folders are resolved from it.
    * @param value The raw setting.
@@ -750,48 +775,123 @@ export class DevtoolConfigure {
         const settings = toRecord(settingsRaw);
         scripts[name] = {
           prompt: typeof settings.prompt === "boolean" ? settings.prompt : null,
-          args: settings.args === undefined ? null : this.readScriptArguments(`${slug}[${index}].scripts[${name}].args`, settings.args),
+          args: settings.args === undefined ? null : this.readCommandArgs(`${slug}[${index}].scripts[${name}].args`, settings.args),
+          form: this.readForm(`${slug}[${index}].scripts[${name}].form`, settings.form),
         };
       }
       const only = folder.only === undefined ? null : toStringArray(folder.only);
       if (folder.only !== undefined && !only) {
         this.addWarning(`${slug}[${index}].only`, "must be an array of glob patterns");
       }
-      folders.push({ path: folderPath, prompt: folder.prompt === true, only, scripts });
+      folders.push({ path: folderPath, prompt: folder.prompt === true, form: this.readForm(`${slug}[${index}].form`, folder.form) ?? "inline", only, scripts });
     }
     return folders;
   }
 
   /**
-   * Reads the arguments declared for a script, each `{ name, choices, optional }`, `{ name, flag: true }`
-   * or `{ name, text: true }`; invalid ones are left out.
+   * Reads where the page of a directory asks for the inputs of a command, `dialog` or `inline`.
    * @param slug Names the setting in warnings.
    * @param value The raw setting.
-   * @returns The arguments, in order.
+   * @returns The form, null when the setting is missing or invalid.
    */
-  private readScriptArguments(slug: string, value: unknown): ScriptArgument[] {
+  private readForm(slug: string, value: unknown): CommandForm | null {
+    if (value === "dialog" || value === "inline") {
+      return value;
+    }
+    if (value !== undefined) {
+      this.addWarning(slug, "must be dialog or inline");
+    }
+    return null;
+  }
+
+  /**
+   * Reads the arguments of a command: strings, numbers and inputs typed when it starts, each
+   * `{ name, choices, optional, display: buttons | dropdown }`, `{ name, flag: true }` or
+   * `{ name, text: true }`; invalid entries are left out.
+   * @param slug Names the setting in warnings.
+   * @param value The raw setting.
+   * @returns The arguments, in order, null when the setting is not a list.
+   */
+  private readCommandArgs(slug: string, value: unknown): CommandArg[] | null {
     if (!Array.isArray(value)) {
-      this.addWarning(slug, "must be an array");
-      return [];
+      this.addWarning(slug, "must be an array of strings, numbers or inputs");
+      return null;
     }
 
-    const args: ScriptArgument[] = [];
+    const args: CommandArg[] = [];
     for (const [index, raw] of value.entries()) {
-      const arg = toRecord(raw);
-      const choices = toStringArray(arg.choices);
-      if (!this.checkString(`${slug}[${index}].name`, arg.name)) {
+      if (typeof raw === "string" || (typeof raw === "number" && Number.isFinite(raw))) {
+        args.push(String(raw));
         continue;
       }
 
-      if (choices?.length) {
-        args.push({ name: arg.name as string, kind: "choice", choices, optional: arg.optional === true });
-      } else if (arg.flag === true || arg.text === true) {
-        args.push({ name: arg.name as string, kind: arg.flag === true ? "flag" : "text", choices: [], optional: true });
-      } else {
-        this.addWarning(`${slug}[${index}]`, "needs choices, flag: true or text: true");
+      const input = this.readCommandInput(`${slug}[${index}]`, raw);
+      if (input) {
+        args.push(input);
       }
     }
     return args;
+  }
+
+  /**
+   * Reads the choices of an input, each a value or `{ label, value }`; invalid ones are left out.
+   * @param slug Names the setting in warnings.
+   * @param value The raw setting.
+   * @returns The choices, null when the setting is not a list.
+   */
+  private readChoices(slug: string, value: unknown): CommandChoice[] | null {
+    if (!Array.isArray(value)) {
+      return null;
+    }
+
+    return value.flatMap((raw, index) => {
+      const choice = typeof raw === "string" || typeof raw === "number" ? { value: raw } : toRecord(raw);
+      if (typeof choice.value !== "string" && typeof choice.value !== "number") {
+        this.addWarning(`${slug}[${index}]`, "must be a value or { label, value }");
+        return [];
+      }
+      const choiceValue = String(choice.value);
+      return [{ label: typeof choice.label === "string" ? choice.label : choiceValue, value: choiceValue }];
+    });
+  }
+
+  /**
+   * Reads an input of a command, `{ name, choices, optional, display, default }`, `{ name, flag: true, default }`
+   * or `{ name, text: true, default }`.
+   * @param slug Names the input in warnings.
+   * @param value The raw input.
+   * @returns The input, null when invalid.
+   */
+  private readCommandInput(slug: string, value: unknown): CommandInput | null {
+    const input = toRecord(value);
+    if (!this.checkString(`${slug}.name`, input.name)) {
+      return null;
+    }
+
+    const name = input.name as string;
+    const choices = this.readChoices(`${slug}.choices`, input.choices);
+    let parsed: CommandInput;
+    if (choices?.length) {
+      if (input.display !== undefined && input.display !== "buttons" && input.display !== "dropdown") {
+        this.addWarning(`${slug}.display`, "must be buttons or dropdown");
+      }
+      parsed = { name, kind: "choice", choices, display: input.display === "dropdown" ? "dropdown" : "buttons", optional: input.optional === true, default: null };
+    } else if (input.flag === true || input.text === true) {
+      parsed = { name, kind: input.flag === true ? "flag" : "text", choices: [], display: "buttons", optional: true, default: null };
+    } else {
+      this.addWarning(slug, "must be a string, a number, or an input with choices, flag: true or text: true");
+      return null;
+    }
+
+    const fallback = typeof input.default === "number" ? String(input.default) : input.default;
+    const valid =
+      (parsed.kind === "choice" && typeof fallback === "string" && parsed.choices.some((choice) => choice.value === fallback)) ||
+      (parsed.kind === "flag" && typeof fallback === "boolean") ||
+      (parsed.kind === "text" && typeof fallback === "string");
+    if (fallback !== undefined && fallback !== null && !valid) {
+      this.addWarning(`${slug}.default`, parsed.kind === "choice" ? "must be one of the choices" : parsed.kind === "flag" ? "must be a boolean" : "must be a string");
+    }
+    return { ...parsed, default: valid ? (fallback as CommandInputValue) : null };
   }
 
   /**

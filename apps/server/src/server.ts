@@ -1,4 +1,5 @@
-import type { FilePayload, FileTreePayload, RuntimeConfig, ScriptsPayload } from "@appsys/devtool-shared";
+import { type FSWatcher, watch } from "node:fs";
+import type { FilePayload, FileTreePayload, RuntimeConfig } from "@appsys/devtool-shared";
 import { logger } from "@appsys/devtool-shared";
 import type { WebSocket } from "ws";
 import { DevtoolCdnSession } from "./cdn-session.js";
@@ -9,7 +10,6 @@ import { DevtoolEnvironment } from "./environment.js";
 import { DevtoolFileSpaces, type FileSpace, isDevtoolConfig } from "./file-spaces.js";
 import { DevtoolHttp } from "./http.js";
 import { DevtoolLB } from "./lb.js";
-import { listScripts } from "./scripts.js";
 import type {
   CommandStreamCreatePayload,
   CommandStreamInputPayload,
@@ -19,6 +19,8 @@ import type {
   ConfigProvider,
   ConnectionMessage,
 } from "./types.js";
+
+const SCRIPT_CHANGE_DELAY_MS = 300;
 
 /**
  * Describes a file asked for in a file space that does not exist.
@@ -50,6 +52,10 @@ export class DevtoolServer {
   private readonly environment: DevtoolEnvironment;
 
   private readonly fileSpaces = new DevtoolFileSpaces();
+
+  private _scriptWatchers: FSWatcher[] = [];
+
+  private _scriptChangeTimer: ReturnType<typeof setTimeout> | null = null;
 
   /**
    * @param configProvider Loads the configuration.
@@ -203,11 +209,6 @@ export class DevtoolServer {
       return;
     }
 
-    if (message.type === "scriptsList") {
-      await this.http.sendToWsConnections("scripts", await this.scripts(message.data.projectSlug, message.data.directorySlug), ws);
-      return;
-    }
-
     if (message.type === "newCommandStream") {
       await this.newCommandStream(message.data);
       return;
@@ -310,23 +311,32 @@ export class DevtoolServer {
   }
 
   /**
-   * Lists the scripts of a directory.
-   * @param projectSlug The project of the directory.
-   * @param directorySlug The directory.
-   * @returns The scripts, or why they could not be listed.
+   * Watches the folders of scripts of the configuration, reloading it shortly after a file is added,
+   * removed or renamed in one of them.
    */
-  private async scripts(projectSlug: string, directorySlug: string): Promise<ScriptsPayload> {
-    const payload: ScriptsPayload = { projectSlug, directorySlug, scripts: [], error: null };
-    const directory = this.config.projects[projectSlug]?.directories[directorySlug];
-    if (!directory) {
-      return { ...payload, error: `${projectSlug}/${directorySlug} is not a directory` };
+  private watchScriptFolders(): void {
+    for (const watcher of this._scriptWatchers) {
+      watcher.close();
     }
 
-    try {
-      return { ...payload, scripts: await listScripts(directory) };
-    } catch (error) {
-      return { ...payload, error: error instanceof Error ? error.message : String(error) };
-    }
+    const folders = new Set(
+      Object.values(this.config.projects).flatMap((project) => Object.values(project.directories).flatMap((directory) => directory.scripts.map((folder) => folder.path))),
+    );
+    this._scriptWatchers = [...folders].map((folder) =>
+      watch(folder, (event) => {
+        if (event !== "rename") {
+          return;
+        }
+        if (this._scriptChangeTimer) {
+          clearTimeout(this._scriptChangeTimer);
+        }
+        this._scriptChangeTimer = setTimeout(() => {
+          this.reconfigure().catch((error: unknown) => {
+            logger.warn("Server", "Scripts", error instanceof Error ? error.message : String(error));
+          });
+        }, SCRIPT_CHANGE_DELAY_MS);
+      }).on("error", (error) => logger.warn("Server", "Scripts", `${folder}: ${error.message}`)),
+    );
   }
 
   /**
@@ -416,6 +426,10 @@ export class DevtoolServer {
     stream.resize(data.cols, data.rows);
   }
 
+  /**
+   * Loads the configuration and hands it to the CDN session, the environment and the file spaces,
+   * then watches its folders of scripts.
+   */
   private async loadConfig(): Promise<void> {
     const nextConfig = await this.configProvider();
     this.configWrapper = new DevtoolConfigure(nextConfig.raw);
@@ -424,6 +438,7 @@ export class DevtoolServer {
     this.cdnSession.configure(nextConfig.raw.cdn);
     this.environment.configure(nextConfig.raw);
     this.fileSpaces.configure(nextConfig.raw, this.config.projects, (filePath) => this.afterConfigWrite(filePath));
+    this.watchScriptFolders();
 
     if (nextConfig.loadedPaths.length) {
       logger.info("Server", "Config", `Loaded: ${nextConfig.loadedPaths.join(", ")}`);

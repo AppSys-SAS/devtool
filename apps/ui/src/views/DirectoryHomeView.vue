@@ -5,7 +5,7 @@ import StreamView from "@/views/StreamView.vue";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import configStore from "@/stores/config";
-import { startDefaultCommand } from "@/lib/directory-commands";
+import { commandLine, startDefaultCommand } from "@/lib/directory-commands";
 import { defaultShortcut } from "@/lib/shortcuts";
 
 const props = defineProps<{
@@ -17,7 +17,7 @@ const directoryDefinition = computed(() => configStore.getDirectory(props.projec
 const directory = computed(() => directoryDefinition.value?.directory ?? null);
 const directoryName = computed(() => directory.value?.name ?? props.directorySlug);
 const directoryDescription = computed(() => directory.value?.description ?? null);
-const directoryArgs = computed(() => directory.value?.args ?? null);
+const directoryArgs = computed(() => (directory.value?.args ? commandLine(directory.value.args) : null));
 const directoryShell = computed(() => directory.value?.shell ?? "N/A");
 const defaultAction = computed(() => (directory.value ? defaultShortcut(props.projectSlug, directory.value) : null));
 const streamSlug = computed(() => configStore.getDirectoryStreamPrimary(props.projectSlug, props.directorySlug));
@@ -47,11 +47,11 @@ const streamSlug = computed(() => configStore.getDirectoryStreamPrimary(props.pr
           {{ directoryDescription }}
         </p>
         <Button
-          v-if="directoryArgs"
+          v-if="directoryArgs !== null"
           class="h-auto w-full justify-start whitespace-normal break-all px-3 py-2 text-left font-mono text-xs leading-5"
           @click="directory && startDefaultCommand(projectSlug, directory)"
         >
-          {{ directoryArgs.join(" ") || directoryShell }}
+          {{ directoryArgs || directoryShell }}
         </Button>
         <Button
           v-if="defaultAction && directory?.defaultAction?.shortcut.type !== 'command'"

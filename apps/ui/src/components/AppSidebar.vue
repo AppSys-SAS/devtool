@@ -9,7 +9,7 @@ import SidebarStreamItem from "@/components/SidebarStreamItem.vue";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
-import type { DirectoryDefaultAction, DirectoryDefinition, ProjectRestore } from "@appsys/devtool-shared";
+import type { CommandArg, DirectoryDefaultAction, DirectoryDefinition, ProjectRestore } from "@appsys/devtool-shared";
 import ShortcutLine from "@/components/ShortcutLine.vue";
 import { defaultShortcut, directoryShortcuts, integrationShortcut, type SidebarShortcut } from "@/lib/shortcuts";
 import { iconFromMeta, startSection, stopSection } from "@/lib/directory-commands";
@@ -23,7 +23,7 @@ interface SidebarDirectory {
   slug: string;
   projectSlug: string;
   name: string;
-  args: string[] | null;
+  args: CommandArg[] | null;
   /** What the directory does by default, `command` telling whether it is its main command. */
   defaultAction: { shortcut: SidebarShortcut; trigger: DirectoryDefaultAction["trigger"]; command: boolean } | null;
   /** Shortcuts shown as icons in the row of the directory. */
@@ -31,11 +31,14 @@ interface SidebarDirectory {
   /** Shortcuts shown as rows under the row of the directory. */
   lines: SidebarShortcut[];
   env: Record<string, string>;
-  extras: Record<string, { name: string; args: string[]; killSignal: string | null; meta?: unknown }>;
+  extras: Record<string, { name: string; args: CommandArg[]; killSignal: string | null; meta?: unknown }>;
   killSignal: string | null;
   notifications: boolean;
   stream: CommandStream | null;
   streams: CommandStream[];
+  /** Whether the folder of the directory is missing on this machine. */
+  missing: boolean;
+  restore: ProjectRestore | null;
   meta?: unknown;
 }
 
@@ -120,6 +123,8 @@ const sidebarData = computed(() => {
           notifications: directory.notifications,
           stream: null,
           streams: [],
+          missing: directory.missing,
+          restore: directory.restore,
           meta: directory.meta,
         };
 
@@ -216,23 +221,22 @@ function startProject(projectSlug: string): void {
 }
 
 /**
- * Brings back the missing folder of a project in the background, its questions in a dialog, then
- * reloads the configuration so the project shows.
- * @param project The missing project.
+ * Brings back the missing folder of a project or of one of its directories in the background, its
+ * questions in a dialog, then reloads the configuration so it shows.
+ * @param projectSlug The project.
+ * @param directorySlug The missing directory, null for the missing project itself.
+ * @param name The name of what is missing.
+ * @param restore The command bringing the folder back.
  */
-function restoreProject(project: SidebarProject): void {
-  if (!project.restore) {
-    return;
-  }
-
+function restoreFolder(projectSlug: string, directorySlug: string | null, name: string, restore: ProjectRestore): void {
   commandRunsStore.start({
-    projectSlug: project.slug,
-    directorySlug: null,
-    args: project.restore.args,
+    projectSlug,
+    directorySlug,
+    args: restore.args,
     env: {},
     killSignal: null,
     notifications: true,
-    name: `${project.restore.name} ${project.name}`,
+    name: `${restore.name} ${name}`,
     restore: true,
     onFinished: () => wsStore.reconfigure(),
   });
@@ -267,7 +271,13 @@ function runDefaultActionFromRow(event: MouseEvent, directory: SidebarDirectory)
   action.shortcut.open();
 }
 
-function areArgsEqual(left: string[], right: string[]): boolean {
+/**
+ * Compares the arguments of a command with those a stream runs.
+ * @param left The arguments of the command, an input never matching.
+ * @param right The arguments of the stream.
+ * @returns True when both hold the same arguments.
+ */
+function areArgsEqual(left: CommandArg[], right: string[]): boolean {
   if (left.length !== right.length) {
     return false;
   }
@@ -396,7 +406,7 @@ function resolveStreamIcon(directory: SidebarDirectory, stream: CommandStream): 
               size="sm"
               variant="outline"
               class="h-6 gap-1 px-2 text-[11px] normal-case tracking-normal"
-              @click="restoreProject(project)"
+              @click="restoreFolder(project.slug, null, project.name, project.restore)"
             >
               <Download class="size-3" />
               {{ project.restore.name }}
@@ -451,7 +461,26 @@ function resolveStreamIcon(directory: SidebarDirectory, stream: CommandStream): 
               :key="`project/${project.slug}/directory/${directory.slug}`"
               class="space-y-1"
             >
+              <div
+                v-if="directory.missing"
+                class="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground/60"
+                title="Missing on this machine"
+              >
+                <FolderX class="size-3.5 shrink-0" />
+                <span class="min-w-0 flex-1 truncate">{{ directory.name }}</span>
+                <Button
+                  v-if="directory.restore"
+                  size="sm"
+                  variant="outline"
+                  class="h-6 gap-1 px-2 text-[11px]"
+                  @click="restoreFolder(project.slug, directory.slug, directory.name, directory.restore)"
+                >
+                  <Download class="size-3" />
+                  {{ directory.restore.name }}
+                </Button>
+              </div>
               <RouterLink
+                v-else
                 :to="{ name: 'directory', params: { projectSlug: project.slug, directorySlug: directory.slug } }"
                 class="group relative flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent/60"
                 @click.capture="runDefaultActionFromRow($event, directory)"
@@ -463,7 +492,7 @@ function resolveStreamIcon(directory: SidebarDirectory, stream: CommandStream): 
               >
                 <span
                   v-if="directory.stream?.unread"
-                  class="pointer-events-none absolute -right-0.5 -top-0.5 z-[100]"
+                  class="pointer-events-none absolute -right-0.5 -top-0.5 z-10"
                 >
                   <span class="relative flex size-3">
                     <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-sky-400 opacity-75"></span>

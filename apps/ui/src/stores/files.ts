@@ -1,5 +1,5 @@
 import { ref } from "vue";
-import type { FilePayload, FileTreePayload, ScriptsPayload } from "@appsys/devtool-shared";
+import type { FilePayload, FileTreePayload } from "@appsys/devtool-shared";
 
 /**
  * Gives the key of a file of a file space.
@@ -12,24 +12,12 @@ export function fileKey(space: string, path: string): string {
 }
 
 /**
- * Gives the key of the scripts of a directory.
- * @param projectSlug The project of the directory.
- * @param directorySlug The directory.
- * @returns The key.
- */
-export function scriptsKey(projectSlug: string, directorySlug: string): string {
-  return `${projectSlug}/${directorySlug}`;
-}
-
-/**
- * Last state the server sent of the file spaces, of their files and of the scripts of the directories.
+ * Last state the server sent of the file spaces and of their files.
  */
 class FilesStore {
   trees = ref<Record<string, FileTreePayload>>({});
 
   files = ref<Record<string, FilePayload>>({});
-
-  scripts = ref<Record<string, ScriptsPayload>>({});
 
   /**
    * Keeps the files of a space sent by the server.
@@ -45,14 +33,6 @@ class FilesStore {
    */
   loadFile(payload: FilePayload): void {
     this.files.value = { ...this.files.value, [fileKey(payload.space, payload.path)]: payload };
-  }
-
-  /**
-   * Keeps the scripts of a directory sent by the server.
-   * @param payload The scripts of one directory.
-   */
-  loadScripts(payload: ScriptsPayload): void {
-    this.scripts.value = { ...this.scripts.value, [scriptsKey(payload.projectSlug, payload.directorySlug)]: payload };
   }
 }
 

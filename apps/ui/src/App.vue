@@ -3,6 +3,7 @@ import { onMounted } from "vue";
 import { RouterView } from "vue-router";
 import AppSidebar from "@/components/AppSidebar.vue";
 import CommandDialog from "@/components/CommandDialog.vue";
+import CommandInputsDialog from "@/components/CommandInputsDialog.vue";
 import commandRunsStore from "@/stores/command-runs";
 import layoutStore from "@/stores/layout";
 import wsStore from "@/stores/ws";
@@ -57,5 +58,6 @@ onMounted(() => {
       @finished="commandRunsStore.current.value.onFinished?.()"
       @closed="commandRunsStore.close()"
     />
+    <CommandInputsDialog />
   </div>
 </template>

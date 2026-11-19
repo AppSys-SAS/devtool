@@ -1,4 +1,15 @@
-import type { DirectoryDefinition, DirectoryExtra, ProjectDefinition } from "@appsys/devtool-shared";
+import {
+  commandInputs,
+  defaultCommandInputs,
+  expandCommandArgs,
+  missingCommandInputs,
+  type CommandArg,
+  type CommandInputValue,
+  type DirectoryDefinition,
+  type DirectoryExtra,
+  type ProjectDefinition,
+} from "@appsys/devtool-shared";
+import commandInputsStore from "@/stores/command-inputs";
 import commandRunsStore from "@/stores/command-runs";
 import configStore from "@/stores/config";
 import wsStore from "@/stores/ws";
@@ -19,38 +30,85 @@ export function iconFromMeta(meta: unknown, fallback = "ph:terminal"): string {
 }
 
 /**
+ * Gives a command line, each input shown as `<name>`.
+ * @param args The arguments of the command.
+ * @returns The command line.
+ */
+export function commandLine(args: CommandArg[]): string {
+  return args.map((arg) => (typeof arg === "string" ? arg : `<${arg.name}>`)).join(" ");
+}
+
+/**
  * Gives the name shown for a command of a directory.
  * @param command The command.
- * @returns Its name, else its arguments for the main command, else its slug.
+ * @returns Its name, else its command line for the main command, else its slug.
  */
 export function commandName(command: DirectoryExtra): string {
-  return command.name || (command.slug === "main" ? command.args.join(" ") : command.slug);
+  return command.name || (command.slug === "main" ? commandLine(command.args) : command.slug);
+}
+
+/**
+ * Gives the values of the inputs of a command: those typed in the dialog when asked for, or when its
+ * default values leave a required choice empty; its default values otherwise.
+ * @param command The command.
+ * @param ask Whether the dialog is shown even when the default values are enough.
+ * @param run Receives the values.
+ */
+function withInputs(command: DirectoryExtra, ask: boolean, run: (inputs: CommandInputValue[]) => void): void {
+  const defaults = defaultCommandInputs(command.args);
+  if (!defaults.length || (!ask && !missingCommandInputs(command.args, defaults).length)) {
+    run(defaults);
+    return;
+  }
+  commandInputsStore.ask(command, run);
+}
+
+/** How a command of a directory runs. */
+export interface RunDirectoryCommandOptions {
+  /** Whether the interface then shows the terminal of the command. */
+  redirect?: boolean;
+  /** The values of its inputs; without them, they are asked in a dialog. */
+  inputs?: CommandInputValue[];
+  /** Whether the command starts on its own, with its default values when they are enough. */
+  automatic?: boolean;
+  /** Runs once the command is finished, the command then running in the background. */
+  onFinished?: () => void;
 }
 
 /**
  * Runs a command of a directory: detached, in the background with its questions in a dialog, or in
- * a terminal.
+ * a terminal, once the values of its inputs are known.
  * @param projectSlug The slug of the project.
  * @param directorySlug The slug of the directory.
  * @param command The command.
- * @param redirect Whether the interface then shows the terminal of the command.
+ * @param options How it runs.
  */
-export function runDirectoryCommand(projectSlug: string, directorySlug: string, command: DirectoryExtra, redirect = true): void {
-  if (command.detached) {
-    wsStore.newCommandDetached(projectSlug, directorySlug, command.args, command.env);
+export function runDirectoryCommand(projectSlug: string, directorySlug: string, command: DirectoryExtra, options: RunDirectoryCommandOptions = {}): void {
+  const { redirect = true, inputs, automatic = false, onFinished } = options;
+  if (!inputs) {
+    withInputs(command, !automatic, (values) => runDirectoryCommand(projectSlug, directorySlug, command, { ...options, inputs: values }));
     return;
   }
 
-  if (command.prompt) {
+  const args = expandCommandArgs(command.args, inputs);
+  const name = [commandName(command), ...expandCommandArgs(commandInputs(command.args), inputs)].join(" ");
+  if (command.detached) {
+    wsStore.newCommandDetached(projectSlug, directorySlug, args, command.env, { command: command.slug, inputs });
+    return;
+  }
+
+  if (command.prompt || onFinished) {
     commandRunsStore.start({
       projectSlug,
       directorySlug,
-      args: command.args,
+      args,
       env: command.env,
       killSignal: command.killSignal,
       notifications: command.notifications,
-      name: commandName(command),
+      name,
       command: command.slug,
+      inputs,
+      onFinished,
     });
     return;
   }
@@ -59,12 +117,12 @@ export function runDirectoryCommand(projectSlug: string, directorySlug: string, 
     projectSlug,
     directorySlug,
     false,
-    command.args,
+    args,
     command.env,
     command.killSignal,
     command.notifications,
-    commandName(command),
-    { redirect, command: command.slug },
+    name,
+    { redirect, command: command.slug, inputs },
   );
 }
 
@@ -83,8 +141,8 @@ export function startSection(project: ProjectDefinition): void {
         if (!directoryStreams.some((stream) => stream.primary)) {
           startDefaultCommand(project.slug, directory);
         }
-      } else if (!directoryStreams.some((stream) => !stream.primary && stream.args.join("\0") === command.args.join("\0"))) {
-        runDirectoryCommand(project.slug, directory.slug, command, false);
+      } else if (!directoryStreams.some((stream) => !stream.primary && stream.command === command.slug)) {
+        runDirectoryCommand(project.slug, directory.slug, command, { redirect: false, automatic: true });
       }
     }
   }
@@ -103,13 +161,14 @@ export function stopSection(projectSlug: string): void {
 }
 
 /**
- * Starts the default command of a directory, again when it already ran.
+ * Starts the default command of a directory, again with the same values when it already ran; the
+ * values of its inputs are its default ones when they are enough, else asked in a dialog.
  * @param projectSlug The slug of the project.
  * @param directory The directory.
  */
 export function startDefaultCommand(
   projectSlug: string,
-  directory: Pick<DirectoryDefinition, "slug" | "name" | "args" | "env" | "killSignal" | "notifications">,
+  directory: Pick<DirectoryDefinition, "slug" | "name" | "args" | "env" | "killSignal" | "notifications" | "defaultAction" | "extras">,
 ): void {
   const streamSlug = configStore.getDirectoryStreamPrimary(projectSlug, directory.slug);
   if (streamSlug) {
@@ -117,7 +176,20 @@ export function startDefaultCommand(
     return;
   }
 
-  if (directory.args) {
-    wsStore.newCommandStream(projectSlug, directory.slug, true, directory.args, directory.env, directory.killSignal, directory.notifications, directory.name);
+  const args = directory.args;
+  if (!args) {
+    return;
+  }
+  const action = directory.defaultAction?.shortcut;
+  const command = action?.type === "command" ? directory.extras[action.slug] : undefined;
+  const start = (inputs: CommandInputValue[]): void =>
+    wsStore.newCommandStream(projectSlug, directory.slug, true, expandCommandArgs(args, inputs), directory.env, directory.killSignal, directory.notifications, directory.name, {
+      command: command?.slug,
+      inputs,
+    });
+  if (command) {
+    withInputs(command, false, start);
+  } else {
+    start([]);
   }
 }

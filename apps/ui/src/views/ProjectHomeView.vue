@@ -10,7 +10,7 @@ const props = defineProps<{
 }>();
 
 const project = computed(() => configStore.getProject(props.projectSlug));
-const directories = computed(() => Object.values(project.value?.directories ?? {}));
+const directories = computed(() => Object.values(project.value?.directories ?? {}).filter((directory) => !directory.missing));
 const running = computed(
   () => configStore.commandStreams.value.filter((stream) => stream.projectSlug === props.projectSlug && stream.status === "RUNNING").length,
 );

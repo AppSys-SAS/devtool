@@ -20,6 +20,8 @@ export class CommandStreamStore implements CommandStream {
 
   tag: string | null = null;
 
+  command: string | null = null;
+
   args: string[] = [];
 
   cwd = "";
@@ -55,6 +57,7 @@ export class CommandStreamStore implements CommandStream {
     this.primary = payload.primary;
     this.name = payload.name;
     this.tag = payload.tag;
+    this.command = payload.command;
     this.args = payload.args;
     this.cwd = payload.cwd;
     this.env = payload.env;

@@ -47,9 +47,6 @@ class WsStore {
           case "file":
             filesStore.loadFile(payload.data as never);
             break;
-          case "scripts":
-            filesStore.loadScripts(payload.data as never);
-            break;
           case "cdnSession":
             sessionStore.load(payload.data as never);
             break;
@@ -275,15 +272,6 @@ class WsStore {
    */
   fileRename(space: string, from: string, to: string): void {
     this.send("fileRename", { space, from, to });
-  }
-
-  /**
-   * Asks the server for the scripts of a directory.
-   * @param projectSlug The project of the directory.
-   * @param directorySlug The directory.
-   */
-  scriptsList(projectSlug: string, directorySlug: string): void {
-    this.send("scriptsList", { projectSlug, directorySlug });
   }
 
   disconnect(alreadyClosed = false): void {

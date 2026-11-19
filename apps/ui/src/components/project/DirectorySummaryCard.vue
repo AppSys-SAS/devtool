@@ -7,8 +7,7 @@ import type { DirectoryDefinition, HostAccess } from "@appsys/devtool-shared";
 import SummaryRow from "@/components/project/SummaryRow.vue";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
-import { useDirectoryScripts } from "@/composables/useDirectoryScripts";
-import { commandName, iconFromMeta, runDirectoryCommand, startDefaultCommand } from "@/lib/directory-commands";
+import { commandLine, commandName, iconFromMeta, runDirectoryCommand, startDefaultCommand } from "@/lib/directory-commands";
 import { defaultShortcut } from "@/lib/shortcuts";
 import { cn } from "@/lib/utils";
 import configStore from "@/stores/config";
@@ -32,9 +31,9 @@ const streams = computed(() =>
 );
 const primary = computed(() => streams.value.find((stream) => stream.primary) ?? null);
 const terminals = computed(() => streams.value.filter((stream) => !stream.primary));
-const commands = computed(() => Object.values(props.directory.extras));
+const commands = computed(() => Object.values(props.directory.extras).filter((command) => !command.script));
+const scripts = computed(() => Object.values(props.directory.extras).filter((command) => command.script));
 const files = computed(() => Object.values(props.directory.files));
-const scripts = useDirectoryScripts(() => props.projectSlug, () => props.directory);
 
 const services = computed(() => {
   const hosts = new Map<string, HostAccess>();
@@ -113,7 +112,7 @@ const directoryRoute = computed(() => ({ name: "directory", params: { projectSlu
           size="icon"
           variant="ghost"
           class="size-7"
-          :title="directory.args?.join(' ')"
+          :title="directory.args ? commandLine(directory.args) : undefined"
           @click="startDefaultCommand(projectSlug, directory)"
         >
           <Play class="size-3.5" />
@@ -140,7 +139,7 @@ const directoryRoute = computed(() => ({ name: "directory", params: { projectSlu
           :key="command.slug"
           type="button"
           :class="CHIP"
-          :title="command.args.join(' ')"
+          :title="commandLine(command.args)"
           @click="runDirectoryCommand(projectSlug, directory.slug, command)"
         >
           <Icon
@@ -187,8 +186,7 @@ const directoryRoute = computed(() => ({ name: "directory", params: { projectSlu
           :title="directory.scripts.map((folder) => folder.path).join(', ')"
         >
           <ScrollText class="size-3.5 shrink-0 text-muted-foreground" />
-          <span v-if="scripts?.error" class="text-destructive">Scripts unavailable</span>
-          <span v-else>{{ scripts ? scripts.scripts.length : "…" }} scripts</span>
+          <span>{{ scripts.length }} scripts</span>
         </RouterLink>
       </SummaryRow>
 
