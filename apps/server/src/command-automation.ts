@@ -2,7 +2,7 @@ import { OpTerminal } from "./op-terminal.js";
 import { stripAnsi } from "./utils.js";
 
 const VALUE_BLOCK = /\{\{\s*(.*?)\s*\}\}/gs;
-const SECRET_REFERENCE = /^op:\/\/\S+$/;
+const SECRET_REFERENCE = /^op:\/\/[^\r\n]+$/;
 const SHELL_SUBSTITUTION = /^\$\((.+)\)$/s;
 const MAX_OUTPUT_LENGTH = 8192;
 const MIN_SCRUBBED_LENGTH = 4;
