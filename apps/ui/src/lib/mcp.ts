@@ -7,7 +7,7 @@ export const DECISIONS: Record<McpDecision, { label: string; class: string }> = 
   session: { label: "Session", class: "border-transparent bg-indigo-500/15 text-indigo-700 dark:text-indigo-300" },
   always: { label: "Always", class: "border-transparent bg-emerald-500/15 text-emerald-700 dark:text-emerald-300" },
   denied: { label: "Denied", class: "border-transparent bg-destructive/15 text-destructive" },
-  config: { label: "Config", class: "border-destructive/40 text-destructive" },
+  config: { label: "Config", class: "border-transparent bg-rose-500/10 text-rose-700 dark:text-rose-300" },
   timeout: { label: "Timeout", class: "border-transparent bg-amber-500/15 text-amber-700 dark:text-amber-300" },
   noUi: { label: "No UI", class: "border-transparent bg-amber-500/15 text-amber-700 dark:text-amber-300" },
 };
