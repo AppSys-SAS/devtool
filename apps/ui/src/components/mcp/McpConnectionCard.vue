@@ -28,7 +28,7 @@ const configured = computed(() => state.value?.clients.filter((client) => client
   <Card>
     <CardHeader>
       <CardTitle>Connection</CardTitle>
-      <CardDescription>Agents of this machine reach the devtool over Streamable HTTP; add it to Claude Code with:</CardDescription>
+      <CardDescription>Agents running on this machine connect over Streamable HTTP. To add the devtool to Claude Code, run this command.</CardDescription>
     </CardHeader>
     <CardContent class="space-y-4">
       <div class="flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-2">
