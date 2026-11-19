@@ -21,8 +21,9 @@ relayed by its load balancer or sent by web pages of other hosts are refused.
    ```
 
    The devtool reloads its configuration from the reload button of its sidebar; nothing else restarts.
-2. Declare the server to the agent, as a Streamable HTTP server named `devtool` (replace 6730 by
-   `adt.ports.server` when it is changed); see [Agent configurations](#agent-configurations).
+2. Declare the server to the agent, as a Streamable HTTP server named after `adt.name` (`appsys-devtool`
+   by default; replace 6730 by `adt.ports.server` when it is changed); see
+   [Agent configurations](#agent-configurations).
 3. The first tool call of a new agent opens a request in the devtool interface ("New client"): the user
    accepts it for the session or always. The interface must be open in a browser, otherwise the call is
    refused with "no devtool interface is open". The request shows the name the agent gives: add it to
@@ -30,30 +31,31 @@ relayed by its load balancer or sent by web pages of other hosts are refused.
 
 ## Agent configurations
 
-Each one declares the server for every project of the user. The Connection tab of the Agents page gives
-the same configurations, with the port of the running devtool.
+Each one declares the server for every project of the user, under the default `adt.name`. The
+Connection tab of the Agents page gives the same configurations, with the name and port of the running
+devtool.
 
 | Agent | Command, or file and configuration |
 | --- | --- |
-| Claude Code | `claude mcp add --scope user --transport http devtool http://127.0.0.1:6730/mcp` |
-| Codex | `codex mcp add devtool --url http://127.0.0.1:6730/mcp` |
-| Gemini CLI | `gemini mcp add -s user -t http devtool http://127.0.0.1:6730/mcp` |
-| opencode | `opencode mcp add devtool --global --url http://127.0.0.1:6730/mcp` |
-| GitHub Copilot (VS Code, CLI) | `copilot mcp add --transport http devtool http://127.0.0.1:6730/mcp` |
-| Cline | `cline mcp add devtool http://127.0.0.1:6730/mcp --transport http --yes` |
-| Qwen Code | `qwen mcp add --scope user --transport http devtool http://127.0.0.1:6730/mcp` |
-| Cursor | `~/.cursor/mcp.json`: `{ "mcpServers": { "devtool": { "url": "http://127.0.0.1:6730/mcp" } } }` |
-| Windsurf | `~/.config/devin/mcp_config.json` (or the file Cascade opens with Open MCP config file): `{ "mcpServers": { "devtool": { "serverUrl": "http://127.0.0.1:6730/mcp" } } }` |
-| Zed | `~/.config/zed/settings.json`: `{ "context_servers": { "devtool": { "url": "http://127.0.0.1:6730/mcp" } } }` |
-| Junie | `~/.junie/mcp/mcp.json`: `{ "mcpServers": { "devtool": { "url": "http://127.0.0.1:6730/mcp" } } }` |
-| JetBrains AI Assistant | Settings > Tools > AI Assistant > Model Context Protocol (MCP) > Add, global, Streamable HTTP: `{ "mcpServers": { "devtool": { "url": "http://127.0.0.1:6730/mcp" } } }` |
-| Warp | `~/.warp/.mcp.json`: `{ "mcpServers": { "devtool": { "url": "http://127.0.0.1:6730/mcp" } } }` |
+| Claude Code | `claude mcp add --scope user --transport http appsys-devtool http://127.0.0.1:6730/mcp` |
+| Codex | `codex mcp add appsys-devtool --url http://127.0.0.1:6730/mcp` |
+| Gemini CLI | `gemini mcp add -s user -t http appsys-devtool http://127.0.0.1:6730/mcp` |
+| opencode | `opencode mcp add appsys-devtool --global --url http://127.0.0.1:6730/mcp` |
+| GitHub Copilot (VS Code, CLI) | `copilot mcp add --transport http appsys-devtool http://127.0.0.1:6730/mcp` |
+| Cline | `cline mcp add appsys-devtool http://127.0.0.1:6730/mcp --transport http --yes` |
+| Qwen Code | `qwen mcp add --scope user --transport http appsys-devtool http://127.0.0.1:6730/mcp` |
+| Cursor | `~/.cursor/mcp.json`: `{ "mcpServers": { "appsys-devtool": { "url": "http://127.0.0.1:6730/mcp" } } }` |
+| Windsurf | `~/.config/devin/mcp_config.json` (or the file Cascade opens with Open MCP config file): `{ "mcpServers": { "appsys-devtool": { "serverUrl": "http://127.0.0.1:6730/mcp" } } }` |
+| Zed | `~/.config/zed/settings.json`: `{ "context_servers": { "appsys-devtool": { "url": "http://127.0.0.1:6730/mcp" } } }` |
+| Junie | `~/.junie/mcp/mcp.json`: `{ "mcpServers": { "appsys-devtool": { "url": "http://127.0.0.1:6730/mcp" } } }` |
+| JetBrains AI Assistant | Settings > Tools > AI Assistant > Model Context Protocol (MCP) > Add, global, Streamable HTTP: `{ "mcpServers": { "appsys-devtool": { "url": "http://127.0.0.1:6730/mcp" } } }` |
+| Warp | `~/.warp/.mcp.json`: `{ "mcpServers": { "appsys-devtool": { "url": "http://127.0.0.1:6730/mcp" } } }` |
 
 Mistral Vibe, in `~/.vibe/config.toml` (`vibe mcp add` registers the server with OAuth):
 
 ```toml
 [[mcp_servers]]
-name = "devtool"
+name = "appsys-devtool"
 transport = "streamable-http"
 url = "http://127.0.0.1:6730/mcp"
 ```
@@ -63,7 +65,7 @@ Claude Desktop only runs local stdio servers: in
 restart it:
 
 ```json
-{ "mcpServers": { "devtool": { "command": "npx", "args": ["-y", "mcp-remote", "http://127.0.0.1:6730/mcp", "--transport", "http-only"] } } }
+{ "mcpServers": { "appsys-devtool": { "command": "npx", "args": ["-y", "mcp-remote", "http://127.0.0.1:6730/mcp", "--transport", "http-only"] } } }
 ```
 
 The formats change between releases of the agents: check their documentation when a server does not

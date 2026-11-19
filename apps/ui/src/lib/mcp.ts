@@ -42,10 +42,11 @@ export interface McpAgent {
   pattern: RegExp;
   /**
    * Gives how it declares the server.
+   * @param name The name the server is declared under.
    * @param url The address of the server.
    * @returns The setup.
    */
-  setup(url: string): McpAgentSetup;
+  setup(name: string, url: string): McpAgentSetup;
 }
 
 /**
@@ -64,16 +65,16 @@ export const MCP_AGENTS: McpAgent[] = [
     label: "Claude Code",
     icon: "simple-icons:claude",
     pattern: /claude/,
-    setup: (url) => ({ command: `claude mcp add --scope user --transport http devtool ${url}` }),
+    setup: (name, url) => ({ command: `claude mcp add --scope user --transport http ${name} ${url}` }),
   },
   {
     id: "claude-desktop",
     label: "Claude Desktop",
     icon: "simple-icons:claude",
     pattern: /claude/,
-    setup: (url) => ({
+    setup: (name, url) => ({
       file: "~/Library/Application Support/Claude/claude_desktop_config.json",
-      config: json({ mcpServers: { devtool: { command: "npx", args: ["-y", "mcp-remote", url, "--transport", "http-only"] } } }),
+      config: json({ mcpServers: { [name]: { command: "npx", args: ["-y", "mcp-remote", url, "--transport", "http-only"] } } }),
       note: "Claude Desktop only runs local servers, through the mcp-remote bridge. Restart it afterwards.",
     }),
   },
@@ -82,24 +83,24 @@ export const MCP_AGENTS: McpAgent[] = [
     label: "Codex",
     icon: "simple-icons:openai",
     pattern: /codex|openai|chatgpt/,
-    setup: (url) => ({ command: `codex mcp add devtool --url ${url}`, file: "~/.codex/config.toml", config: `[mcp_servers.devtool]\nurl = "${url}"` }),
+    setup: (name, url) => ({ command: `codex mcp add ${name} --url ${url}`, file: "~/.codex/config.toml", config: `[mcp_servers.${name}]\nurl = "${url}"` }),
   },
   {
     id: "gemini",
     label: "Gemini CLI",
     icon: "simple-icons:googlegemini",
     pattern: /gemini/,
-    setup: (url) => ({ command: `gemini mcp add -s user -t http devtool ${url}` }),
+    setup: (name, url) => ({ command: `gemini mcp add -s user -t http ${name} ${url}` }),
   },
   {
     id: "opencode",
     label: "opencode",
     icon: "simple-icons:opencode",
     pattern: /opencode/,
-    setup: (url) => ({
-      command: `opencode mcp add devtool --global --url ${url}`,
+    setup: (name, url) => ({
+      command: `opencode mcp add ${name} --global --url ${url}`,
       file: "~/.config/opencode/opencode.json",
-      config: json({ $schema: "https://opencode.ai/config.json", mcp: { servers: { devtool: { type: "remote", url, oauth: false } } } }),
+      config: json({ $schema: "https://opencode.ai/config.json", mcp: { servers: { [name]: { type: "remote", url, oauth: false } } } }),
     }),
   },
   {
@@ -107,17 +108,17 @@ export const MCP_AGENTS: McpAgent[] = [
     label: "Cursor",
     icon: "simple-icons:cursor",
     pattern: /cursor/,
-    setup: (url) => ({ file: "~/.cursor/mcp.json", config: json({ mcpServers: { devtool: { url } } }) }),
+    setup: (name, url) => ({ file: "~/.cursor/mcp.json", config: json({ mcpServers: { [name]: { url } } }) }),
   },
   {
     id: "copilot",
     label: "GitHub Copilot (VS Code, CLI)",
     icon: "simple-icons:githubcopilot",
     pattern: /copilot|visual studio code|vscode/,
-    setup: (url) => ({
-      command: `copilot mcp add --transport http devtool ${url}`,
+    setup: (name, url) => ({
+      command: `copilot mcp add --transport http ${name} ${url}`,
       file: "~/.copilot/mcp-config.json",
-      config: json({ mcpServers: { devtool: { type: "http", url, tools: ["*"] } } }),
+      config: json({ mcpServers: { [name]: { type: "http", url, tools: ["*"] } } }),
     }),
   },
   {
@@ -125,9 +126,9 @@ export const MCP_AGENTS: McpAgent[] = [
     label: "Windsurf",
     icon: "simple-icons:windsurf",
     pattern: /windsurf|codeium/,
-    setup: (url) => ({
+    setup: (name, url) => ({
       file: "~/.config/devin/mcp_config.json",
-      config: json({ mcpServers: { devtool: { serverUrl: url } } }),
+      config: json({ mcpServers: { [name]: { serverUrl: url } } }),
       note: "Or the file Cascade opens with Open MCP config file.",
     }),
   },
@@ -136,17 +137,17 @@ export const MCP_AGENTS: McpAgent[] = [
     label: "Zed",
     icon: "simple-icons:zedindustries",
     pattern: /\bzed\b/,
-    setup: (url) => ({ file: "~/.config/zed/settings.json", config: json({ context_servers: { devtool: { url } } }) }),
+    setup: (name, url) => ({ file: "~/.config/zed/settings.json", config: json({ context_servers: { [name]: { url } } }) }),
   },
   {
     id: "cline",
     label: "Cline",
     icon: "simple-icons:cline",
     pattern: /cline/,
-    setup: (url) => ({
-      command: `cline mcp add devtool ${url} --transport http --yes`,
+    setup: (name, url) => ({
+      command: `cline mcp add ${name} ${url} --transport http --yes`,
       file: "~/.cline/data/settings/cline_mcp_settings.json",
-      config: json({ mcpServers: { devtool: { type: "streamableHttp", url } } }),
+      config: json({ mcpServers: { [name]: { type: "streamableHttp", url } } }),
     }),
   },
   {
@@ -154,29 +155,29 @@ export const MCP_AGENTS: McpAgent[] = [
     label: "Qwen Code",
     icon: "simple-icons:qwen",
     pattern: /qwen/,
-    setup: (url) => ({ command: `qwen mcp add --scope user --transport http devtool ${url}` }),
+    setup: (name, url) => ({ command: `qwen mcp add --scope user --transport http ${name} ${url}` }),
   },
   {
     id: "vibe",
     label: "Mistral Vibe",
     icon: "simple-icons:mistralai",
     pattern: /mistral|vibe/,
-    setup: (url) => ({ file: "~/.vibe/config.toml", config: `[[mcp_servers]]\nname = "devtool"\ntransport = "streamable-http"\nurl = "${url}"` }),
+    setup: (name, url) => ({ file: "~/.vibe/config.toml", config: `[[mcp_servers]]\nname = "${name}"\ntransport = "streamable-http"\nurl = "${url}"` }),
   },
   {
     id: "junie",
     label: "Junie",
     icon: "simple-icons:jetbrains",
     pattern: /junie/,
-    setup: (url) => ({ file: "~/.junie/mcp/mcp.json", config: json({ mcpServers: { devtool: { url } } }) }),
+    setup: (name, url) => ({ file: "~/.junie/mcp/mcp.json", config: json({ mcpServers: { [name]: { url } } }) }),
   },
   {
     id: "jetbrains-ai",
     label: "JetBrains AI Assistant",
     icon: "simple-icons:jetbrains",
     pattern: /jetbrains/,
-    setup: (url) => ({
-      config: json({ mcpServers: { devtool: { url } } }),
+    setup: (name, url) => ({
+      config: json({ mcpServers: { [name]: { url } } }),
       note: "Paste it in Settings > Tools > AI Assistant > Model Context Protocol (MCP) > Add, as a global Streamable HTTP server.",
     }),
   },
@@ -185,7 +186,7 @@ export const MCP_AGENTS: McpAgent[] = [
     label: "Warp",
     icon: "simple-icons:warp",
     pattern: /warp/,
-    setup: (url) => ({ file: "~/.warp/.mcp.json", config: json({ mcpServers: { devtool: { url } } }) }),
+    setup: (name, url) => ({ file: "~/.warp/.mcp.json", config: json({ mcpServers: { [name]: { url } } }) }),
   },
 ];
 

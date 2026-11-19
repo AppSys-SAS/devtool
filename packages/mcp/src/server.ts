@@ -219,7 +219,8 @@ export class DevtoolMcp {
    * @returns The session, kept once its identifier is given.
    */
   private async createSession(): Promise<McpSession> {
-    const server = new McpServer({ name: "devtool", version: this._host.version }, { capabilities: { resources: { subscribe: true, listChanged: true } }, instructions: INSTRUCTIONS });
+    const { name, displayName } = this._host.config.adt;
+    const server = new McpServer({ name, title: displayName, version: this._host.version }, { capabilities: { resources: { subscribe: true, listChanged: true } }, instructions: INSTRUCTIONS });
     const session: McpSession = {
       server,
       subscriptions: new Map(),

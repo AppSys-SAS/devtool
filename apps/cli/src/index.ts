@@ -29,7 +29,7 @@ import {
   SHARED_CONFIG_PATH,
   type TransferResult,
 } from "@appsys/devtool-cdn";
-import { CONFIG_FOLDER_VARIABLE, loadMergedConfig, resolveCacheFolder, resolveDefaultConfigPaths } from "@appsys/devtool-config";
+import { CONFIG_FOLDER_VARIABLE, loadMergedConfig, resolveDefaultConfigPaths } from "@appsys/devtool-config";
 import runProxy from "@appsys/devtool-proxy";
 import runServer, { relaunchUnderApp, renewCertificates } from "@appsys/devtool-server";
 import { logger, type LogLevel } from "@appsys/devtool-shared";
@@ -269,7 +269,7 @@ async function main(): Promise<void> {
       const configPaths = configurations.length
         ? configurations.map((configuration) => (path.isAbsolute(configuration) ? configuration : path.resolve(invocationCwd, configuration)))
         : resolveDefaultConfigPaths();
-      if (await relaunchUnderApp(resolveCacheFolder((await loadMergedConfig(configPaths)).config))) {
+      if (await relaunchUnderApp((await loadMergedConfig(configPaths)).config)) {
         return;
       }
       logger.setLevel((options.logLevel ?? "info") as LogLevel);

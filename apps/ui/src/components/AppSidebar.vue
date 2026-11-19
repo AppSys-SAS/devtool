@@ -594,7 +594,7 @@ function resolveStreamIcon(directory: SidebarDirectory, stream: CommandStream): 
         :to="{ name: 'dashboard' }"
         class="min-w-0 truncate text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
       >
-        AppSys Devtool <sup>{{ appVersion }}</sup>
+        {{ configStore.displayName.value }} <sup>{{ appVersion }}</sup>
       </RouterLink>
 
       <Button

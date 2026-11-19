@@ -4,7 +4,7 @@ import http from "node:http";
 import mime from "mime-types";
 import { WebSocketServer, type WebSocket } from "ws";
 import { logger } from "@appsys/devtool-shared";
-import { serveIcons } from "./icons.js";
+import { serveAppIcon, serveIcons } from "./icons.js";
 import type { ServerContextLike } from "./types.js";
 import { LISTEN_ADDRESS } from "./utils.js";
 
@@ -90,8 +90,8 @@ export class DevtoolHttp {
   }
 
   /**
-   * Answers an HTTP request: the MCP server, icons from the installed icon sets, else the files of the
-   * interface, falling back to its index page.
+   * Answers an HTTP request: the MCP server, icons from the installed icon sets, the icon of the devtool,
+   * else the files of the interface, falling back to its index page.
    * @param req The request.
    * @param res Its response.
    */
@@ -102,7 +102,7 @@ export class DevtoolHttp {
         return;
       }
 
-      if (await serveIcons(req.url ?? "/", res)) {
+      if ((await serveIcons(req.url ?? "/", res)) || (await serveAppIcon(req.url ?? "/", res, this.context.config.adt.icon))) {
         return;
       }
 

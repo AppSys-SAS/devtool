@@ -1,12 +1,19 @@
 import fs from "node:fs/promises";
 import { createRequire } from "node:module";
 import type { ServerResponse } from "node:http";
+import { fileURLToPath } from "node:url";
 import type { IconifyJSON } from "@iconify/types";
 import { getIcons } from "@iconify/utils";
+import mime from "mime-types";
 import { logger } from "@appsys/devtool-shared";
 
 /** Path under which icons are served, in the format of the Iconify API. */
 export const ICONS_PATH = "/icons/";
+
+/** Path of the icon of the devtool. */
+const APP_ICON_PATH = "/app-icon";
+
+const DEFAULT_APP_ICON = fileURLToPath(new URL("../assets/AppIcon.svg", import.meta.url));
 
 const ICON_REQUEST = /^\/icons\/([a-z0-9]+(?:-[a-z0-9]+)*)\.json$/;
 
@@ -67,5 +74,29 @@ export async function serveIcons(requestUrl: string, res: ServerResponse): Promi
 
   res.writeHead(200, { "content-type": "application/json", "cache-control": "public, max-age=86400" });
   res.end(JSON.stringify(icons));
+  return true;
+}
+
+/**
+ * Answers a request for the icon of the devtool: its configured image, else the default one, never kept
+ * by the browser so that a new configuration shows at once.
+ * @param requestUrl The URL of the request, path and query.
+ * @param res The response to write to.
+ * @param icon The configured image, null for the default one.
+ * @returns True when the request asks for the icon, answered.
+ */
+export async function serveAppIcon(requestUrl: string, res: ServerResponse, icon: string | null): Promise<boolean> {
+  if (new URL(requestUrl, "http://localhost").pathname !== APP_ICON_PATH) {
+    return false;
+  }
+
+  let file = icon ?? DEFAULT_APP_ICON;
+  let content = await fs.readFile(file).catch(() => null);
+  if (!content) {
+    file = DEFAULT_APP_ICON;
+    content = await fs.readFile(file);
+  }
+  res.writeHead(200, { "content-type": mime.lookup(file) || "application/octet-stream", "cache-control": "no-cache" });
+  res.end(content);
   return true;
 }

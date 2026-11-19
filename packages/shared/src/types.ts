@@ -2,6 +2,12 @@
 export type HostAccess = "local" | "network";
 
 export interface AdtDefinition {
+  /** The identifier of the devtool, such as the name of its MCP server. */
+  name: string;
+  /** The name shown to people, such as the name of its app and of its interface. */
+  displayName: string;
+  /** The image of its icon, null for the default one. */
+  icon: string | null;
   host: string | null;
   /** The interface, from the startup options only: a folder of static files or the URL of a server. */
   uiPath?: string;
@@ -400,6 +406,10 @@ export interface RuntimeConfig {
 
 export interface ClientConfigPayload {
   version: string;
+  /** The identifier of the devtool, such as the name of its MCP server. */
+  name: string;
+  /** The name shown to people. */
+  displayName: string;
   warnings: string[];
   loadBalancers: string[];
   integrations: IntegrationDefinition[];

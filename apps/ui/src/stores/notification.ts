@@ -8,7 +8,7 @@ const NOTIFICATION_DURATION_MS = 10_000;
 const NOTIFICATION_INTERVAL_MS = 2000;
 
 /** The icon shown in the notifications. */
-const NOTIFICATION_ICON = "/favicon.ico";
+const NOTIFICATION_ICON = "/app-icon";
 
 /** The lock held by the one tab of the browser that sends the notifications. */
 const SENDER_LOCK = "appsys-devtool-notifications";

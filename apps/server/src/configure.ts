@@ -4,7 +4,7 @@ import net from "node:net";
 import type { CertificateAcme, ClientConfigPayload, CommandArg, CommandChoice, CommandForm, CommandInput, CommandInputValue, DirectoryDefinition, DirectoryFiles, DirectoryScripts, ScriptSettings, AdtDefinition, DirectoryDefaultAction, DirectoryShortcut, DnsDefinition, DnsRecord, HostAccess, IntegrationDefinition, LoadBalancerCertificate, McpCategory, McpPatterns, McpRules, McpSettings, McpTarget, PassthroughRule, ProjectDefinition, ProjectRestore, RuntimeConfig, SidebarSettings } from "@appsys/devtool-shared";
 import { defaultMcpRules, isMcpLevel, logger, readMcpRules } from "@appsys/devtool-shared";
 import { type LegoOptionValue, legoRunArgs } from "@appsys/devtool-certs";
-import { configSourceKey, resolveCacheFolder } from "@appsys/devtool-config";
+import { configSourceKey, resolveAppIdentity, resolveCacheFolder } from "@appsys/devtool-config";
 import { type CommandAnswer, type CommandAutomation, findInvalidValueBlocks } from "./command-automation.js";
 import { listScripts } from "./scripts.js";
 import type { ConfigOrigin } from "./types.js";
@@ -31,6 +31,7 @@ const DEFAULT_INTEGRATION_ICON = "lucide:app-window";
  */
 function defaultAdt(): AdtDefinition {
   return {
+    ...resolveAppIdentity({}).identity,
     host: null,
     cacheDir: resolveCacheFolder({}),
     shell: null,
@@ -148,6 +149,8 @@ export class DevtoolConfigure {
   getForClient(version: string): ClientConfigPayload {
     return {
       version,
+      name: this.adt.name,
+      displayName: this.adt.displayName,
       warnings: this.warnings,
       loadBalancers: Object.keys(this.loadBalancers),
       integrations: this.integrations,
@@ -268,8 +271,8 @@ export class DevtoolConfigure {
   }
 
   /**
-   * Reads the settings of the devtool itself, `adt`: its host, interface, cache, shell, ports, access and
-   * the optional parts of its sidebar.
+   * Reads the settings of the devtool itself, `adt`: its host, interface, cache, names, icon, shell, ports,
+   * access and the optional parts of its sidebar.
    */
   private async reconfigureAdt(): Promise<void> {
     const adt = toRecord(this.initialConfig.adt);
@@ -285,6 +288,16 @@ export class DevtoolConfigure {
       this.adt.uiPath = adt.uiPath;
     }
     this.adt.cacheDir = resolveCacheFolder(this.initialConfig);
+
+    const { identity, problems } = resolveAppIdentity(this.initialConfig);
+    Object.assign(this.adt, identity);
+    for (const problem of problems) {
+      this.addWarning(problem.setting, problem.message);
+    }
+    if (identity.icon && !(await fs.stat(identity.icon).then((stat) => stat.isFile(), () => false))) {
+      this.addWarning("adt.icon", `${identity.icon} does not exist`);
+      this.adt.icon = null;
+    }
 
     const adtShell = this.readShell("adt.shell", adt.shell);
     if (adtShell !== null) {

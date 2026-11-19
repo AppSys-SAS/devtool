@@ -32,8 +32,8 @@ previous one:
 
 It also keeps the CDN session (`session.json`) and the synchronization journal (`sync.json`).
 
-- Relative paths (`adt.cacheDir`, certificates, `environment.folder`, `workspace`) are resolved from the
-  configuration folder.
+- Relative paths (`adt.cacheDir`, `adt.icon`, certificates, `environment.folder`, `workspace`) are
+  resolved from the configuration folder.
 - The interface is never configured there: `devtool server` serves the UI built with it, `pnpm dev`
   proxies Vite (`$DEVTOOL_UI_PATH`, else `http://127.0.0.1:6731`).
 - Relative section paths are resolved from `workspace`, the personal folder holding the repositories
@@ -52,6 +52,15 @@ It also keeps the CDN session (`session.json`) and the synchronization journal (
 `adt.cacheDir` (`~/.cache/appsys/devtool` by default) holds what the devtool rebuilds or keeps between
 runs (the macOS app below); every command it runs receives it as `APPSYS_DEVTOOL_CACHE_DIR`, so a
 docker-compose of the environment can keep its data there.
+
+The devtool names and shows itself from three settings:
+
+```yaml
+adt:
+  displayName: AppSys Devtool   # the macOS app, the tab, the sidebar, the notifications
+  name: appsys-devtool          # the MCP server for agents, the identifier of the macOS app; the display name in lowercase by default
+  icon: assets/icon.svg         # SVG, PNG, JPEG or ICNS: the favicon, the notifications, the macOS app
+```
 
 A new developer writes `config.local.yml` with `workspace` and `cdn`, then runs `devtool env pull`.
 
@@ -288,10 +297,10 @@ shows. Every value read is masked in the output, and only blocks of the configur
 1Password references are read in a terminal of their own, opened for one run of the command and
 closed when it ends: 1Password asks once per run, never reusing an earlier authorization.
 
-On macOS, `devtool server` and `pnpm dev` run the server again, detached, under an app named
-`AppSys Devtool` built in the cache folder (its executable a hard link to Node, its icon from
-`apps/server/assets`), the started process only relaying its stop and ending with it. 1Password
-names the process heading the tree, so its prompts show `AppSys Devtool` for everything the server
+On macOS, `devtool server` and `pnpm dev` run the server again, detached, under an app named after
+`adt.displayName` built in the cache folder (its executable a hard link to Node, its icon `adt.icon` or
+the one of `apps/server/assets`), the started process only relaying its stop and ending with it.
+1Password names the process heading the tree, so its prompts show that name for everything the server
 runs, commands calling `op` themselves included.
 
 ```yaml
@@ -310,7 +319,7 @@ login:
 With `adt.mcp.enabled: true`, the server answers MCP clients of this machine over Streamable HTTP at
 `http://127.0.0.1:<adt.ports.server>/mcp` (never through the load balancer nor for web pages of other
 hosts). Claude Code connects with
-`claude mcp add --scope user --transport http devtool http://127.0.0.1:6730/mcp`; the Connection tab of
+`claude mcp add --scope user --transport http appsys-devtool http://127.0.0.1:6730/mcp`; the Connection tab of
 the Agents page and [the setup skill](skills/devtool-mcp-setup/SKILL.md#agent-configurations) give the
 configuration of the other agents (Claude Desktop, Codex, Gemini CLI, opencode, Cursor, GitHub Copilot,
 Windsurf, Zed, Cline, Qwen Code, Mistral Vibe, Junie, JetBrains AI Assistant, Warp), and the

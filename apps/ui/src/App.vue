@@ -1,16 +1,27 @@
 <script setup lang="ts">
-import { onMounted } from "vue";
+import { computed, onMounted } from "vue";
 import { RouterView } from "vue-router";
+import { useFavicon, useTitle } from "@vueuse/core";
 import AppSidebar from "@/components/AppSidebar.vue";
 import CommandDialog from "@/components/CommandDialog.vue";
 import CommandInputsDialog from "@/components/CommandInputsDialog.vue";
 import McpRequestDialog from "@/components/mcp/McpRequestDialog.vue";
 import McpToasts from "@/components/mcp/McpToasts.vue";
 import commandRunsStore from "@/stores/command-runs";
+import configStore from "@/stores/config";
 import layoutStore from "@/stores/layout";
+import mcpStore from "@/stores/mcp";
 import wsStore from "@/stores/ws";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+
+useTitle(
+  computed(() => {
+    const waiting = mcpStore.state.value?.pending.length ?? 0;
+    return waiting ? `(${waiting}) ${configStore.displayName.value}` : configStore.displayName.value;
+  }),
+);
+useFavicon(computed(() => `/app-icon?loaded=${configStore.loadedAt.value}`));
 
 onMounted(() => {
   if (!wsStore.connected.value && !wsStore.loading.value) {

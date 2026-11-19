@@ -76,14 +76,15 @@ function resolvePathSetting(record: unknown, key: string, cwd: string): void {
 }
 
 /**
- * Resolves the paths a configuration file gives relative to the configuration folder: the cache, the certificates
- * of the load balancers, the environment folder and the workspace.
+ * Resolves the paths a configuration file gives relative to the configuration folder: the cache, the icon, the
+ * certificates of the load balancers, the environment folder and the workspace.
  * @param config The configuration of the file.
  * @param cwd The configuration folder.
  */
 function resolveFolderPaths(config: RawConfig, cwd: string): void {
   resolvePathSetting(config, "workspace", cwd);
   resolvePathSetting(config.adt, "cacheDir", cwd);
+  resolvePathSetting(config.adt, "icon", cwd);
   resolvePathSetting(config.environment, "folder", cwd);
   if (typeof config.loadBalancers === "object" && config.loadBalancers !== null) {
     for (const certificate of Object.values(config.loadBalancers)) {
@@ -231,13 +232,90 @@ export function resolveConfigFolder(): string {
 }
 
 /**
+ * Gives the `adt` settings of a configuration.
+ * @param config The merged configuration.
+ * @returns Its settings, empty when it has none.
+ */
+function adtOf(config: RawConfig): Record<string, unknown> {
+  return typeof config.adt === "object" && config.adt !== null ? (config.adt as Record<string, unknown>) : {};
+}
+
+/**
  * Gives the cache folder of a configuration: its `adt.cacheDir`, else `~/.cache/appsys/devtool`.
  * @param config The merged configuration.
  * @returns The absolute path of the folder.
  */
 export function resolveCacheFolder(config: RawConfig): string {
-  const adt = typeof config.adt === "object" && config.adt !== null ? (config.adt as Record<string, unknown>) : {};
+  const adt = adtOf(config);
   return typeof adt.cacheDir === "string" && adt.cacheDir.trim() ? adt.cacheDir : path.join(os.homedir(), ".cache/appsys/devtool");
+}
+
+/** How the devtool names and shows itself. */
+export interface AppIdentity {
+  /** The identifier, such as the name of its MCP server. */
+  name: string;
+  /** The name shown to people, such as the name of its app. */
+  displayName: string;
+  /** The image of its icon, null for the default one. */
+  icon: string | null;
+}
+
+/** A setting of the identity left at its default, and why. */
+export interface AppIdentityProblem {
+  setting: string;
+  message: string;
+}
+
+const DEFAULT_DISPLAY_NAME = "AppSys Devtool";
+const NAME_PATTERN = /^[a-z0-9][a-z0-9_-]*$/;
+const ICON_EXTENSIONS = [".svg", ".png", ".jpg", ".jpeg", ".icns"];
+
+/**
+ * Turns a display name into an identifier: lowercase, without accents, words joined by hyphens.
+ * @param displayName The display name.
+ * @returns The identifier, empty when the name holds no letter nor digit.
+ */
+function slugOf(displayName: string): string {
+  return displayName
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+/**
+ * Gives how a configuration names and shows the devtool: `adt.displayName`, `adt.name` (by default the
+ * identifier of the display name) and `adt.icon`, an invalid setting keeping its default.
+ * @param config The merged configuration.
+ * @returns The identity and the settings left at their default.
+ */
+export function resolveAppIdentity(config: RawConfig): { identity: AppIdentity; problems: AppIdentityProblem[] } {
+  const adt = adtOf(config);
+  const problems: AppIdentityProblem[] = [];
+
+  let displayName = DEFAULT_DISPLAY_NAME;
+  if (typeof adt.displayName === "string" && adt.displayName.trim() && !adt.displayName.includes("/")) {
+    displayName = adt.displayName.trim();
+  } else if (adt.displayName !== undefined) {
+    problems.push({ setting: "adt.displayName", message: "must be a text without /" });
+  }
+
+  let name = slugOf(displayName) || slugOf(DEFAULT_DISPLAY_NAME);
+  if (typeof adt.name === "string" && NAME_PATTERN.test(adt.name)) {
+    name = adt.name;
+  } else if (adt.name !== undefined) {
+    problems.push({ setting: "adt.name", message: "must hold lowercase letters, digits, - and _ only" });
+  }
+
+  let icon: string | null = null;
+  if (typeof adt.icon === "string" && ICON_EXTENSIONS.includes(path.extname(adt.icon).toLowerCase())) {
+    icon = adt.icon;
+  } else if (adt.icon !== undefined) {
+    problems.push({ setting: "adt.icon", message: `must be a ${ICON_EXTENSIONS.join(", ")} file` });
+  }
+
+  return { identity: { name, displayName, icon }, problems };
 }
 
 /**

@@ -8,6 +8,15 @@ import type { WsConfigPayload } from "@/types";
 const HIDDEN_SIDEBAR: SidebarSettings = { environment: false, configs: false, login: false };
 
 class ConfigStore {
+  /** The identifier of the devtool, such as the name of its MCP server, kept while disconnected. */
+  name = ref("appsys-devtool");
+
+  /** The name of the devtool shown to people, kept while disconnected. */
+  displayName = ref("AppSys Devtool");
+
+  /** When the configuration was last received, to fetch again what it may have changed. */
+  loadedAt = ref(0);
+
   warnings = ref<string[]>([]);
 
   loadBalancers = ref<string[]>([]);
@@ -36,6 +45,9 @@ class ConfigStore {
       return;
     }
 
+    this.loadedAt.value = Date.now();
+    this.name.value = config.name;
+    this.displayName.value = config.displayName;
     this.warnings.value = config.warnings;
     this.loadBalancers.value = config.loadBalancers;
     this.integrations.value = config.integrations;

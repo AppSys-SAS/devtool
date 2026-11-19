@@ -7,7 +7,6 @@ import wsStore from "./ws";
 
 const MCP_ROUTE = { name: "agents" };
 const WAITING_ROUTE = { name: "agents", query: { tab: "waiting" } };
-const BASE_TITLE = document.title;
 
 /**
  * The agents using the MCP server: their sessions, the requests waiting for an answer, the grants,
@@ -44,8 +43,8 @@ class McpStore {
   }
 
   /**
-   * Takes the state sent by the server: notifies the requests not seen yet that ask for it, closes
-   * the notifications of the requests no longer waiting and counts the waiting ones in the page title.
+   * Takes the state sent by the server: notifies the requests not seen yet that ask for it and closes
+   * the notifications of the requests no longer waiting.
    * @param state The state.
    */
   load(state: McpStatePayload): void {
@@ -60,10 +59,18 @@ class McpStore {
     for (const request of state.pending) {
       if (request.notify && !this._notified.has(request.id)) {
         notificationStore.askPermission();
-        this._notified.set(request.id, notificationStore.send(`${BASE_TITLE} · ${this.clientName(request.client)}`, request.title, WAITING_ROUTE, { force: true, persistent: true }));
+        this._notified.set(request.id, notificationStore.send(this.notificationTitle(request.client), request.title, WAITING_ROUTE, { force: true, persistent: true }));
       }
     }
-    document.title = state.pending.length ? `(${state.pending.length}) ${BASE_TITLE}` : BASE_TITLE;
+  }
+
+  /**
+   * Gives the title of a notification about an agent.
+   * @param client The name of the agent.
+   * @returns The name of the devtool and of the agent.
+   */
+  private notificationTitle(client: string): string {
+    return `${configStore.displayName.value} · ${this.clientName(client)}`;
   }
 
   /**
@@ -84,7 +91,7 @@ class McpStore {
     this.messages.value = [...this.messages.value, message];
     if (configStore.mcp.value?.notifications) {
       notificationStore.askPermission();
-      notificationStore.send(`${BASE_TITLE} · ${this.clientName(message.client)}`, message.message, MCP_ROUTE, { force: true });
+      notificationStore.send(this.notificationTitle(message.client), message.message, MCP_ROUTE, { force: true });
     }
   }
 

@@ -19,6 +19,7 @@ export default defineConfig({
         ws: true,
       },
       "/icons/": "http://127.0.0.1:6730",
+      "/app-icon": "http://127.0.0.1:6730",
     },
   },
 });
