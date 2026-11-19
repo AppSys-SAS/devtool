@@ -19,6 +19,7 @@ const RESOURCE_UPDATE_MS = 500;
 const SESSION_IDLE_MS = 30 * 60_000;
 const SESSION_SWEEP_MS = 60_000;
 const RESOURCE_LINES = 200;
+const HISTORY_INPUT_LENGTH = 300;
 const INSTRUCTIONS = [
   "Tools of the devtool, a local development environment: its terminals, the commands and scripts of its configuration, its files, its environment synchronized with a CDN and its certificates.",
   "Start with list_projects, list_commands and list_terminals. Prefer run_command (commands of the configuration) over run_shell.",
@@ -287,17 +288,27 @@ export class DevtoolMcp {
       await this.openSession(session);
     }
     const started = Date.now();
+    let waited = 0;
     let decision: McpDecision = "auto";
     let reason: string | null = null;
+    let acceptance: "session" | "always" | null = null;
     let permission: McpPermission | null = null;
     let target: string | null = null;
     let terminal: string | null = null;
+    const waitFor = async <T>(work: Promise<T>): Promise<T> => {
+      const begin = Date.now();
+      try {
+        return await work;
+      } finally {
+        waited += Date.now() - begin;
+      }
+    };
     const call: McpCall = {
       session: sessionId,
       client: this.approvals.clientOf(sessionId),
       authorize: async (asked) => {
         permission = asked;
-        const authorization = await this.approvals.authorize(sessionId, tool.name, asked);
+        const authorization = await waitFor(this.approvals.authorize(sessionId, tool.name, asked));
         decision = authorization.decision;
         return authorization;
       },
@@ -310,7 +321,12 @@ export class DevtoolMcp {
     let ok = true;
     let text: string;
     try {
-      await this.approvals.accept(sessionId, tool.name);
+      const acceptedBefore = this.approvals.isAccepted(sessionId);
+      await waitFor(this.approvals.accept(sessionId, tool.name));
+      if (!acceptedBefore) {
+        const status = this.approvals.statusOf(sessionId);
+        acceptance = status === "session" || status === "always" ? status : null;
+      }
       text = JSON.stringify(await tool.run(input, call), null, 2) ?? "null";
     } catch (error) {
       ok = false;
@@ -337,7 +353,12 @@ export class DevtoolMcp {
       reason,
       ok,
       message: ok ? null : text,
+      input: Object.entries(input)
+        .filter(([name]) => !tool.privateInput.includes(name))
+        .map(([name, value]) => ({ label: name, value: (typeof value === "string" ? value : JSON.stringify(value)).slice(0, HISTORY_INPUT_LENGTH) })),
       duration: Date.now() - started,
+      waited,
+      acceptance,
       terminal,
     });
     return ok ? { content: [{ type: "text", text }] } : { content: [{ type: "text", text }], isError: true };

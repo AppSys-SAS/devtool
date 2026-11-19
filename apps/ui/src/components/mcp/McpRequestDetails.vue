@@ -5,6 +5,7 @@ import { Bot, Clock } from "@lucide/vue";
 import type { CommandInputValue, McpAnswer, McpRequestPayload } from "@appsys/devtool-shared";
 import CommandInputsForm from "@/components/CommandInputsForm.vue";
 import McpAnswerButtons from "@/components/mcp/McpAnswerButtons.vue";
+import McpDetailList from "@/components/mcp/McpDetailList.vue";
 import { Badge } from "@/components/ui/badge";
 import { findMcpCommand } from "@/lib/mcp";
 import configStore from "@/stores/config";
@@ -54,22 +55,10 @@ const command = computed(() => (props.request.command && props.request.inputs ? 
       </span>
     </div>
 
-    <dl
+    <McpDetailList
       v-if="request.details.length"
-      class="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs"
-    >
-      <template
-        v-for="(detail, index) in request.details"
-        :key="index"
-      >
-        <dt class="text-muted-foreground">
-          {{ detail.label }}
-        </dt>
-        <dd class="max-h-32 overflow-auto font-mono whitespace-pre-wrap break-all">
-          {{ detail.value }}
-        </dd>
-      </template>
-    </dl>
+      :details="request.details"
+    />
 
     <div
       v-if="request.keys.length"

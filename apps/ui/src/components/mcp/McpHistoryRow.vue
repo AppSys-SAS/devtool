@@ -1,13 +1,17 @@
 <script setup lang="ts">
-import { shallowRef } from "vue";
+import { computed, shallowRef } from "vue";
 import { RouterLink } from "vue-router";
-import { ChevronRight, CircleAlert, CircleCheck, SquareTerminal } from "@lucide/vue";
+import { ChevronRight, CircleAlert, CircleCheck, Hourglass, SquareTerminal } from "@lucide/vue";
 import type { McpGrantPayload, McpHistoryEntry } from "@appsys/devtool-shared";
+import McpDetailList from "@/components/mcp/McpDetailList.vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DECISIONS } from "@/lib/mcp";
 
-defineProps<{
+/** Below this, the time spent in the approvals is not worth showing. */
+const NOTABLE_WAIT_MS = 300;
+
+const props = defineProps<{
   entry: McpHistoryEntry;
   /** The grants of the key of the call. */
   grants: McpGrantPayload[];
@@ -23,6 +27,16 @@ const emit = defineEmits<{
 }>();
 
 const expanded = shallowRef(false);
+const waited = computed(() => ((props.entry.waited ?? 0) >= NOTABLE_WAIT_MS ? props.entry.waited : 0));
+
+/**
+ * Writes a duration in milliseconds or seconds.
+ * @param milliseconds The duration.
+ * @returns The duration with its unit.
+ */
+function formatDuration(milliseconds: number): string {
+  return milliseconds < 1000 ? `${milliseconds} ms` : `${(milliseconds / 1000).toFixed(1)} s`;
+}
 </script>
 
 <template>
@@ -58,13 +72,34 @@ const expanded = shallowRef(false);
         v-else
         class="size-3.5 shrink-0 text-destructive"
       />
-      <span class="w-14 shrink-0 text-right tabular-nums text-muted-foreground">{{ entry.duration }} ms</span>
+      <span
+        class="flex w-20 shrink-0 items-center justify-end gap-1 tabular-nums text-muted-foreground"
+        :title="waited ? `${formatDuration(waited)} waiting for an answer` : undefined"
+      >
+        <Hourglass
+          v-if="waited"
+          class="size-3 text-amber-600"
+        />
+        {{ formatDuration(entry.duration) }}
+      </span>
     </button>
 
     <div
       v-if="expanded"
       class="space-y-2 border-t px-3 py-2 text-xs"
     >
+      <p
+        v-if="entry.acceptance"
+        class="text-muted-foreground"
+      >
+        {{ entry.client }} was accepted {{ entry.acceptance === "always" ? "always" : "for its session" }} during this call.
+      </p>
+      <p
+        v-if="waited"
+        class="text-muted-foreground"
+      >
+        {{ formatDuration(waited) }} of {{ formatDuration(entry.duration) }} spent waiting for an answer.
+      </p>
       <p
         v-if="entry.message"
         :class="entry.ok ? 'text-muted-foreground' : 'text-destructive'"
@@ -77,22 +112,30 @@ const expanded = shallowRef(false);
       >
         Refused by <code>{{ entry.reason }}</code>
       </p>
-      <dl
-        v-if="entry.details.length"
-        class="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1"
-      >
-        <template
-          v-for="(detail, index) in entry.details"
-          :key="index"
+      <div class="space-y-1">
+        <p class="font-medium text-muted-foreground">
+          Arguments
+        </p>
+        <McpDetailList
+          v-if="entry.input?.length"
+          :details="entry.input"
+        />
+        <p
+          v-else
+          class="text-muted-foreground"
         >
-          <dt class="text-muted-foreground">
-            {{ detail.label }}
-          </dt>
-          <dd class="max-h-24 overflow-auto font-mono whitespace-pre-wrap break-all">
-            {{ detail.value }}
-          </dd>
-        </template>
-      </dl>
+          None.
+        </p>
+      </div>
+      <div
+        v-if="entry.details.length"
+        class="space-y-1"
+      >
+        <p class="font-medium text-muted-foreground">
+          Request
+        </p>
+        <McpDetailList :details="entry.details" />
+      </div>
       <div class="flex flex-wrap items-center gap-2">
         <RouterLink
           v-if="entry.terminal && terminalOpen"

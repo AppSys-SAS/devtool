@@ -229,6 +229,7 @@ export function fileTools(host: McpHost): McpTool[] {
         content: z.string(),
         baseUpdatedAt: z.string().nullable().optional().describe("updatedAt given by read_file, null for a new file"),
       },
+      privateInput: ["content"],
       run: async ({ space, path: filePath, content, baseUpdatedAt }, call) => {
         const target = findSpace(host, space);
         refuseDevtoolConfig(host, target, filePath);
@@ -254,6 +255,7 @@ export function fileTools(host: McpHost): McpTool[] {
           )
           .min(1),
       },
+      privateInput: ["changes"],
       run: async ({ space, path: filePath, changes }, call) => {
         const target = findSpace(host, space);
         refuseDevtoolConfig(host, target, filePath);

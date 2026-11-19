@@ -27,6 +27,8 @@ export interface McpTool {
   input: z.ZodRawShape;
   /** Whether the tool only reads. */
   readOnly: boolean;
+  /** The arguments never kept in the history, such as the content of a file. */
+  privateInput: readonly string[];
   run(input: Record<string, unknown>, call: McpCall): Promise<unknown>;
 }
 
@@ -41,9 +43,10 @@ export function defineTool<Shape extends z.ZodRawShape>(tool: {
   description: string;
   input: Shape;
   readOnly?: boolean;
+  privateInput?: (keyof Shape & string)[];
   run(input: z.infer<z.ZodObject<Shape>>, call: McpCall): Promise<unknown>;
 }): McpTool {
-  return { ...tool, readOnly: tool.readOnly ?? false, run: (input, call) => tool.run(input as z.infer<z.ZodObject<Shape>>, call) };
+  return { ...tool, readOnly: tool.readOnly ?? false, privateInput: tool.privateInput ?? [], run: (input, call) => tool.run(input as z.infer<z.ZodObject<Shape>>, call) };
 }
 
 /** An error an agent can fix: a missing terminal, command or file, an invalid value. */

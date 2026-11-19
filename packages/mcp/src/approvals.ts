@@ -207,6 +207,15 @@ export class DevtoolApprovals {
   }
 
   /**
+   * Gives whether and how the agent of a session is accepted.
+   * @param id The session.
+   * @returns Its status, null for a session not followed.
+   */
+  statusOf(id: string): McpClientStatus | null {
+    return this._sessions.get(id)?.status ?? null;
+  }
+
+  /**
    * Tells whether the agent of a session is accepted, without asking.
    * @param id The session.
    * @returns True when its calls may be decided.

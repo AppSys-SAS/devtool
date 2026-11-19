@@ -729,7 +729,13 @@ export interface McpHistoryEntry {
   ok: boolean;
   /** The error, or a short summary of the result. */
   message: string | null;
+  /** The arguments of the call, the private ones left out. */
+  input: McpDetail[];
   duration: number;
+  /** The part of the duration spent waiting for a person to answer. */
+  waited: number;
+  /** How the agent was accepted by a person during the call, null when it was accepted before. */
+  acceptance: "session" | "always" | null;
   /** The terminal the call acted on or started. */
   terminal: string | null;
 }
