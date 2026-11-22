@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { isMap, isSeq, parseDocument, type Document } from "yaml";
-import { mcpLevelsFor, mcpLevelsOf, type McpAction, type McpLevel } from "@appsys/devtool-shared";
+import { isMap, isScalar, isSeq, parseDocument, type Document } from "yaml";
+import { isMcpFilesSetting, mcpLevelsFor, mcpLevelsOf, type McpAction, type McpLevel } from "@appsys/devtool-shared";
 
 /** The levels of the settings being a level themselves, by their last key. */
 const LEVEL_SETTINGS: Record<string, McpLevel[]> = {
@@ -19,7 +19,7 @@ const LEVEL_SETTINGS: Record<string, McpLevel[]> = {
  */
 export function acceptsMcpLevel(settingPath: string[], action: McpAction | null, level: McpLevel): boolean {
   if (action !== null) {
-    return settingPath.at(-1) !== "ownTerminals" && settingPath.at(-1) !== "level" && mcpLevelsFor(action).includes(level);
+    return settingPath.at(-1) !== "ownTerminals" && settingPath.at(-1) !== "level" && mcpLevelsFor(action, isMcpFilesSetting(settingPath)).includes(level);
   }
   return LEVEL_SETTINGS[settingPath.at(-1) ?? ""]?.includes(level) ?? false;
 }
@@ -35,7 +35,8 @@ function documentPath(settingPath: string[]): (string | number)[] {
 
 /**
  * Makes the lists leading to a setting long enough to hold it, the items added being empty maps,
- * which change nothing once the configuration files are merged.
+ * which change nothing once the configuration files are merged, and turns an item written as a text
+ * into its long form `{ path }` so that it can hold the setting.
  * @param document The YAML document.
  * @param keys The keys leading to the setting.
  */
@@ -52,6 +53,10 @@ function ensureLists(document: Document, keys: (string | number)[]): void {
     }
     while (list.items.length <= key) {
       list.add(document.createNode({}));
+    }
+    const item = list.get(key, true);
+    if (isScalar(item) && typeof item.value === "string") {
+      list.set(key, document.createNode({ path: item.value }));
     }
   });
 }
@@ -101,7 +106,7 @@ export async function writeMcpLevel(file: string, settingPath: string[], action:
     }
   } else {
     const current = document.getIn(keys);
-    const declared = mcpLevelsOf(isMap(current) ? current.toJSON() : current).levels;
+    const declared = mcpLevelsOf(isMap(current) ? current.toJSON() : current, isMcpFilesSetting(settingPath)).levels;
     const next = { ...declared, [action]: level ?? undefined };
     const remaining = Object.entries(next).filter(([, value]) => value !== undefined);
     if (!remaining.length) {

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import net from "node:net";
-import { logger, type McpRules } from "@appsys/devtool-shared";
+import { SHARED_CONFIG_PATH } from "@appsys/devtool-cdn";
+import { environmentRules, logger, MCP_LEVELS, type McpAction, type McpRule, type McpRules } from "@appsys/devtool-shared";
 import { z } from "zod";
 import { maskValues } from "./files.js";
 import type { McpHost } from "./host.js";
@@ -50,6 +51,19 @@ async function describeTargets(targets: string[]): Promise<{ url: string; listen
  */
 function certificateRules(host: McpHost, name: string): McpRules {
   return host.config.loadBalancers[`.${name}`]?.mcp ?? host.config.adt.mcp.certificates;
+}
+
+/**
+ * Gives the rule of an action on items of the environment: the strictest of their rules.
+ * @param host The server.
+ * @param action The action.
+ * @param paths The paths of the items.
+ * @returns The rule deciding the action.
+ */
+function environmentRule(host: McpHost, action: McpAction, paths: string[]): McpRule {
+  return paths
+    .map((itemPath) => environmentRules(host.config.adt.mcp, itemPath)[action])
+    .reduce((strictest, rule) => (MCP_LEVELS.indexOf(rule.level) > MCP_LEVELS.indexOf(strictest.level) ? rule : strictest));
 }
 
 /**
@@ -141,7 +155,8 @@ export function environmentTools(host: McpHost): McpTool[] {
       run: async (_input, call) => {
         call.describe("environment");
         await call.authorize({ action: "read", rule: host.config.adt.mcp.environment.read, keysOnly: true, title: "See the environment", grantKey: "read:environment", grantLabel: "See the environment" });
-        return host.environment.state();
+        const state = host.environment.state();
+        return { ...state, items: state.items.filter((item) => environmentRule(host, "read", [item.path]).level !== "deny") };
       },
     }),
     defineTool({
@@ -151,9 +166,9 @@ export function environmentTools(host: McpHost): McpTool[] {
       input: { path: z.string().describe("Path of the file in the environment") },
       readOnly: true,
       run: async ({ path }, call) => {
-        const rule = host.config.adt.mcp.environment.read;
+        const rule = environmentRule(host, "read", [path]);
         call.describe(`environment:${path}`);
-        await call.authorize({ action: "read", rule, keysOnly: true, title: `Compare the keys of ${path}`, grantKey: "read:environment", grantLabel: "See the environment" });
+        await call.authorize({ action: "read", rule, keysOnly: true, title: `Compare the keys of ${path}`, grantKey: `read:environment:${path}`, grantLabel: `See ${path}` });
         const keys = await host.environment.keys(path);
         if (rule.level !== "keys") {
           return keys;
@@ -176,7 +191,7 @@ export function environmentTools(host: McpHost): McpTool[] {
       readOnly: true,
       run: async ({ path }, call) => {
         call.describe(`environment:${path}`);
-        await call.authorize({ action: "read", rule: host.config.adt.mcp.environment.read, keysOnly: true, title: `List the tables of ${path}`, grantKey: "read:environment", grantLabel: "See the environment" });
+        await call.authorize({ action: "read", rule: environmentRule(host, "read", [path]), title: `List the tables of ${path}`, grantKey: `read:environment:${path}`, grantLabel: `See ${path}` });
         return host.environment.tables(path);
       },
     }),
@@ -199,7 +214,7 @@ export function environmentTools(host: McpHost): McpTool[] {
         call.describe(`environment ${direction}`);
         await call.authorize({
           action: "run",
-          rule: host.config.adt.mcp.environment.run,
+          rule: environmentRule(host, "run", paths),
           confirm: direction === "push",
           title: `${direction === "pull" ? "Pull" : "Push"} ${paths.join(", ")}`,
           details: targets.map((target) => ({ label: direction, value: target.tables?.length ? `${target.path} (${target.tables.join(", ")})` : target.path })),
@@ -219,7 +234,7 @@ export function environmentTools(host: McpHost): McpTool[] {
       input: {},
       run: async (_input, call) => {
         call.describe("shared configuration");
-        await call.authorize({ action: "run", rule: host.config.adt.mcp.environment.run, confirm: true, title: "Pull the shared configuration of the devtool from the CDN" });
+        await call.authorize({ action: "run", rule: environmentRule(host, "run", [SHARED_CONFIG_PATH]), confirm: true, title: "Pull the shared configuration of the devtool from the CDN" });
         const pulled = await host.environment.pullSharedConfig();
         if (!pulled) {
           throw new McpToolError(host.environment.state().error ?? "The shared configuration was not pulled");

@@ -94,8 +94,19 @@ export interface McpSettings {
   ownTerminals: McpLevel;
   /** The command lines an agent may run outside the commands of the configuration. */
   shell: McpPatterns;
-  /** The rules of the files and copies of the environment. */
+  /** The rules of the files and copies of the environment, refined by each item. */
   environment: McpRules;
+  /** The items of the environment, files, databases, buckets and Redis databases, with their rules. */
+  environmentItems: McpEnvironmentItem[];
+}
+
+/** An item of the environment, with the rules of agents on it and where they are written. */
+export interface McpEnvironmentItem {
+  /** Its path in the environment. */
+  path: string;
+  kind: EnvironmentItemPayload["kind"];
+  rules: McpRules;
+  target: McpTarget;
 }
 
 /** The optional parts of the sidebar, each hidden unless enabled. */

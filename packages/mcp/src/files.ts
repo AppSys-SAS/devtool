@@ -1,5 +1,5 @@
 import { configFormatOf } from "@appsys/devtool-cdn";
-import type { McpDetail, McpRules } from "@appsys/devtool-shared";
+import { environmentRules, type McpDetail, type McpRules } from "@appsys/devtool-shared";
 import { z } from "zod";
 import { McpRefusal } from "./approvals.js";
 import type { McpFileSpace, McpHost } from "./host.js";
@@ -9,28 +9,48 @@ import { defineTool, McpToolError, type McpCall, type McpTool } from "./tool.js"
 interface AgentFileSpace {
   id: string;
   name: string;
+  /** The rules of the space as a whole. */
   rules: McpRules;
+  /**
+   * Gives the rules of a file of the space.
+   * @param filePath The path of the file in the space.
+   * @returns Its rules.
+   */
+  rulesOf(filePath: string): McpRules;
   space: McpFileSpace;
 }
 
 /**
- * Lists the spaces of files agents may see: the configs of the environment and the folders of files
- * of the projects.
+ * Lists the spaces of files agents may see: the configs of the environment, each file following its
+ * item, and the folders of files of the projects.
  * @param host The server.
- * @returns The spaces whose reading is not refused.
+ * @returns The spaces whose reading is not refused, for a file at least.
  */
 function fileSpaces(host: McpHost): AgentFileSpace[] {
+  const { mcp } = host.config.adt;
   const declared = [
-    { id: host.fileSpaces.configsSpace, name: "Configs of the environment", rules: host.config.adt.mcp.environment },
+    {
+      id: host.fileSpaces.configsSpace,
+      name: "Configs of the environment",
+      rules: mcp.environment,
+      rulesOf: (filePath: string) => environmentRules(mcp, filePath),
+      readable: [mcp.environment, ...mcp.environmentItems.filter((item) => item.kind === "file").map((item) => item.rules)].some((rules) => rules.read.level !== "deny"),
+    },
     ...Object.values(host.config.projects).flatMap((section) =>
       Object.values(section.directories).flatMap((project) =>
-        Object.values(project.files).map((files) => ({ id: `${section.slug}/${project.slug}/${files.slug}`, name: files.name, rules: files.mcp })),
+        Object.values(project.files).map((files) => ({
+          id: `${section.slug}/${project.slug}/${files.slug}`,
+          name: files.name,
+          rules: files.mcp,
+          rulesOf: () => files.mcp,
+          readable: files.mcp.read.level !== "deny",
+        })),
       ),
     ),
   ];
-  return declared.flatMap((item) => {
+  return declared.flatMap(({ readable, ...item }) => {
     const space = host.fileSpaces.get(item.id);
-    return space && item.rules.read.level !== "deny" ? [{ ...item, space }] : [];
+    return space && readable ? [{ ...item, space }] : [];
   });
 }
 
@@ -116,7 +136,7 @@ async function authorizeWrite(
   call.describe(`${space.id}:${filePath}`);
   await call.authorize({
     action: "write",
-    rule: space.rules.write,
+    rule: space.rulesOf(filePath).write,
     keysOnly: extra.keysOnly,
     title,
     details: [{ label: "Space", value: space.name }, { label: "File", value: filePath }, ...(extra.details ?? [])],
@@ -189,7 +209,8 @@ export function fileTools(host: McpHost): McpTool[] {
         const target = findSpace(host, space);
         call.describe(target.id);
         await call.authorize({ action: "read", rule: target.rules.read, keysOnly: true, title: `List the files of ${target.name}`, grantKey: `read:${target.id}`, grantLabel: `Read ${target.id}` });
-        return target.space.tree();
+        const tree = await target.space.tree();
+        return { ...tree, entries: tree.entries.filter((entry) => entry.kind === "directory" || target.rulesOf(entry.path).read.level !== "deny") };
       },
     }),
     defineTool({
@@ -206,14 +227,15 @@ export function fileTools(host: McpHost): McpTool[] {
         const target = findSpace(host, space);
         const keys = mode === "keys";
         call.describe(`${target.id}:${filePath}`);
+        const rule = target.rulesOf(filePath).read;
         await call.authorize({
           action: "read",
-          rule: target.rules.read,
+          rule,
           keysOnly: keys,
           title: `Read ${keys ? "the keys of " : ""}${filePath}`,
           details: [{ label: "Space", value: target.name }, { label: "File", value: filePath }, { label: "Mode", value: keys ? "keys only" : "content" }],
-          grantKey: `read:${target.id}`,
-          grantLabel: `Read ${target.id}`,
+          grantKey: rule === target.rules.read ? `read:${target.id}` : `read:${target.id}:${filePath}`,
+          grantLabel: rule === target.rules.read ? `Read ${target.id}` : `Read ${target.id}:${filePath}`,
         });
         const { content, updatedAt } = await readText(target, filePath);
         return keys ? { path: filePath, updatedAt, keys: keysOf(filePath, content) } : { path: filePath, updatedAt, content };

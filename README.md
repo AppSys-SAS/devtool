@@ -337,8 +337,8 @@ A new client is accepted first, by `adt.mcp.clients` or by the user. Then each c
 its action on what it acts on: `read` (see), `run` (start), `input` (type), `control` (stop, restart,
 resize, free a port, reload) and `write` (files). A level is `allow`, `ask` (a dialog in the interface,
 notified when `adt.mcp.notifications` is on, refused after `adt.mcp.timeout` seconds or at once when no
-interface is open), `keys` (files only: their keys with the type of each value, `update_keys` for writing)
-or `deny` (`read: deny` hides it from the agent). `mcp` takes a level for every action, or levels by
+interface is open), `keys` (`read` and `write` of `adt.mcp.files`, of the folders of files, of
+`environment.mcp` and of the files of the environment only: their keys with the type of each value, `update_keys` for writing) or `deny` (`read: deny` hides it from the agent). `mcp` takes a level for every action, or levels by
 action, inherited from the most general to the most precise:
 
 - commands and restores: `adt.mcp.default` > `adt.mcp.commands` > section > project > command;
@@ -348,7 +348,12 @@ action, inherited from the most general to the most precise:
   command follows its command);
 - certificates: `adt.mcp.default` > `adt.mcp.certificates` > `loadBalancers.<name>.mcp`;
 - `port_owners` (read) and `reload_config` (control): `adt.mcp.default` > `adt.mcp.devtool`;
-- the `configs` files and the `environment_*` tools: `adt.mcp.default` > `environment.mcp`.
+- the `configs` files and the `environment_*` tools: `adt.mcp.default` > `environment.mcp` > the `mcp`
+  of each item of `environment.files`, `databases`, `buckets` and `redis` (a `.local.yml` override follows
+  its file, a pull or push of several items the strictest of them).
+
+An item of a list written as a text, such as `- devtool/config.yml`, is the short form of
+`{ path: devtool/config.yml }`: a personal override may give it settings at the same position.
 
 A setting of a section or project prevails over the categories, being more precise. Typing into and
 controlling the terminals an agent started itself follow `adt.mcp.ownTerminals`; `run_shell` follows
@@ -382,6 +387,11 @@ projects:
       settings: { path: config, mcp: { read: keys, write: keys } }
 environment:
   mcp: { read: keys, run: ask }
+  files:
+    - devtool/config.yml
+    - { path: helpdesk/helpdesk.env, mcp: { write: deny } }
+  databases:
+    - { path: account/db.gz, engine: postgres, container: postgres, mcp: { run: deny } }
 ```
 
 A request is answered once, for the session of the agent or always. The Agents page (robot icon next to

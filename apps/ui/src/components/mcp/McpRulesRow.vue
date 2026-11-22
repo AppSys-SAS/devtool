@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { MCP_ACTIONS, mcpLevelsFor, type McpAction, type McpLevel, type McpRules, type McpTarget } from "@appsys/devtool-shared";
+import { isMcpFilesSetting, MCP_ACTIONS, mcpLevelsFor, type McpAction, type McpLevel, type McpRules, type McpTarget } from "@appsys/devtool-shared";
 import McpLevelSelect from "@/components/mcp/McpLevelSelect.vue";
 import { Badge } from "@/components/ui/badge";
 import { changeKey, LEVELS, shortPath, type McpEditMode, type McpLevelChange } from "@/lib/mcp";
@@ -28,6 +28,7 @@ const props = defineProps<{
 }>();
 
 const file = computed(() => (props.edit?.file === "local" ? props.edit.localFile : props.target?.declaredIn) ?? null);
+const files = computed(() => isMcpFilesSetting(props.target?.path ?? []));
 const blocked = computed(() => {
   if (!props.target) {
     return "Declared by the devtool itself";
@@ -86,7 +87,7 @@ function change(action: McpAction, level: McpLevel | null): void {
           :level="staged(action) ? staged(action)!.level : rules[action].level"
           :title="staged(action) ? `Changed, written to ${staged(action)!.file === 'local' ? 'the personal override' : 'the declaring file'} when done` : `From ${rules[action].from}`"
           :staged="staged(action) !== undefined"
-          :levels="levels ?? mcpLevelsFor(action)"
+          :levels="levels ?? mcpLevelsFor(action, files)"
           :blocked="blocked"
           @select="(level) => change(action, level)"
         />

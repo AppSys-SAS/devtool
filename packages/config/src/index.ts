@@ -130,14 +130,33 @@ async function pathExists(fullPath: string): Promise<boolean> {
   }
 }
 
-export function mergeConfig<T extends RawConfig>(a: T, b: RawConfig): T {
-  return mergeWith(a, cloneDeep(b), (left: unknown, right: unknown, key: string) => {
-    if (Array.isArray(left) && Array.isArray(right) && key === "include") {
-      return left.concat(right);
-    }
+/**
+ * Merges one value of a configuration file over another: `include` lists are joined, and an item of a
+ * list written as a text, the short form of `{ path }`, takes the settings of the item over it.
+ * @param left The value merged into.
+ * @param right The value merged over it.
+ * @param key The key or index of the value.
+ * @param holder What holds the value merged into.
+ * @returns The merged value, undefined to merge it the default way.
+ */
+function mergeValue(left: unknown, right: unknown, key: string, holder: unknown): unknown {
+  if (Array.isArray(left) && Array.isArray(right) && key === "include") {
+    return left.concat(right);
+  }
+  if (Array.isArray(holder) && typeof left === "string" && typeof right === "object" && right !== null && !Array.isArray(right)) {
+    return mergeWith({ path: left }, right, mergeValue);
+  }
+  return undefined;
+}
 
-    return undefined;
-  }) as T;
+/**
+ * Merges a configuration file over another.
+ * @param a The configuration merged into, changed.
+ * @param b The configuration merged over it.
+ * @returns The merged configuration.
+ */
+export function mergeConfig<T extends RawConfig>(a: T, b: RawConfig): T {
+  return mergeWith(a, cloneDeep(b), mergeValue) as T;
 }
 
 /** The files declaring each setting of a configuration, by {@link configSourceKey}, in the order they are merged. */

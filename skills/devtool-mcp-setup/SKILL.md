@@ -85,8 +85,9 @@ configurations, the sessions, the history of every call, the grants and the effe
    - `control`: stop, restart, close, resize a terminal, free a port, reload the configuration
    - `write`: change files
 3. Levels: `allow` (no question), `ask` (a request in the interface, with a browser notification when
-   `adt.mcp.notifications` is on), `keys` (files only: keys of YAML / JSON / .env files without their
-   values), `deny` (refused, and hidden from listings when it is `read`).
+   `adt.mcp.notifications` is on), `keys` (keys of YAML / JSON / .env files without their values; `read`
+   and `write` of `adt.mcp.files`, of the folders of files, of `environment.mcp` and of the files of the
+   environment only), `deny` (refused, and hidden from listings when it is `read`).
 4. A grant given from a request or from the history ("This session", "Always") turns `ask` into `allow`
    for that call; a `deny` of the configuration always prevails.
 
@@ -101,7 +102,8 @@ declared winning action by action:
 - terminals a person opened without a command: `adt.mcp.default`, `adt.mcp.terminals`;
 - certificates: `adt.mcp.default`, `adt.mcp.certificates`, `loadBalancers.<name>.mcp`;
 - `port_owners` (read) and `reload_config` (control): `adt.mcp.default`, `adt.mcp.devtool`;
-- configuration files and copies of the environment: `adt.mcp.default`, `environment.mcp`.
+- configuration files and copies of the environment: `adt.mcp.default`, `environment.mcp`, the `mcp` of
+  each item of `environment.files`, `databases`, `buckets` and `redis`.
 
 `notify_user` is always allowed. The Permissions tab of the Agents page shows the level of every action
 with the setting it comes from, and its Edit mode changes them in `config.local.yml` (Personal) or in the
@@ -144,6 +146,10 @@ projects:
       settings: { path: config, mcp: { read: keys, write: keys } }
 environment:
   mcp: { read: keys, run: ask }
+  files:
+    - { path: helpdesk/helpdesk.env, mcp: { write: deny } }
+  databases:
+    - { path: account/db.gz, engine: postgres, container: postgres, mcp: { run: deny } }
 ```
 
 Agents never write the configuration of the devtool itself (`devtool/config.yml` and its `.local.yml`).

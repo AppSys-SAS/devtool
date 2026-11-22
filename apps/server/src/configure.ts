@@ -1,7 +1,7 @@
 import path from "node:path";
 import fs from "node:fs/promises";
 import net from "node:net";
-import type { CertificateAcme, ClientConfigPayload, CommandArg, CommandChoice, CommandForm, CommandInput, CommandInputValue, DirectoryDefinition, DirectoryFiles, DirectoryScripts, ScriptSettings, AdtDefinition, DirectoryDefaultAction, DirectoryShortcut, DnsDefinition, DnsRecord, HostAccess, IntegrationDefinition, LoadBalancerCertificate, McpCategory, McpPatterns, McpRules, McpSettings, McpTarget, PassthroughRule, ProjectDefinition, ProjectRestore, RuntimeConfig, SidebarSettings } from "@appsys/devtool-shared";
+import type { CertificateAcme, ClientConfigPayload, CommandArg, CommandChoice, CommandForm, CommandInput, CommandInputValue, DirectoryDefinition, DirectoryFiles, DirectoryScripts, ScriptSettings, AdtDefinition, DirectoryDefaultAction, DirectoryShortcut, DnsDefinition, DnsRecord, HostAccess, IntegrationDefinition, LoadBalancerCertificate, McpCategory, McpEnvironmentItem, McpPatterns, McpRules, McpSettings, McpTarget, PassthroughRule, ProjectDefinition, ProjectRestore, RuntimeConfig, SidebarSettings } from "@appsys/devtool-shared";
 import { defaultMcpRules, isMcpLevel, logger, readMcpRules } from "@appsys/devtool-shared";
 import { type LegoOptionValue, legoRunArgs } from "@appsys/devtool-certs";
 import { configSourceKey, resolveAppIdentity, resolveCacheFolder } from "@appsys/devtool-config";
@@ -71,8 +71,12 @@ function defaultMcpSettings(notifications: boolean): McpSettings {
     ownTerminals: "allow",
     shell: { level: "deny", allow: [], deny: [] },
     environment: rules,
+    environmentItems: [],
   };
 }
+
+/** The lists of items of the environment, with the kind of their items. */
+const ENVIRONMENT_LISTS = { files: "file", databases: "database", buckets: "bucket", redis: "redis" } as const;
 
 /** The categories of `adt.mcp` refining `adt.mcp.default`. */
 const MCP_CATEGORIES: readonly McpCategory[] = ["commands", "scripts", "files", "terminals", "certificates", "devtool"];
@@ -191,8 +195,8 @@ export class DevtoolConfigure {
 
   /**
    * Finds where an MCP setting of the configuration is written, among the settings the interfaces may
-   * change: those of `adt.mcp` and `environment`, and of the certificates, sections, projects, commands,
-   * folders of scripts, scripts and folders of files.
+   * change: those of `adt.mcp` and `environment`, and of the items of the environment, certificates,
+   * sections, projects, commands, folders of scripts, scripts and folders of files.
    * @param settingPath The keys leading to the setting.
    * @returns The setting and the file declaring it, null when it is not one of them.
    */
@@ -201,6 +205,7 @@ export class DevtoolConfigure {
     const targets = [
       ...Object.values(this.settingTargets()),
       ...Object.values(this.loadBalancers).map((certificate) => certificate.mcpTarget),
+      ...this.adt.mcp.environmentItems.map((item) => item.target),
       ...Object.values(this.projects).map((project) => project.mcpTarget),
       ...directories.flatMap((directory) => [
         directory.mcpTarget,
@@ -376,7 +381,27 @@ export class DevtoolConfigure {
     settings.clients = this.readMcpPatterns("adt.mcp.clients", mcp.clients, settings.clients);
     settings.shell = this.readMcpPatterns("adt.mcp.shell", mcp.shell, settings.shell);
     settings.environment = this.readMcpRules("environment.mcp", toRecord(this.initialConfig.environment).mcp, settings.default, "environment");
+    settings.environmentItems = this.readEnvironmentItems(settings.environment);
     return settings;
+  }
+
+  /**
+   * Reads the `mcp` setting of every item of the environment, an item written as a text being its path.
+   * @param inherited The rules of the whole environment.
+   * @returns The items with a path, and their rules.
+   */
+  private readEnvironmentItems(inherited: McpRules): McpEnvironmentItem[] {
+    const environment = toRecord(this.initialConfig.environment);
+    return Object.entries(ENVIRONMENT_LISTS).flatMap(([list, kind]) =>
+      (Array.isArray(environment[list]) ? (environment[list] as unknown[]) : []).flatMap((value, index) => {
+        const item = typeof value === "string" ? { path: value } : toRecord(value);
+        if (typeof item.path !== "string") {
+          return [];
+        }
+        const from = `environment.${list}.${index}`;
+        return [{ path: item.path, kind, rules: this.readMcpRules(`${from}.mcp`, item.mcp, inherited, from), target: this.mcpTarget(["environment", list, String(index), "mcp"]) }];
+      }),
+    );
   }
 
   /**

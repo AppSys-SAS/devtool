@@ -13,10 +13,12 @@ import mcpStore from "@/stores/mcp";
 const COMMAND_ACTIONS: readonly McpAction[] = ["read", "run", "input", "control"];
 const FILE_ACTIONS: readonly McpAction[] = ["read", "write"];
 const CERTIFICATE_ACTIONS: readonly McpAction[] = ["read", "run"];
+const ENVIRONMENT_ACTIONS: readonly McpAction[] = ["read", "run", "write"];
+const DATA_ACTIONS: readonly McpAction[] = ["read", "run"];
 const OWN_TERMINAL_LEVELS: readonly McpLevel[] = ["allow", "ask"];
 const PATTERN_LEVELS: readonly McpLevel[] = ["allow", "ask", "deny"];
 
-/** A global setting of `adt.mcp` or `environment`, as a row of the card. */
+/** A global setting of `adt.mcp`, as a row of the card. */
 interface SettingRow {
   label: string;
   kind: string;
@@ -134,7 +136,6 @@ const settingRows = computed<SettingRow[]>(() => {
       levels: PATTERN_LEVELS,
     },
     { label: "adt.mcp.devtool", kind: "holders of a port (read), reloading the configuration (control)", rules: value.devtool, actions: ["read", "control"], target: targets.devtool },
-    { label: "environment", kind: "configs, pulls and pushes", rules: value.environment, actions: ["read", "run", "write"], target: targets.environment },
     { label: "adt.mcp.certificates", kind: "every certificate, refined below", rules: value.certificates, actions: CERTIFICATE_ACTIONS, target: targets.certificates },
   ];
 });
@@ -248,6 +249,32 @@ const settingRows = computed<SettingRow[]>(() => {
         <p class="px-2 py-1 text-xs text-muted-foreground">
           <code>notify_user</code> is always allowed: it only shows a message in this interface. Writing the configuration of the devtool is always refused.
         </p>
+      </div>
+
+      <div class="space-y-1 border-t pt-2">
+        <McpRulesRow
+          label="environment"
+          kind="configs, pulls and pushes, refined by each item"
+          :rules="settings.environment"
+          :actions="ENVIRONMENT_ACTIONS"
+          :depth="0"
+          :granted="granted"
+          :target="settings.targets.environment"
+          :edit="edit"
+        />
+        <McpRulesRow
+          v-for="item in settings.environmentItems"
+          :key="`environment/${item.kind}/${item.path}`"
+          :label="item.path"
+          :kind="item.kind"
+          :rules="item.rules"
+          :actions="item.kind === 'file' ? ENVIRONMENT_ACTIONS : DATA_ACTIONS"
+          :depth="1"
+          :grant-id="`environment:${item.path}`"
+          :granted="granted"
+          :target="item.target"
+          :edit="edit"
+        />
       </div>
 
       <div
