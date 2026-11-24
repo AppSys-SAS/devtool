@@ -10,6 +10,8 @@ const state = sessionStore.state
 
 const displayName = computed(() => state.value?.user?.name ?? state.value?.user?.username ?? 'Signed in')
 
+const identity = computed(() => [state.value?.user?.username, state.value?.user?.email].filter(Boolean).join(' · ') || undefined)
+
 const initials = computed(() => {
   const words = (state.value?.user?.name ?? state.value?.user?.username ?? '').split(/[\s._-]+/).filter(word => word !== '')
   return words.slice(0, 2).map(word => word[0]?.toUpperCase()).join('')
@@ -20,7 +22,7 @@ const initials = computed(() => {
  */
 function login (): void {
   sessionStore.openLoginWindow()
-  wsStore.cdnLogin()
+  wsStore.authLogin()
 }
 </script>
 
@@ -43,7 +45,7 @@ function login (): void {
       <template v-if="state.signedIn">
         <div
           class="truncate text-sm font-medium"
-          :title="state.user?.username ?? undefined"
+          :title="identity"
         >
           {{ displayName }}
         </div>
@@ -63,7 +65,7 @@ function login (): void {
       </template>
       <template v-else-if="state.pendingLoginUrl">
         <div class="truncate text-sm">
-          Waiting for {{ state.issuerName ?? "the sign-in" }}…
+          Waiting for {{ state.providerName ?? "the sign-in" }}…
         </div>
         <a
           :href="state.pendingLoginUrl"
@@ -92,7 +94,7 @@ function login (): void {
       variant="ghost"
       class="size-8 shrink-0"
       title="Sign out"
-      @click="wsStore.cdnLogout()"
+      @click="wsStore.authLogout()"
     >
       <LogOut class="size-3.5" />
     </Button>
@@ -101,7 +103,7 @@ function login (): void {
       size="sm"
       variant="outline"
       class="h-8 shrink-0 gap-1.5 px-2 text-xs"
-      :title="state.issuerName ? `Sign in with ${state.issuerName}` : undefined"
+      :title="state.providerName ? `Sign in with ${state.providerName}` : undefined"
       @click="login"
     >
       <LogIn class="size-3.5" />

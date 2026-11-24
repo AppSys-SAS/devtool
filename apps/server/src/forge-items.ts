@@ -3,7 +3,7 @@ import { promisify } from 'node:util'
 import type { ForgeItemsPayload, ForgeTimelinePayload, ForgeKind, IntegrationDefinition, RuntimeConfig } from '@appsys/devtool-shared'
 import { integrationKey, logger } from '@appsys/devtool-shared'
 import { findForge, ForgeError, type GitForge, repositoryOf, type ForgeRepository } from '@appsys/devtool-git'
-import { type CommandAutomation, CommandSecrets } from './command-automation.js'
+import { type AuthReader, type CommandAutomation, CommandSecrets } from './command-automation.js'
 import { integrationAutomationKey } from './configure.js'
 
 const execFileAsync = promisify(execFile)
@@ -15,6 +15,8 @@ const TIMELINE_LAST = 30
 export interface ForgeItemsHost {
   /** Sends the state to every connected interface. */
   publish: (payload: ForgeItemsPayload[]) => Promise<void>
+  /** Reads the values of the signed-in developer for the value blocks of the tokens. */
+  readAuth: AuthReader
 }
 
 /** An integration listing what a forge holds, with what reading it needs. */
@@ -214,7 +216,12 @@ export class DevtoolForgeItems {
     if (source.token === null) {
       return null
     }
-    const secrets = new CommandSecrets(source.automation?.opAccount ?? null, source.folder, async command => (await execFileAsync('/bin/sh', ['-c', command], { cwd: source.folder })).stdout)
+    const secrets = new CommandSecrets({
+      account: source.automation?.opAccount ?? null,
+      folder: source.folder,
+      runShell: async command => (await execFileAsync('/bin/sh', ['-c', command], { cwd: source.folder })).stdout,
+      readAuth: this._host.readAuth
+    })
     try {
       return await secrets.resolve(source.token)
     } finally {

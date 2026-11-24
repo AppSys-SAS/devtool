@@ -23,6 +23,7 @@
     "dev:lb": "tsx src/dev-lb.ts"
   },
   "dependencies": {
+    "@appsys/devtool-auth": "workspace:*",
     "@appsys/devtool-cdn": "workspace:*",
     "@appsys/devtool-certs": "workspace:*",
     "@appsys/devtool-config": "workspace:*",

@@ -155,8 +155,10 @@ itself is missing, the Environment page offers to pull it.
 
 ## First start of a developer
 
-1. Write `config.local.yml` in `~/.config/appsys/devtool` with your `workspace` and the `cdn` section.
-2. `devtool login`
+1. Write `config.local.yml` in `~/.config/appsys/devtool` with your `workspace`, the
+   [`auth`](/configuration/auth) section of your identity provider and the [`cdn`](/configuration/cdn)
+   section.
+2. `devtool login`, to sign in with the identity provider
 3. `devtool env pull --yes`
 4. `devtool server`
 

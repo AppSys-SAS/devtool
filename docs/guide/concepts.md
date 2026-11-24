@@ -20,7 +20,8 @@ config.yml
 │       └── integrations web tools, pull requests and issues
 ├── integrations        web tools shown for the whole devtool
 ├── environment         files and data shared with the team through the CDN
-├── cdn                 where the environment lives, and how you sign in
+├── auth                how you sign in, with your company account
+├── cdn                 where the environment lives
 └── adt                 the devtool itself: name, ports, sidebar, agents
 ```
 
@@ -34,7 +35,8 @@ config.yml
 | Files | A folder you can browse and edit from the interface, or a folder of agent skills. | [Files](/configuration/files) |
 | Integration | A web tool shown inside the devtool, or the pull requests and issues of a repository. | [Integrations](/configuration/integrations) |
 | Environment | The files, database dumps and bucket snapshots every developer needs, kept in a local folder. | [Environment](/configuration/environment) |
-| CDN | The server storing the shared environment. You sign in to it with your company account. | [CDN](/configuration/cdn) |
+| Sign-in | Your session with the identity provider of the team, used by the CDN and readable by commands. | [Sign-in](/configuration/auth) |
+| CDN | The server storing the shared environment, reached with your sign-in. | [CDN](/configuration/cdn) |
 | Agent | A coding agent, such as Claude Code, that drives the devtool through its MCP server. | [MCP server](/agents/mcp-server) |
 
 Every entry of a map has a **slug**: its key in the YAML file, such as `web` in `projects: { web: ... }`.

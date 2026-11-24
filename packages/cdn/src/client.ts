@@ -2,7 +2,7 @@ import { createReadStream } from 'node:fs'
 import fs from 'node:fs/promises'
 import { pipeline, Readable, Transform, type TransformCallback } from 'node:stream'
 import type { ReadableStream as WebReadableStream } from 'node:stream/web'
-import { accessToken } from './auth.js'
+import { accessToken } from '@appsys/devtool-auth'
 import type { CdnOptions } from './options.js'
 
 /** Raised when the CDN answers with an error. */
@@ -150,7 +150,7 @@ export class CdnClient {
    * @returns The answer.
    */
   private async request (method: string, path: string, init: RequestInit & { duplex?: 'half' } = {}): Promise<Response> {
-    const token = await accessToken(this._options)
+    const token = await accessToken(this._options.auth)
     const url = path === '' ? `${this._options.url}/devtool` : `${this._options.url}/devtool/${path.split('/').map(encodeURIComponent).join('/')}`
 
     return fetch(url, { ...init, method, headers: { ...init.headers, Authorization: `Bearer ${token}` } })

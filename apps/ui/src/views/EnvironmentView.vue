@@ -311,7 +311,7 @@ function pull (): void {
  */
 function login (): void {
   sessionStore.openLoginWindow()
-  wsStore.cdnLogin()
+  wsStore.authLogin()
 }
 
 /**
@@ -406,12 +406,12 @@ onMounted(() => wsStore.envRefresh())
             size="sm"
             @click="login"
           >
-            Sign in{{ session.issuerName ? ` with ${session.issuerName}` : "" }}
+            Sign in{{ session.providerName ? ` with ${session.providerName}` : "" }}
           </Button>
           <span
             v-else
             class="text-xs text-muted-foreground"
-          >Waiting for {{ session.issuerName ?? "the sign-in" }}…</span>
+          >Waiting for {{ session.providerName ?? "the sign-in" }}…</span>
         </div>
 
         <div

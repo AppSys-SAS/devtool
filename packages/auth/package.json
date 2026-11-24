@@ -1,0 +1,24 @@
+{
+  "name": "@appsys/devtool-auth",
+  "version": "0.1.1",
+  "type": "module",
+  "main": "./lib/index.js",
+  "types": "./lib/index.d.ts",
+  "files": [
+    "lib"
+  ],
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "import": "./lib/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b tsconfig.json --force",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@appsys/devtool-config": "workspace:*",
+    "oauth4webapi": "^3.8.8"
+  }
+}

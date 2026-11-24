@@ -3,6 +3,7 @@ import fs from 'node:fs/promises'
 import net from 'node:net'
 import type { AgentAction, AgentDefinition, CertificateAcme, ForgeKind, ClientConfigPayload, CommandArg, CommandChoice, CommandForm, CommandInput, DirectoryDefinition, DirectoryFiles, DirectoryFilesType, DirectoryScripts, ScriptSettings, AdtDefinition, DirectoryDefaultAction, DirectoryShortcut, DnsDefinition, DnsRecord, HostAccess, IntegrationDefinition, IntegrationType, LoadBalancerCertificate, McpCategory, McpEnvironmentItem, McpPatterns, McpRules, McpSettings, McpTarget, PassthroughRule, ProjectDefinition, ProjectRestore, RuntimeConfig, SidebarSettings, SortMode } from '@appsys/devtool-shared'
 import { AGENT_ACTIONS, DEFAULT_AGENT_PROMPTS, defaultMcpRules, integrationKey, isMcpLevel, logger, readMcpRules, shortcutKey, SORT_MODES, sortKeys } from '@appsys/devtool-shared'
+import { type AuthOptions, readAuthOptions } from '@appsys/devtool-auth'
 import { type LegoOptionValue, legoRunArgs } from '@appsys/devtool-certs'
 import { configSourceKey, resolveAppIdentity, resolveCacheFolder } from '@appsys/devtool-config'
 import { FORGES, findForge, originUrl, repositoryOf } from '@appsys/devtool-git'
@@ -150,6 +151,9 @@ export class DevtoolConfigure {
   /** The tokens of the integrations, value blocks not read yet, by `<section>[/<project>]/<slug>`, never sent to the interfaces. */
   public integrationTokens: Record<string, string>
 
+  /** The identity provider signing the developers in, null when the configuration declares none. */
+  public auth: AuthOptions | null
+
   /** The prompts of the actions of agents by kind of items, `adt.agentPrompts`, over those of the devtool. */
   private agentPrompts: Partial<Record<ForgeKind, Partial<Record<AgentAction, string>>>>
 
@@ -169,6 +173,7 @@ export class DevtoolConfigure {
     this.dns = null
     this.integrations = []
     this.integrationTokens = {}
+    this.auth = null
     this.agentPrompts = {}
     this.projects = {}
     this.automations = {}
@@ -311,6 +316,15 @@ export class DevtoolConfigure {
       this.reconfigureLoadBalancers()
     } catch (error) {
       this.addWarning('loadBalancers', error instanceof Error ? error.message : 'Unknown load balancer error')
+    }
+
+    const auth = readAuthOptions(this.initialConfig.auth)
+    this.auth = auth.options
+    for (const problem of auth.problems) {
+      this.addWarning(problem.setting, problem.message)
+    }
+    if (this.initialConfig.cdn !== undefined && this.initialConfig.auth === undefined) {
+      this.addWarning('cdn', 'needs an auth section, signing the developers in')
     }
 
     this.passthrough = this.readPassthrough('passthrough', this.initialConfig.passthrough)
@@ -1369,7 +1383,7 @@ export class DevtoolConfigure {
     ]
     for (const value of values) {
       for (const block of findInvalidValueBlocks(value.text)) {
-        this.addWarning(value.slug, `unknown value block ${block}, expected {{ op://… }}, {{ file://… }} or {{ $(…) }}`)
+        this.addWarning(value.slug, `unknown value block ${block}, expected {{ op://… }}, {{ file://… }}, {{ $(…) }} or {{ auth://… }}`)
       }
     }
 

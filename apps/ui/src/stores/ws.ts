@@ -50,7 +50,7 @@ class WsStore {
           case 'file':
             filesStore.loadFile(payload.data as never)
             break
-          case 'cdnSession':
+          case 'authSession':
             sessionStore.load(payload.data as never)
             break
           case 'environment':
@@ -181,15 +181,15 @@ class WsStore {
   /**
    * Asks the server to sign the developer in.
    */
-  cdnLogin (): void {
-    this.send('cdnLogin', {})
+  authLogin (): void {
+    this.send('authLogin', {})
   }
 
   /**
    * Asks the server to sign the developer out.
    */
-  cdnLogout (): void {
-    this.send('cdnLogout', {})
+  authLogout (): void {
+    this.send('authLogout', {})
   }
 
   /**

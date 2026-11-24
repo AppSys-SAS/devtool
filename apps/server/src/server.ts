@@ -4,7 +4,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { FilePayload, FileTreePayload, McpMessagePayload, PortOwner, RuntimeConfig, SidebarOrderChange } from '@appsys/devtool-shared'
 import { logger, SORT_MODES } from '@appsys/devtool-shared'
 import type { WebSocket } from 'ws'
-import { DevtoolCdnSession } from './cdn-session.js'
+import { DevtoolAuthSession } from './auth-session.js'
 import type { CommandAutomation } from './command-automation.js'
 import { DevtoolCertificates } from './certificates.js'
 import { type CommandStreamHooks, DevtoolCommandStream } from './command-stream.js'
@@ -55,7 +55,7 @@ export class DevtoolServer implements McpServerHost {
 
   private commandStreams: DevtoolCommandStream[]
 
-  private readonly cdnSession: DevtoolCdnSession
+  readonly authSession: DevtoolAuthSession
 
   readonly environment: DevtoolEnvironment
 
@@ -84,8 +84,8 @@ export class DevtoolServer implements McpServerHost {
     this.lb = null
     this.commandStreams = []
     this.environment = new DevtoolEnvironment(payload => this.http.sendToWsConnections('environment', payload))
-    this.cdnSession = new DevtoolCdnSession(async payload => {
-      await this.http.sendToWsConnections('cdnSession', payload)
+    this.authSession = new DevtoolAuthSession(async payload => {
+      await this.http.sendToWsConnections('authSession', payload)
       if (!payload.pendingLoginUrl) {
         this.refreshEnvironment()
       }
@@ -101,7 +101,8 @@ export class DevtoolServer implements McpServerHost {
     this.forgeItems = new DevtoolForgeItems({
       publish: async payload => {
         await this.http?.sendToWsConnections('forgeItems', payload)
-      }
+      },
+      readAuth: async value => this.authSession.value(value)
     })
     this.mcp = new DevtoolMcp(this)
   }
@@ -250,7 +251,7 @@ export class DevtoolServer implements McpServerHost {
    */
   async onNewConnection (ws: WebSocket): Promise<void> {
     await this.http.sendToWsConnections('config', this.configWrapper.getForClient(this.version), ws)
-    await this.http.sendToWsConnections('cdnSession', await this.cdnSession.status(), ws)
+    await this.http.sendToWsConnections('authSession', await this.authSession.status(), ws)
     await this.http.sendToWsConnections('environment', this.environment.state(), ws)
     await this.http.sendToWsConnections('certificates', this.certificates.state(), ws)
     await this.http.sendToWsConnections('forgeItems', this.forgeItems.state(), ws)
@@ -281,13 +282,13 @@ export class DevtoolServer implements McpServerHost {
       return
     }
 
-    if (message.type === 'cdnLogin') {
-      void this.cdnSession.login()
+    if (message.type === 'authLogin') {
+      void this.authSession.login()
       return
     }
 
-    if (message.type === 'cdnLogout') {
-      await this.cdnSession.logout()
+    if (message.type === 'authLogout') {
+      await this.authSession.logout()
       return
     }
 
@@ -555,7 +556,7 @@ export class DevtoolServer implements McpServerHost {
       await this.lb.recreate()
     }
     await this.http.sendToWsConnections('config', this.configWrapper.getForClient(this.version))
-    await this.cdnSession.publish()
+    await this.authSession.publish()
   }
 
   /**
@@ -660,7 +661,7 @@ export class DevtoolServer implements McpServerHost {
     this.configWrapper = new DevtoolConfigure(nextConfig.raw, nextConfig.origin)
     await this.configWrapper.reconfigure()
     this.config = this.configWrapper.runtimeConfig
-    this.cdnSession.configure(nextConfig.raw.cdn)
+    this.authSession.configure(nextConfig.raw.auth)
     this.environment.configure(nextConfig.raw)
     await this.certificates.configure(this.config, this.configWrapper.automations)
     this.forgeItems.configure(this.config, this.configWrapper.automations, this.configWrapper.integrationTokens)

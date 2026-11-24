@@ -4,7 +4,7 @@ import { RouterLink, useRoute } from 'vue-router'
 import { useColorMode } from '@vueuse/core'
 import { Icon } from '@iconify/vue'
 import { ArrowDownUp, Bookmark, Bot, Download, FileCog, FolderTree, FolderX, Monitor, Moon, Play, RefreshCw, RotateCcw, Square, Sun } from '@lucide/vue'
-import CdnSession from '@/components/CdnSession.vue'
+import AuthSession from '@/components/AuthSession.vue'
 import SidebarStreamItem from '@/components/SidebarStreamItem.vue'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -631,7 +631,7 @@ function resolveStreamIcon (directory: SidebarDirectory, stream: CommandStream):
       </div>
     </ScrollArea>
     <Separator />
-    <CdnSession v-if="sidebarSettings.login" />
+    <AuthSession v-if="sidebarSettings.login" />
     <div class="flex items-center justify-between gap-2 px-3 py-2">
       <RouterLink
         :to="{ name: 'dashboard' }"

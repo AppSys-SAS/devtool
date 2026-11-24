@@ -2,14 +2,18 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { parseEnv } from 'node:util'
+import { AUTH_VALUES, type AuthValue } from '@appsys/devtool-auth'
 import { stripAnsi } from '@appsys/devtool-shared'
 import { parse as parseYaml } from 'yaml'
 import { OpTerminal } from './op-terminal.js'
 
 const VALUE_BLOCK = /\{\{\s*(.*?)\s*\}\}/gs
-const SECRET_REFERENCE = /^op:\/\/[^\r\n]+$/
-const FILE_REFERENCE = /^file:\/\/([^#\r\n]+)(?:#(\/[^\r\n]*))?$/
-const SHELL_SUBSTITUTION = /^\$\((.+)\)$/s
+const VALUE_SOURCES = {
+  op: /^op:\/\/[^\r\n]+$/,
+  file: /^file:\/\/([^#\r\n]+)(?:#(\/[^\r\n]*))?$/,
+  shell: /^\$\((.+)\)$/s,
+  auth: new RegExp(`^auth://(${AUTH_VALUES.join('|')})$`)
+} satisfies Record<string, RegExp>
 const MAX_OUTPUT_LENGTH = 8192
 const MIN_SCRUBBED_LENGTH = 4
 const SCRUBBED = '••••'
@@ -33,15 +37,29 @@ export interface CommandAutomation {
 /** Runs a shell command and gives its standard output, failing when the command fails. */
 export type ShellRunner = (command: string) => Promise<string>
 
+/** Gives a value of the signed-in developer, failing when nobody is signed in. */
+export type AuthReader = (value: AuthValue) => Promise<string>
+
+/** Where the value blocks of a command are read. */
+export interface CommandSecretsOptions {
+  /** The 1Password account the references are read from, null for the default one. */
+  account: string | null
+  /** The folder relative file references are resolved from. */
+  folder: string
+  /** Runs the shell commands of the substitutions. */
+  runShell: ShellRunner
+  /** Reads the values of the signed-in developer. */
+  readAuth: AuthReader
+}
+
 /**
- * Lists the value blocks of a text that are neither a 1Password reference, a file reference nor a
- * shell substitution.
+ * Lists the value blocks of a text that none of the value sources reads.
  * @param text The text.
  * @returns Each invalid block, as written.
  */
 export function findInvalidValueBlocks (text: string): string[] {
   return [...text.matchAll(VALUE_BLOCK)]
-    .filter(([, expression]) => !SECRET_REFERENCE.test(expression) && !FILE_REFERENCE.test(expression) && !SHELL_SUBSTITUTION.test(expression))
+    .filter(([, expression]) => !Object.values(VALUE_SOURCES).some(source => source.test(expression)))
     .map(([block]) => block)
 }
 
@@ -67,25 +85,29 @@ function parseValueFile (file: string, content: string): unknown {
 
 /**
  * Reads the value blocks of the texts of a command, `{{ op://<vault>/<item>/<field> }}` from
- * 1Password in a terminal of its own, `{{ file://<path>#<pointer> }}` from a file and
- * `{{ $(<command>) }}` from the output of a shell command, each expression once, and hides every
- * value read from the output.
+ * 1Password in a terminal of its own, `{{ file://<path>#<pointer> }}` from a file,
+ * `{{ $(<command>) }}` from the output of a shell command and `{{ auth://<value> }}` from the
+ * signed-in developer, each expression once, and hides every value read from the output.
  */
 export class CommandSecrets {
   private readonly _values = new Map<string, string>()
 
   private _terminal: OpTerminal | null = null
 
+  private readonly _readers: Record<keyof typeof VALUE_SOURCES, (match: RegExpExecArray) => Promise<string>> = {
+    op: async match => {
+      this._terminal ??= OpTerminal.open(this._options.account)
+      return this._terminal.read(match[0])
+    },
+    file: async match => this.readFile(match[1], match[2] ?? null),
+    shell: async match => (await this._options.runShell(match[1])).replace(/[\r\n]+$/, ''),
+    auth: async match => this._options.readAuth(match[1] as AuthValue)
+  }
+
   /**
-   * @param _account The 1Password account the references are read from, null for the default one.
-   * @param _folder The folder relative file references are resolved from.
-   * @param _runShell Runs the shell commands of the substitutions.
+   * @param _options Where the value blocks are read.
    */
-  constructor (
-    private readonly _account: string | null,
-    private readonly _folder: string,
-    private readonly _runShell: ShellRunner
-  ) {}
+  constructor (private readonly _options: CommandSecretsOptions) {}
 
   /**
    * Replaces the value blocks of a text by their values.
@@ -146,21 +168,12 @@ export class CommandSecrets {
    * @returns Its value.
    */
   private async readOnce (expression: string): Promise<string> {
-    if (SECRET_REFERENCE.test(expression)) {
-      this._terminal ??= OpTerminal.open(this._account)
-      return this._terminal.read(expression)
+    for (const [source, pattern] of Object.entries(VALUE_SOURCES)) {
+      const match = pattern.exec(expression)
+      if (match) {
+        return this._readers[source as keyof typeof VALUE_SOURCES](match)
+      }
     }
-
-    const reference = FILE_REFERENCE.exec(expression)
-    if (reference) {
-      return this.readFile(reference[1], reference[2] ?? null)
-    }
-
-    const substitution = SHELL_SUBSTITUTION.exec(expression)
-    if (substitution) {
-      return (await this._runShell(substitution[1])).replace(/[\r\n]+$/, '')
-    }
-
     throw new Error(`Unknown value block {{ ${expression} }}`)
   }
 
@@ -171,7 +184,7 @@ export class CommandSecrets {
    * @returns The content of the file without its trailing newlines, or the value as text.
    */
   private async readFile (filePath: string, pointer: string | null): Promise<string> {
-    const file = path.resolve(this._folder, filePath.startsWith('~/') ? path.join(os.homedir(), filePath.slice(2)) : filePath)
+    const file = path.resolve(this._options.folder, filePath.startsWith('~/') ? path.join(os.homedir(), filePath.slice(2)) : filePath)
     const content = await fs.readFile(file, 'utf8')
     if (pointer === null) {
       return content.replace(/[\r\n]+$/, '')

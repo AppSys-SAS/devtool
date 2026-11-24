@@ -1,11 +1,11 @@
 import { ref } from 'vue'
-import type { CdnSessionPayload } from '@appsys/devtool-shared'
+import type { AuthSessionPayload } from '@appsys/devtool-shared'
 
 /**
- * Sign-in state of the developer on the CDN, and the browser tab of a sign-in in progress.
+ * Sign-in state of the developer with the identity provider, and the browser tab of a sign-in in progress.
  */
 class SessionStore {
-  state = ref<CdnSessionPayload | null>(null)
+  state = ref<AuthSessionPayload | null>(null)
 
   private loginWindow: Window | null = null
 
@@ -14,7 +14,7 @@ class SessionStore {
    * closing it when the sign-in failed before.
    * @param payload The state, or null once disconnected from the server.
    */
-  load (payload: CdnSessionPayload | null): void {
+  load (payload: AuthSessionPayload | null): void {
     this.state.value = payload
     if (!this.loginWindow || this.loginWindow.closed) {
       return

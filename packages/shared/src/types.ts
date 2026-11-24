@@ -695,19 +695,20 @@ export interface PortConflict {
 /** What to do about a port conflict: stop its holders, also running the command again, or leave it. */
 export type PortConflictAction = 'kill' | 'killAndRestart' | 'dismiss'
 
-/** Sign-in state of the developer on the CDN. */
-export interface CdnSessionPayload {
-  /** Whether the configuration declares a CDN. */
+/** Sign-in state of the developer with the identity provider of the configuration. */
+export interface AuthSessionPayload {
+  /** Whether the configuration declares an identity provider. */
   configured: boolean
-  /** Name shown for the OpenID Connect issuer signing in, null when the configuration gives none. */
-  issuerName: string | null
+  /** Name shown for the identity provider, null when the configuration gives none. */
+  providerName: string | null
   signedIn: boolean
   user: {
     name: string | null
     username: string | null
+    email: string | null
     groups: string[]
   } | null
-  /** Sign-in address to open while a sign-in started from the interface waits for the issuer. */
+  /** Sign-in address to open while a sign-in started from the interface waits for the identity provider. */
   pendingLoginUrl: string | null
   /** Why the last sign-in started from the interface failed. */
   error: string | null
@@ -855,7 +856,7 @@ export interface WsPayloadMap {
   config: ClientConfigPayload
   fileTree: FileTreePayload
   file: FilePayload
-  cdnSession: CdnSessionPayload
+  authSession: AuthSessionPayload
   environment: EnvironmentPayload
   certificates: CertificatePayload[]
   forgeItems: ForgeItemsPayload[]

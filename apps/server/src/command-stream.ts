@@ -642,7 +642,12 @@ export class DevtoolCommandStream {
       throw new Error('Command already running')
     }
 
-    const secrets = new CommandSecrets(this.automation?.opAccount ?? null, this.cwd, command => this.runInShell(command))
+    const secrets = new CommandSecrets({
+      account: this.automation?.opAccount ?? null,
+      folder: this.cwd,
+      runShell: command => this.runInShell(command),
+      readAuth: async value => this.server.authSession.value(value)
+    })
     let resolvedArgs = finalArgs
     let resolvedEnv = this.env
     if (this.automation) {
