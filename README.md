@@ -618,3 +618,27 @@ pnpm --filter @appsys/devtool-ui dev
 # Server-only dev mode
 pnpm --filter @appsys/devtool-server dev
 ```
+
+## Development
+
+The packages resolve each other through their built `lib/`, so build before checking:
+
+```bash
+pnpm build
+pnpm typecheck   # tsc 7 (tsgo); the TypeScript 6 API stays installed for ESLint
+pnpm lint        # ESLint, with the style rules (`pnpm lint --fix` applies them)
+pnpm test        # Vitest unit tests, `tests/unit/**/*.spec.ts` of each app and package
+pnpm test:e2e    # Playwright end-to-end tests, `e2e/tests`
+```
+
+The end-to-end tests start a devtool on ports 16730 and 16731 with the configuration of
+`e2e/fixtures`, copied to a temporary folder (`$E2E_FOLDER`, `devtool-e2e` in the system temporary
+folder by default). They need Chromium once: `pnpm exec playwright install chromium`.
+
+Commits follow [Conventional Commits](https://www.conventionalcommits.org/): release-please turns
+them into the changelog and the version of the next release, and pull requests are squashed with their
+title as the commit message.
+
+## License
+
+Copyright 2026 AppSys SAS. Licensed under the [Apache License, Version 2.0](LICENSE).
