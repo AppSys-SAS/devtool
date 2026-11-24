@@ -1,26 +1,26 @@
 <script setup lang="ts">
-import { computed, shallowRef } from "vue";
-import type { McpGrantPayload } from "@appsys/devtool-shared";
-import ConfirmDialog from "@/components/ConfirmDialog.vue";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import mcpStore from "@/stores/mcp";
+import { computed, shallowRef } from 'vue'
+import type { McpGrantPayload } from '@appsys/devtool-shared'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import mcpStore from '@/stores/mcp'
 
-const grants = computed(() => mcpStore.state.value?.grants ?? []);
+const grants = computed(() => mcpStore.state.value?.grants ?? [])
 const scopes = computed(() => [
-  { scope: "session" as const, title: "For the session", empty: "Nothing granted until an agent disconnects.", grants: grants.value.filter((grant) => grant.scope === "session") },
-  { scope: "always" as const, title: "Always", empty: "Nothing granted for good.", grants: grants.value.filter((grant) => grant.scope === "always") },
-]);
-const clearing = shallowRef<"session" | "always">("session");
-const clearOpen = shallowRef(false);
+  { scope: 'session' as const, title: 'For the session', empty: 'Nothing granted until an agent disconnects.', grants: grants.value.filter(grant => grant.scope === 'session') },
+  { scope: 'always' as const, title: 'Always', empty: 'Nothing granted for good.', grants: grants.value.filter(grant => grant.scope === 'always') }
+])
+const clearing = shallowRef<'session' | 'always'>('session')
+const clearOpen = shallowRef(false)
 
 /**
  * Asks whether to remove every grant of a scope.
  * @param scope Whether the grants last for a session or always.
  */
-function askClear(scope: "session" | "always"): void {
-  clearing.value = scope;
-  clearOpen.value = true;
+function askClear (scope: 'session' | 'always'): void {
+  clearing.value = scope
+  clearOpen.value = true
 }
 
 /**
@@ -28,8 +28,8 @@ function askClear(scope: "session" | "always"): void {
  * @param grant The grant.
  * @returns The description.
  */
-function granted(grant: McpGrantPayload): string {
-  return `${grant.client ? mcpStore.clientName(grant.client) : "any client"} ·${new Date(grant.date).toLocaleString()}`;
+function granted (grant: McpGrantPayload): string {
+  return `${grant.client ? mcpStore.clientName(grant.client) : 'any client'} ·${new Date(grant.date).toLocaleString()}`
 }
 </script>
 

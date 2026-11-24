@@ -1,35 +1,35 @@
 <script setup lang="ts">
-import { computed } from "vue";
-import { Icon } from "@iconify/vue";
-import StreamView from "@/views/StreamView.vue";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import configStore from "@/stores/config";
-import { commandLine, startDefaultCommand } from "@/lib/directory-commands";
-import { defaultShortcut } from "@/lib/shortcuts";
+import { computed } from 'vue'
+import { Icon } from '@iconify/vue'
+import StreamView from '@/views/StreamView.vue'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import configStore from '@/stores/config'
+import { commandLine, startDefaultCommand } from '@/lib/directory-commands'
+import { defaultShortcut } from '@/lib/shortcuts'
 
 const props = defineProps<{
-  projectSlug: string;
-  directorySlug: string;
-}>();
+  projectSlug: string
+  directorySlug: string
+}>()
 
-const directoryDefinition = computed(() => configStore.getDirectory(props.projectSlug, props.directorySlug));
-const directory = computed(() => directoryDefinition.value?.directory ?? null);
-const directoryName = computed(() => directory.value?.name ?? props.directorySlug);
-const directoryDescription = computed(() => directory.value?.description ?? null);
-const directoryArgs = computed(() => (directory.value?.args ? commandLine(directory.value.args) : null));
-const directoryShell = computed(() => directory.value?.shell ?? "N/A");
-const defaultAction = computed(() => (directory.value ? defaultShortcut(props.projectSlug, directory.value) : null));
-const streamSlug = computed(() => configStore.getDirectoryStreamPrimary(props.projectSlug, props.directorySlug));
+const directoryDefinition = computed(() => configStore.getDirectory(props.projectSlug, props.directorySlug))
+const directory = computed(() => directoryDefinition.value?.directory ?? null)
+const directoryName = computed(() => directory.value?.name ?? props.directorySlug)
+const directoryDescription = computed(() => directory.value?.description ?? null)
+const directoryArgs = computed(() => (directory.value?.args ? commandLine(directory.value.args) : null))
+const directoryShell = computed(() => directory.value?.shell ?? 'N/A')
+const defaultAction = computed(() => (directory.value ? defaultShortcut(props.projectSlug, directory.value) : null))
+const streamSlug = computed(() => configStore.getDirectoryStreamPrimary(props.projectSlug, props.directorySlug))
 </script>
 
 <template>
   <StreamView
     v-if="streamSlug"
+    :key="streamSlug"
     :project-slug="projectSlug"
     :directory-slug="directorySlug"
     :stream-slug="streamSlug"
-    :key="streamSlug"
   />
   <div
     v-else

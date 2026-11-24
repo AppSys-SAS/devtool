@@ -1,24 +1,24 @@
-import { addAPIProvider } from "@iconify/vue";
-import { createApp } from "vue";
-import pkg from "../package.json";
-import App from "./App.vue";
-import router from "./router";
-import "./style.css";
+import { addAPIProvider } from '@iconify/vue'
+import { createApp } from 'vue'
+import pkg from '../package.json'
+import App from './App.vue'
+import router from './router'
+import './style.css'
 
 declare global {
   interface Window {
     devtool?: {
-      version: string;
-    };
+      version: string
+    }
   }
 }
 
 window.devtool = {
-  version: pkg.version,
-};
+  version: pkg.version
+}
 
-addAPIProvider("", { resources: [window.location.origin], path: "/icons/" });
+addAPIProvider('', { resources: [window.location.origin], path: '/icons/' })
 
-const app = createApp(App);
-app.use(router);
-app.mount("#app");
+const app = createApp(App)
+app.use(router)
+app.mount('#app')

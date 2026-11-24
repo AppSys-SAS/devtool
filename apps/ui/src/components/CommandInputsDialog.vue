@@ -1,28 +1,28 @@
 <script setup lang="ts">
-import { computed } from "vue";
-import { DialogContent, DialogDescription, DialogOverlay, DialogPortal, DialogRoot, DialogTitle } from "reka-ui";
-import type { CommandInputValue } from "@appsys/devtool-shared";
-import CommandInputsForm from "@/components/CommandInputsForm.vue";
-import { commandName } from "@/lib/directory-commands";
-import commandInputsStore from "@/stores/command-inputs";
+import { computed } from 'vue'
+import { DialogContent, DialogDescription, DialogOverlay, DialogPortal, DialogRoot, DialogTitle } from 'reka-ui'
+import type { CommandInputValue } from '@appsys/devtool-shared'
+import CommandInputsForm from '@/components/CommandInputsForm.vue'
+import { commandName } from '@/lib/directory-commands'
+import commandInputsStore from '@/stores/command-inputs'
 
-const request = commandInputsStore.current;
+const request = commandInputsStore.current
 
 const open = computed({
   get: () => request.value !== null,
-  set: (value) => {
+  set: value => {
     if (!value) {
-      commandInputsStore.close();
+      commandInputsStore.close()
     }
-  },
-});
+  }
+})
 
 /**
  * Runs the command with the values typed.
  * @param inputs The values of its inputs.
  */
-function submit(inputs: CommandInputValue[]): void {
-  commandInputsStore.submit(inputs);
+function submit (inputs: CommandInputValue[]): void {
+  commandInputsStore.submit(inputs)
 }
 </script>
 

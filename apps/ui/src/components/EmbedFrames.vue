@@ -1,15 +1,15 @@
 <script setup lang="ts">
-import { computed } from "vue";
-import { useElementBounding } from "@vueuse/core";
-import embedStore from "@/stores/embeds";
+import { computed } from 'vue'
+import { useElementBounding } from '@vueuse/core'
+import embedStore from '@/stores/embeds'
 
-const bounds = useElementBounding(computed(() => embedStore.shown.value?.element ?? null));
+const bounds = useElementBounding(computed(() => embedStore.shown.value?.element ?? null))
 const style = computed(() => ({
   top: `${bounds.top.value}px`,
   left: `${bounds.left.value}px`,
   width: `${bounds.width.value}px`,
-  height: `${bounds.height.value}px`,
-}));
+  height: `${bounds.height.value}px`
+}))
 </script>
 
 <template>

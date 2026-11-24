@@ -1,23 +1,23 @@
-import type { RouteLocationRaw } from "vue-router";
-import type { DirectoryDefinition, DirectoryShortcut, ForgeItemsPayload, IntegrationDefinition, ProjectDefinition } from "@appsys/devtool-shared";
-import { integrationKey } from "@appsys/devtool-shared";
-import router from "@/router";
-import { commandName, iconFromMeta, runDirectoryCommand, startDefaultCommand } from "@/lib/directory-commands";
-import forgeItemsStore from "@/stores/forge-items";
+import type { RouteLocationRaw } from 'vue-router'
+import type { DirectoryDefinition, DirectoryShortcut, ForgeItemsPayload, IntegrationDefinition, ProjectDefinition } from '@appsys/devtool-shared'
+import { integrationKey } from '@appsys/devtool-shared'
+import router from '@/router'
+import { commandName, iconFromMeta, runDirectoryCommand, startDefaultCommand } from '@/lib/directory-commands'
+import forgeItemsStore from '@/stores/forge-items'
 
-const GENERIC_INTEGRATION_ICON = "lucide:app-window";
+const GENERIC_INTEGRATION_ICON = 'lucide:app-window'
 
 /** Something the sidebar offers in one click, as an icon or a row. */
 export interface SidebarShortcut {
-  key: string;
-  name: string;
+  key: string
+  name: string
   /** Iconify name of its icon. */
-  icon: string;
+  icon: string
   /** The page of the devtool it shows, null when it opens a tab or runs a command. */
-  route: RouteLocationRaw | null;
-  open: () => void;
+  route: RouteLocationRaw | null
+  open: () => void
   /** A number shown with it, such as what waits for the person, absent when there is none. */
-  count?: number;
+  count?: number
 }
 
 /**
@@ -27,14 +27,14 @@ export interface SidebarShortcut {
  * @param directorySlug The directory declaring it, if any.
  * @returns Its route, under the project or the directory declaring it when there is one.
  */
-export function integrationRoute(integration: IntegrationDefinition, projectSlug?: string, directorySlug?: string): RouteLocationRaw {
+export function integrationRoute (integration: IntegrationDefinition, projectSlug?: string, directorySlug?: string): RouteLocationRaw {
   if (projectSlug && directorySlug) {
-    return { name: "directory-integration", params: { projectSlug, directorySlug, integration: integration.slug } };
+    return { name: 'directory-integration', params: { projectSlug, directorySlug, integration: integration.slug } }
   }
   if (projectSlug) {
-    return { name: "project-integration", params: { projectSlug, integration: integration.slug } };
+    return { name: 'project-integration', params: { projectSlug, integration: integration.slug } }
   }
-  return { name: "integration", params: { integration: integration.slug } };
+  return { name: 'integration', params: { integration: integration.slug } }
 }
 
 /**
@@ -42,8 +42,8 @@ export function integrationRoute(integration: IntegrationDefinition, projectSlug
  * @param integration The integration.
  * @returns Whether it has a page: embedded, or listing pull requests or issues.
  */
-export function hasIntegrationPage(integration: IntegrationDefinition): boolean {
-  return integration.embed || integration.type !== "web";
+export function hasIntegrationPage (integration: IntegrationDefinition): boolean {
+  return integration.embed || integration.type !== 'web'
 }
 
 /**
@@ -52,11 +52,11 @@ export function hasIntegrationPage(integration: IntegrationDefinition): boolean 
  * @param state The items of the integration.
  * @returns Their number, 0 before they are read.
  */
-function waitingCount(state: ForgeItemsPayload | null): number {
+function waitingCount (state: ForgeItemsPayload | null): number {
   if (!state) {
-    return 0;
+    return 0
   }
-  return state.kind === "pullRequests" ? state.items.filter((item) => item.reviewRequested).length : state.items.filter((item) => item.assigned).length;
+  return state.kind === 'pullRequests' ? state.items.filter(item => item.reviewRequested).length : state.items.filter(item => item.assigned).length
 }
 
 /**
@@ -67,17 +67,17 @@ function waitingCount(state: ForgeItemsPayload | null): number {
  * @param directorySlug The directory declaring it, if any.
  * @returns The shortcut.
  */
-export function integrationShortcut(integration: IntegrationDefinition, projectSlug?: string, directorySlug?: string): SidebarShortcut {
-  const route = hasIntegrationPage(integration) ? integrationRoute(integration, projectSlug, directorySlug) : null;
-  const waiting = integration.badge && projectSlug ? waitingCount(forgeItemsStore.get(integrationKey(projectSlug, directorySlug ?? null, integration.slug))) : 0;
+export function integrationShortcut (integration: IntegrationDefinition, projectSlug?: string, directorySlug?: string): SidebarShortcut {
+  const route = hasIntegrationPage(integration) ? integrationRoute(integration, projectSlug, directorySlug) : null
+  const waiting = integration.badge && projectSlug ? waitingCount(forgeItemsStore.get(integrationKey(projectSlug, directorySlug ?? null, integration.slug))) : 0
   return {
     key: `integration:${integration.slug}`,
     name: integration.name,
     icon: integration.icon,
     route,
     open: () => (route ? void router.push(route) : openTab(integration.url)),
-    ...(waiting ? { count: waiting } : {}),
-  };
+    ...(waiting ? { count: waiting } : {})
+  }
 }
 
 /**
@@ -87,26 +87,26 @@ export function integrationShortcut(integration: IntegrationDefinition, projectS
  * @param shortcuts Its icons or lines.
  * @returns The shortcuts, in order, without those naming nothing.
  */
-export function directoryShortcuts(projectSlug: string, directory: DirectoryDefinition, shortcuts: DirectoryShortcut[]): SidebarShortcut[] {
+export function directoryShortcuts (projectSlug: string, directory: DirectoryDefinition, shortcuts: DirectoryShortcut[]): SidebarShortcut[] {
   return shortcuts.flatMap((shortcut): SidebarShortcut[] => {
-    const key = `${shortcut.type}:${shortcut.slug}:${shortcut.index}`;
-    if (shortcut.type === "integration") {
-      const integration = directory.integrations.find((item) => item.slug === shortcut.slug);
-      return integration ? [integrationShortcut(integration, projectSlug, directory.slug)] : [];
+    const key = `${shortcut.type}:${shortcut.slug}:${shortcut.index}`
+    if (shortcut.type === 'integration') {
+      const integration = directory.integrations.find(item => item.slug === shortcut.slug)
+      return integration ? [integrationShortcut(integration, projectSlug, directory.slug)] : []
     }
-    if (shortcut.type === "command") {
-      const command = directory.extras[shortcut.slug];
-      return command ? [{ key, name: commandName(command), icon: iconFromMeta(command.meta), route: null, open: () => runDirectoryCommand(projectSlug, directory.slug, command) }] : [];
+    if (shortcut.type === 'command') {
+      const command = directory.extras[shortcut.slug]
+      return command ? [{ key, name: commandName(command), icon: iconFromMeta(command.meta), route: null, open: () => runDirectoryCommand(projectSlug, directory.slug, command) }] : []
     }
-    if (shortcut.type === "files") {
-      const files = directory.files[shortcut.slug];
-      const route = { name: "directory-files", params: { projectSlug, directorySlug: directory.slug, fileSpace: shortcut.slug } };
-      const icon = files?.type === "agentSkills" ? "lucide:sparkles" : "lucide:folder-open";
-      return files ? [{ key, name: files.name, icon, route, open: () => void router.push(route) }] : [];
+    if (shortcut.type === 'files') {
+      const files = directory.files[shortcut.slug]
+      const route = { name: 'directory-files', params: { projectSlug, directorySlug: directory.slug, fileSpace: shortcut.slug } }
+      const icon = files?.type === 'agentSkills' ? 'lucide:sparkles' : 'lucide:folder-open'
+      return files ? [{ key, name: files.name, icon, route, open: () => void router.push(route) }] : []
     }
-    const host = directory.loadBalancer[shortcut.slug]?.hosts[shortcut.index];
-    return host ? [{ key, name: host, icon: "lucide:globe", route: null, open: () => openTab(`https://${host}`) }] : [];
-  });
+    const host = directory.loadBalancer[shortcut.slug]?.hosts[shortcut.index]
+    return host ? [{ key, name: host, icon: 'lucide:globe', route: null, open: () => openTab(`https://${host}`) }] : []
+  })
 }
 
 /**
@@ -115,11 +115,11 @@ export function directoryShortcuts(projectSlug: string, directory: DirectoryDefi
  * @param shortcuts Its icons or lines.
  * @returns The shortcuts, in order, without those naming nothing.
  */
-export function projectShortcuts(project: ProjectDefinition, shortcuts: DirectoryShortcut[]): SidebarShortcut[] {
-  return shortcuts.flatMap((shortcut) => {
-    const integration = shortcut.type === "integration" ? project.integrations.find((item) => item.slug === shortcut.slug) : undefined;
-    return integration ? [integrationShortcut(integration, project.slug)] : [];
-  });
+export function projectShortcuts (project: ProjectDefinition, shortcuts: DirectoryShortcut[]): SidebarShortcut[] {
+  return shortcuts.flatMap(shortcut => {
+    const integration = shortcut.type === 'integration' ? project.integrations.find(item => item.slug === shortcut.slug) : undefined
+    return integration ? [integrationShortcut(integration, project.slug)] : []
+  })
 }
 
 /**
@@ -128,28 +128,28 @@ export function projectShortcuts(project: ProjectDefinition, shortcuts: Director
  * @param directory The directory.
  * @returns The shortcut, null when the directory declares no default action.
  */
-export function defaultShortcut(projectSlug: string, directory: DirectoryDefinition): SidebarShortcut | null {
-  const action = directory.defaultAction;
+export function defaultShortcut (projectSlug: string, directory: DirectoryDefinition): SidebarShortcut | null {
+  const action = directory.defaultAction
   if (!action) {
-    return null;
+    return null
   }
-  const shortcut =
-    action.shortcut.type === "command"
-      ? { key: "default", name: directory.name, icon: "lucide:play", route: null, open: () => startDefaultCommand(projectSlug, directory) }
-      : directoryShortcuts(projectSlug, directory, [action.shortcut])[0];
+  const shortcut
+    = action.shortcut.type === 'command'
+      ? { key: 'default', name: directory.name, icon: 'lucide:play', route: null, open: () => startDefaultCommand(projectSlug, directory) }
+      : directoryShortcuts(projectSlug, directory, [action.shortcut])[0]
   if (!shortcut) {
-    return null;
+    return null
   }
-  if (action.icon && action.icon !== "own") {
-    return { ...shortcut, icon: action.icon };
+  if (action.icon && action.icon !== 'own') {
+    return { ...shortcut, icon: action.icon }
   }
-  return action.shortcut.type === "integration" && action.icon !== "own" ? { ...shortcut, icon: GENERIC_INTEGRATION_ICON } : shortcut;
+  return action.shortcut.type === 'integration' && action.icon !== 'own' ? { ...shortcut, icon: GENERIC_INTEGRATION_ICON } : shortcut
 }
 
 /**
  * Opens a URL in a new tab of the browser.
  * @param url The URL.
  */
-function openTab(url: string): void {
-  window.open(url, "_blank", "noopener");
+function openTab (url: string): void {
+  window.open(url, '_blank', 'noopener')
 }

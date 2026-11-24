@@ -7,20 +7,20 @@ import {
   AlertDialogOverlay,
   AlertDialogPortal,
   AlertDialogRoot,
-  AlertDialogTitle,
-} from "reka-ui";
-import { buttonVariants } from "@/components/ui/button";
+  AlertDialogTitle
+} from 'reka-ui'
+import { buttonVariants } from '@/components/ui/button'
 
 defineProps<{
-  title: string;
-  confirmLabel: string;
-}>();
+  title: string
+  confirmLabel: string
+}>()
 
-const open = defineModel<boolean>("open", { required: true });
+const open = defineModel<boolean>('open', { required: true })
 
 const emit = defineEmits<{
-  confirm: [];
-}>();
+  confirm: []
+}>()
 </script>
 
 <template>

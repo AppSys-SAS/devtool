@@ -1,4 +1,4 @@
-export { DevtoolMcp } from "./server.js";
+export { DevtoolMcp } from './server.js'
 export type {
   McpCertificates,
   McpCommandStart,
@@ -10,5 +10,5 @@ export type {
   McpServerHost,
   McpTerminal,
   McpTerminalEvents,
-  McpUiMessage,
-} from "./host.js";
+  McpUiMessage
+} from './host.js'

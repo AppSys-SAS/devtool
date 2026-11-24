@@ -1,16 +1,16 @@
-import type { Socket } from "node:net";
-import { type HostAccess, isLoopback } from "@appsys/devtool-shared";
+import type { Socket } from 'node:net'
+import { type HostAccess, isLoopback } from '@appsys/devtool-shared'
 
-const relayedClients = new Map<number, string>();
+const relayedClients = new Map<number, string>()
 
 /**
  * Remembers the client of a connection relayed from this machine, by the local port of the relay.
  * @param localPort The local port of the relaying connection.
  * @param address The remote address of the client.
  */
-export function rememberRelayedClient(localPort: number | undefined, address: string | undefined): void {
+export function rememberRelayedClient (localPort: number | undefined, address: string | undefined): void {
   if (localPort !== undefined && address) {
-    relayedClients.set(localPort, address);
+    relayedClients.set(localPort, address)
   }
 }
 
@@ -18,9 +18,9 @@ export function rememberRelayedClient(localPort: number | undefined, address: st
  * Forgets the client of a relayed connection once the relay is closed.
  * @param localPort The local port of the relaying connection.
  */
-export function forgetRelayedClient(localPort: number | undefined): void {
+export function forgetRelayedClient (localPort: number | undefined): void {
   if (localPort !== undefined) {
-    relayedClients.delete(localPort);
+    relayedClients.delete(localPort)
   }
 }
 
@@ -29,9 +29,9 @@ export function forgetRelayedClient(localPort: number | undefined): void {
  * @param socket The connection.
  * @returns The remote address, undefined when unknown.
  */
-export function clientAddressOf(socket: Pick<Socket, "remoteAddress" | "remotePort">): string | undefined {
-  const relayed = socket.remotePort !== undefined && isLoopback(socket.remoteAddress) ? relayedClients.get(socket.remotePort) : undefined;
-  return relayed ?? socket.remoteAddress;
+export function clientAddressOf (socket: Pick<Socket, 'remoteAddress' | 'remotePort'>): string | undefined {
+  const relayed = socket.remotePort !== undefined && isLoopback(socket.remoteAddress) ? relayedClients.get(socket.remotePort) : undefined
+  return relayed ?? socket.remoteAddress
 }
 
 /**
@@ -40,8 +40,8 @@ export function clientAddressOf(socket: Pick<Socket, "remoteAddress" | "remotePo
  * @param address The remote address of the client connection, never a forwarded header.
  * @returns True when the client is allowed.
  */
-export function allows(access: HostAccess, address: string | undefined): boolean {
-  return access === "network" || isLoopback(address);
+export function allows (access: HostAccess, address: string | undefined): boolean {
+  return access === 'network' || isLoopback(address)
 }
 
 /**
@@ -50,6 +50,6 @@ export function allows(access: HostAccess, address: string | undefined): boolean
  * @param host The host name, lower case.
  * @returns True when the host matches.
  */
-export function matchesHost(pattern: string, host: string): boolean {
-  return pattern.startsWith("*.") ? host.endsWith(pattern.slice(1)) : host === pattern;
+export function matchesHost (pattern: string, host: string): boolean {
+  return pattern.startsWith('*.') ? host.endsWith(pattern.slice(1)) : host === pattern
 }

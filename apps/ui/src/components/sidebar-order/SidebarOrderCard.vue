@@ -1,27 +1,27 @@
 <script setup lang="ts">
-import { Check, Pencil, X } from "@lucide/vue";
-import { SORT_MODES, type SortMode } from "@appsys/devtool-shared";
-import ConfigFileChoice from "@/components/ConfigFileChoice.vue";
-import SidebarOrderList from "@/components/sidebar-order/SidebarOrderList.vue";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Select } from "@/components/ui/select";
-import { type SidebarOrderList as OrderedList, useSidebarOrderEdit } from "@/composables/useSidebarOrderEdit";
-import configStore from "@/stores/config";
+import { Check, Pencil, X } from '@lucide/vue'
+import { SORT_MODES, type SortMode } from '@appsys/devtool-shared'
+import ConfigFileChoice from '@/components/ConfigFileChoice.vue'
+import SidebarOrderList from '@/components/sidebar-order/SidebarOrderList.vue'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Select } from '@/components/ui/select'
+import { type SidebarOrderList as OrderedList, useSidebarOrderEdit } from '@/composables/useSidebarOrderEdit'
+import configStore from '@/stores/config'
 
-const SORT_LABELS: Record<SortMode, string> = { config: "As configured", name: "By name", manual: "By hand" };
-const SORT_OPTIONS = SORT_MODES.map((mode) => ({ label: SORT_LABELS[mode], value: mode }));
+const SORT_LABELS: Record<SortMode, string> = { config: 'As configured', name: 'By name', manual: 'By hand' }
+const SORT_OPTIONS = SORT_MODES.map(mode => ({ label: SORT_LABELS[mode], value: mode }))
 
-const edit = useSidebarOrderEdit();
+const edit = useSidebarOrderEdit()
 
 /**
  * Changes how a list is ordered from its selector.
  * @param list The list.
  * @param value The mode chosen.
  */
-function choose(list: OrderedList, value: string | undefined): void {
+function choose (list: OrderedList, value: string | undefined): void {
   if (value && SORT_MODES.includes(value as SortMode)) {
-    edit.setSort(list, value as SortMode);
+    edit.setSort(list, value as SortMode)
   }
 }
 </script>

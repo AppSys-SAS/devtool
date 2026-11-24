@@ -1,40 +1,40 @@
 <script setup lang="ts">
-import { computed, watch } from "vue";
-import { useRoute, useRouter } from "vue-router";
-import { TabsContent, TabsList, TabsRoot, TabsTrigger } from "reka-ui";
-import McpConnectionCard from "@/components/mcp/McpConnectionCard.vue";
-import McpGrantsCard from "@/components/mcp/McpGrantsCard.vue";
-import McpHistoryCard from "@/components/mcp/McpHistoryCard.vue";
-import McpPendingCard from "@/components/mcp/McpPendingCard.vue";
-import McpPermissionsCard from "@/components/mcp/McpPermissionsCard.vue";
-import configStore from "@/stores/config";
-import mcpStore from "@/stores/mcp";
+import { computed, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { TabsContent, TabsList, TabsRoot, TabsTrigger } from 'reka-ui'
+import McpConnectionCard from '@/components/mcp/McpConnectionCard.vue'
+import McpGrantsCard from '@/components/mcp/McpGrantsCard.vue'
+import McpHistoryCard from '@/components/mcp/McpHistoryCard.vue'
+import McpPendingCard from '@/components/mcp/McpPendingCard.vue'
+import McpPermissionsCard from '@/components/mcp/McpPermissionsCard.vue'
+import configStore from '@/stores/config'
+import mcpStore from '@/stores/mcp'
 
-const route = useRoute();
-const router = useRouter();
+const route = useRoute()
+const router = useRouter()
 
 const tab = computed({
-  get: () => (typeof route.query.tab === "string" ? route.query.tab : ""),
-  set: (value) => void router.replace({ query: { ...route.query, tab: value } }),
-});
+  get: () => (typeof route.query.tab === 'string' ? route.query.tab : ''),
+  set: value => void router.replace({ query: { ...route.query, tab: value } })
+})
 
 watch(
   () => route.query.tab,
-  (value) => {
-    if (typeof value !== "string") {
-      tab.value = mcpStore.state.value?.pending.length ? "waiting" : "connection";
+  value => {
+    if (typeof value !== 'string') {
+      tab.value = mcpStore.state.value?.pending.length ? 'waiting' : 'connection'
     }
   },
-  { immediate: true },
-);
+  { immediate: true }
+)
 
 const tabs = computed(() => [
-  { value: "connection", label: "Connection", count: mcpStore.state.value?.sessions.length ?? 0 },
-  { value: "waiting", label: "Waiting", count: mcpStore.state.value?.pending.length ?? 0 },
-  { value: "history", label: "History", count: mcpStore.history.value.length },
-  { value: "grants", label: "Grants", count: mcpStore.state.value?.grants.length ?? 0 },
-  { value: "permissions", label: "Permissions", count: 0 },
-]);
+  { value: 'connection', label: 'Connection', count: mcpStore.state.value?.sessions.length ?? 0 },
+  { value: 'waiting', label: 'Waiting', count: mcpStore.state.value?.pending.length ?? 0 },
+  { value: 'history', label: 'History', count: mcpStore.history.value.length },
+  { value: 'grants', label: 'Grants', count: mcpStore.state.value?.grants.length ?? 0 },
+  { value: 'permissions', label: 'Permissions', count: 0 }
+])
 </script>
 
 <template>

@@ -1,81 +1,81 @@
 <script setup lang="ts">
-import { computed, provide } from "vue";
-import { Icon } from "@iconify/vue";
-import { Bookmark, FolderTree, Sparkles } from "@lucide/vue";
-import { RouterLink, RouterView } from "vue-router";
-import type { DirectoryExtra } from "@appsys/devtool-shared";
-import CommandItem from "@/components/CommandItem.vue";
-import IntegrationLink from "@/components/IntegrationLink.vue";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import bookmarkStore from "@/stores/bookmark";
-import configStore from "@/stores/config";
-import layoutStore, { rightSidebarKey } from "@/stores/layout";
+import { computed, provide } from 'vue'
+import { Icon } from '@iconify/vue'
+import { Bookmark, FolderTree, Sparkles } from '@lucide/vue'
+import { RouterLink, RouterView } from 'vue-router'
+import type { DirectoryExtra } from '@appsys/devtool-shared'
+import CommandItem from '@/components/CommandItem.vue'
+import IntegrationLink from '@/components/IntegrationLink.vue'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import bookmarkStore from '@/stores/bookmark'
+import configStore from '@/stores/config'
+import layoutStore, { rightSidebarKey } from '@/stores/layout'
 
 const props = defineProps<{
-  projectSlug: string;
-  directorySlug: string;
-}>();
+  projectSlug: string
+  directorySlug: string
+}>()
 
-provide(rightSidebarKey, true);
+provide(rightSidebarKey, true)
 
-type DirectoryCommand =
+type DirectoryCommand
+  = | {
+    type: 'external-link'
+    name: string
+    icon: string
+    href: string
+  }
   | {
-      type: "external-link";
-      name: string;
-      icon: string;
-      href: string;
-    }
-  | {
-      type: "command";
-      name: string;
-      command: DirectoryExtra;
-    };
-
-const directoryDefinition = computed(() => configStore.getDirectory(props.projectSlug, props.directorySlug));
-const directory = computed(() => directoryDefinition.value?.directory ?? null);
-const projectName = computed(() => directoryDefinition.value?.project.name ?? props.projectSlug);
-const directoryName = computed(() => directoryDefinition.value?.directory.name ?? props.directorySlug);
-const directoryDescription = computed(() => directoryDefinition.value?.directory.description ?? null);
-const scripts = computed(() => Object.values(directory.value?.extras ?? {}).filter((extra) => extra.script));
-
-const commands = computed<DirectoryCommand[]>(() => {
-  const directory = directoryDefinition.value?.directory;
-  if (!directory) {
-    return [];
+    type: 'command'
+    name: string
+    command: DirectoryExtra
   }
 
-  const nextCommands: DirectoryCommand[] = [];
+const directoryDefinition = computed(() => configStore.getDirectory(props.projectSlug, props.directorySlug))
+const directory = computed(() => directoryDefinition.value?.directory ?? null)
+const projectName = computed(() => directoryDefinition.value?.project.name ?? props.projectSlug)
+const directoryName = computed(() => directoryDefinition.value?.directory.name ?? props.directorySlug)
+const directoryDescription = computed(() => directoryDefinition.value?.directory.description ?? null)
+const scripts = computed(() => Object.values(directory.value?.extras ?? {}).filter(extra => extra.script))
 
-  const hosts = new Set<string>();
+const commands = computed<DirectoryCommand[]>(() => {
+  const directory = directoryDefinition.value?.directory
+  if (!directory) {
+    return []
+  }
+
+  const nextCommands: DirectoryCommand[] = []
+
+  const hosts = new Set<string>()
   for (const service of Object.values(directory.loadBalancer)) {
     for (const host of service.hosts) {
-      hosts.add(host);
+      hosts.add(host)
     }
   }
   for (const host of hosts) {
     nextCommands.push({
-      type: "external-link",
+      type: 'external-link',
       name: host,
-      icon: "lucide:globe",
-      href: `https://${host}`,
-    });
+      icon: 'lucide:globe',
+      href: `https://${host}`
+    })
   }
 
-  for (const command of Object.values(directory.extras).filter((extra) => !extra.script)) {
-    nextCommands.push({ type: "command", name: command.slug, command });
+  for (const command of Object.values(directory.extras).filter(extra => !extra.script)) {
+    nextCommands.push({ type: 'command', name: command.slug, command })
   }
 
-  return nextCommands;
-});
+  return nextCommands
+})
 
-const bookmarkSlug = computed(() => `${props.projectSlug}/${props.directorySlug}`);
-const isBookmarked = computed(() => bookmarkStore.slugs.value.includes(bookmarkSlug.value));
+const bookmarkSlug = computed(() => `${props.projectSlug}/${props.directorySlug}`)
+const isBookmarked = computed(() => bookmarkStore.slugs.value.includes(bookmarkSlug.value))
 
-function toggleBookmark(): void {
-  bookmarkStore.toggleBookmark(bookmarkSlug.value);
+function toggleBookmark (): void {
+  bookmarkStore.toggleBookmark(bookmarkSlug.value)
 }
 
 const handleOpenLinkInNewTab = (href: string) => {
@@ -124,9 +124,9 @@ const handleOpenLinkInNewTab = (href: string) => {
               <button
                 v-if="command.type === 'external-link'"
                 type="button"
-                @click="handleOpenLinkInNewTab(command.href)"
                 target="_blank"
                 class="flex w-full items-start gap-2 rounded-md border px-3 py-2 text-left text-sm transition-colors hover:bg-accent/60"
+                @click="handleOpenLinkInNewTab(command.href)"
               >
                 <Icon
                   :icon="command.icon"

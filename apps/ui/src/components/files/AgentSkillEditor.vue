@@ -1,47 +1,47 @@
 <script setup lang="ts">
-import { computed, shallowRef } from "vue";
-import { TriangleAlert } from "@lucide/vue";
-import { type AgentSkillFields, readAgentSkill, withAgentSkillBody, withAgentSkillFields } from "@appsys/devtool-shared";
-import CodeEditor from "@/components/CodeEditor.vue";
-import MarkdownPreview from "@/components/files/MarkdownPreview.vue";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
+import { computed, shallowRef } from 'vue'
+import { TriangleAlert } from '@lucide/vue'
+import { type AgentSkillFields, readAgentSkill, withAgentSkillBody, withAgentSkillFields } from '@appsys/devtool-shared'
+import CodeEditor from '@/components/CodeEditor.vue'
+import MarkdownPreview from '@/components/files/MarkdownPreview.vue'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { cn } from '@/lib/utils'
 
-const DESCRIPTION_MAX_LENGTH = 1024;
+const DESCRIPTION_MAX_LENGTH = 1024
 
 const props = defineProps<{
   /** The path of the `SKILL.md` in its file space. */
-  path: string;
+  path: string
   /** The folder of the skill. */
-  folder: string;
+  folder: string
   /** Whether the instructions are shown rendered next to the editor. */
-  preview: boolean;
-}>();
+  preview: boolean
+}>()
 
-const content = defineModel<string>({ required: true });
+const content = defineModel<string>({ required: true })
 
 const emit = defineEmits<{
-  save: [];
-}>();
+  save: []
+}>()
 
-const mode = shallowRef<"form" | "source">("form");
+const mode = shallowRef<'form' | 'source'>('form')
 
-const skill = computed(() => readAgentSkill(content.value, props.folder));
+const skill = computed(() => readAgentSkill(content.value, props.folder))
 const body = computed({
   get: () => skill.value.body,
-  set: (value) => {
-    content.value = withAgentSkillBody(content.value, value);
-  },
-});
+  set: value => {
+    content.value = withAgentSkillBody(content.value, value)
+  }
+})
 
 /**
  * Sets a field of the header of the skill in its content.
  * @param field The field.
  * @param value Its new value.
  */
-function setField(field: keyof AgentSkillFields, value: string | number): void {
-  content.value = withAgentSkillFields(content.value, { [field]: String(value) });
+function setField (field: keyof AgentSkillFields, value: string | number): void {
+  content.value = withAgentSkillFields(content.value, { [field]: String(value) })
 }
 </script>
 

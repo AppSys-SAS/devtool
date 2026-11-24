@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import type { McpDetail } from "@appsys/devtool-shared";
+import type { McpDetail } from '@appsys/devtool-shared'
 
 defineProps<{
-  details: McpDetail[];
-}>();
+  details: McpDetail[]
+}>()
 </script>
 
 <template>

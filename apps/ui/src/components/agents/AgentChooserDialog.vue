@@ -1,26 +1,26 @@
 <script setup lang="ts">
-import { DialogClose, DialogContent, DialogDescription, DialogOverlay, DialogPortal, DialogRoot, DialogTitle } from "reka-ui";
-import type { AgentDefinition } from "@appsys/devtool-shared";
-import AgentOption from "@/components/agents/AgentOption.vue";
-import { buttonVariants } from "@/components/ui/button";
+import { DialogClose, DialogContent, DialogDescription, DialogOverlay, DialogPortal, DialogRoot, DialogTitle } from 'reka-ui'
+import type { AgentDefinition } from '@appsys/devtool-shared'
+import AgentOption from '@/components/agents/AgentOption.vue'
+import { buttonVariants } from '@/components/ui/button'
 
 defineProps<{
-  agents: AgentDefinition[];
-}>();
+  agents: AgentDefinition[]
+}>()
 
-const open = defineModel<boolean>("open", { required: true });
+const open = defineModel<boolean>('open', { required: true })
 
 const emit = defineEmits<{
-  choose: [agent: AgentDefinition];
-}>();
+  choose: [agent: AgentDefinition]
+}>()
 
 /**
  * Picks an agent and closes the dialog.
  * @param agent The agent picked.
  */
-function choose(agent: AgentDefinition): void {
-  open.value = false;
-  emit("choose", agent);
+function choose (agent: AgentDefinition): void {
+  open.value = false
+  emit('choose', agent)
 }
 </script>
 

@@ -1,30 +1,30 @@
 <script setup lang="ts">
-import { type Component, computed } from "vue";
-import { Circle, CircleX, Eye, FilePen, GitCommitHorizontal, GitMerge, Link, LoaderCircle, Pencil, RotateCcw, Tag, Upload, UserPlus } from "@lucide/vue";
-import type { ForgeEventKind, ForgeReviewState, ForgeTimelineEvent } from "@appsys/devtool-shared";
-import MarkdownPreview from "@/components/files/MarkdownPreview.vue";
-import ForgeReviewThread from "@/components/forge/ForgeReviewThread.vue";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { formatRelativeDate } from "@/lib/format";
+import { type Component, computed } from 'vue'
+import { Circle, CircleX, Eye, FilePen, GitCommitHorizontal, GitMerge, Link, LoaderCircle, Pencil, RotateCcw, Tag, Upload, UserPlus } from '@lucide/vue'
+import type { ForgeEventKind, ForgeReviewState, ForgeTimelineEvent } from '@appsys/devtool-shared'
+import MarkdownPreview from '@/components/files/MarkdownPreview.vue'
+import ForgeReviewThread from '@/components/forge/ForgeReviewThread.vue'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { formatRelativeDate } from '@/lib/format'
 
 const props = defineProps<{
   /** What happened, the oldest first. */
-  events: ForgeTimelineEvent[];
+  events: ForgeTimelineEvent[]
   /** About how many events come before these, 0 when there is none. */
-  remaining: number;
+  remaining: number
   /** Whether the events before these are being read. */
-  loading: boolean;
-}>();
+  loading: boolean
+}>()
 
 const emit = defineEmits<{
-  loadPrevious: [];
-}>();
+  loadPrevious: []
+}>()
 
-type Commit = Extract<ForgeTimelineEvent, { type: "commit" }>;
+type Commit = Extract<ForgeTimelineEvent, { type: 'commit' }>
 
 /** An entry of the timeline: an event, or commits pushed one after the other, the most recent first. */
-type Entry = { key: string; event: Exclude<ForgeTimelineEvent, Commit>; commits?: undefined } | { key: string; event?: undefined; commits: Commit[] };
+type Entry = { key: string, event: Exclude<ForgeTimelineEvent, Commit>, commits?: undefined } | { key: string, event?: undefined, commits: Commit[] }
 
 const EVENT_ICONS: Record<ForgeEventKind, Component> = {
   label: Tag,
@@ -37,29 +37,29 @@ const EVENT_ICONS: Record<ForgeEventKind, Component> = {
   rename: Pencil,
   reference: Link,
   draft: FilePen,
-  other: Circle,
-};
+  other: Circle
+}
 
-const REVIEWS: Record<ForgeReviewState, { label: string; class: string }> = {
-  approved: { label: "approved", class: "border-transparent bg-emerald-500/15 text-emerald-700 dark:text-emerald-400" },
-  changesRequested: { label: "requested changes", class: "border-transparent bg-amber-500/15 text-amber-700 dark:text-amber-400" },
-  commented: { label: "reviewed", class: "" },
-  dismissed: { label: "review dismissed", class: "text-muted-foreground" },
-};
+const REVIEWS: Record<ForgeReviewState, { label: string, class: string }> = {
+  approved: { label: 'approved', class: 'border-transparent bg-emerald-500/15 text-emerald-700 dark:text-emerald-400' },
+  changesRequested: { label: 'requested changes', class: 'border-transparent bg-amber-500/15 text-amber-700 dark:text-amber-400' },
+  commented: { label: 'reviewed', class: '' },
+  dismissed: { label: 'review dismissed', class: 'text-muted-foreground' }
+}
 
 const entries = computed(() =>
   [...props.events].reverse().reduce<Entry[]>((list, event, index) => {
-    const last = list.at(-1);
-    if (event.type !== "commit") {
-      list.push({ key: `${props.events.length - index}`, event });
+    const last = list.at(-1)
+    if (event.type !== 'commit') {
+      list.push({ key: `${props.events.length - index}`, event })
     } else if (last?.commits) {
-      last.commits.push(event);
+      last.commits.push(event)
     } else {
-      list.push({ key: `${props.events.length - index}`, commits: [event] });
+      list.push({ key: `${props.events.length - index}`, commits: [event] })
     }
-    return list;
-  }, []),
-);
+    return list
+  }, [])
+)
 </script>
 
 <template>

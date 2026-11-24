@@ -1,17 +1,17 @@
 <script setup lang="ts">
-import { computed } from "vue";
-import FileSpaceView from "@/views/FileSpaceView.vue";
-import configStore from "@/stores/config";
+import { computed } from 'vue'
+import FileSpaceView from '@/views/FileSpaceView.vue'
+import configStore from '@/stores/config'
 
 const props = defineProps<{
-  projectSlug: string;
-  directorySlug: string;
-  fileSpace: string;
-}>();
+  projectSlug: string
+  directorySlug: string
+  fileSpace: string
+}>()
 
-const directory = computed(() => configStore.getDirectory(props.projectSlug, props.directorySlug)?.directory ?? null);
-const files = computed(() => directory.value?.files[props.fileSpace] ?? null);
-const commands = computed(() => files.value?.commands.map((slug) => directory.value?.extras[slug]).filter((command) => command !== undefined) ?? []);
+const directory = computed(() => configStore.getDirectory(props.projectSlug, props.directorySlug)?.directory ?? null)
+const files = computed(() => directory.value?.files[props.fileSpace] ?? null)
+const commands = computed(() => files.value?.commands.map(slug => directory.value?.extras[slug]).filter(command => command !== undefined) ?? [])
 </script>
 
 <template>

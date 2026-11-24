@@ -1,20 +1,20 @@
-import runServer, { relaunchUnderApp } from "./index.js";
-import { loadMergedConfig } from "@appsys/devtool-config";
-import { logger } from "@appsys/devtool-shared";
-import { DEV_UI_PATH } from "./dev-options.js";
+import runServer, { relaunchUnderApp } from './index.js'
+import { loadMergedConfig } from '@appsys/devtool-config'
+import { logger } from '@appsys/devtool-shared'
+import { DEV_UI_PATH } from './dev-options.js'
 
 void (async () => {
   try {
     if (await relaunchUnderApp((await loadMergedConfig()).config)) {
-      return;
+      return
     }
-    logger.setLevel("debug");
+    logger.setLevel('debug')
     await runServer({
       uiPath: DEV_UI_PATH,
-      loadBalancer: false,
-    });
+      loadBalancer: false
+    })
   } catch (error) {
-    logger.error("Server", "Dev", error instanceof Error ? error.message : "Unknown startup error");
-    process.exit(1);
+    logger.error('Server', 'Dev', error instanceof Error ? error.message : 'Unknown startup error')
+    process.exit(1)
   }
-})();
+})()

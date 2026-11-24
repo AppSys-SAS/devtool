@@ -1,23 +1,23 @@
 <script setup lang="ts">
-import { computed } from "vue";
-import { Icon } from "@iconify/vue";
-import IntegrationLink from "@/components/IntegrationLink.vue";
-import DirectorySummaryCard from "@/components/project/DirectorySummaryCard.vue";
-import { iconFromMeta } from "@/lib/directory-commands";
-import configStore from "@/stores/config";
+import { computed } from 'vue'
+import { Icon } from '@iconify/vue'
+import IntegrationLink from '@/components/IntegrationLink.vue'
+import DirectorySummaryCard from '@/components/project/DirectorySummaryCard.vue'
+import { iconFromMeta } from '@/lib/directory-commands'
+import configStore from '@/stores/config'
 
 const props = defineProps<{
-  projectSlug: string;
-}>();
+  projectSlug: string
+}>()
 
-const project = computed(() => configStore.getProject(props.projectSlug));
+const project = computed(() => configStore.getProject(props.projectSlug))
 const directories = computed(() => {
-  const value = project.value;
-  return (value?.content ?? []).flatMap((key) => value?.directories[key] ?? []).filter((directory) => !directory.missing);
-});
+  const value = project.value
+  return (value?.content ?? []).flatMap(key => value?.directories[key] ?? []).filter(directory => !directory.missing)
+})
 const running = computed(
-  () => configStore.commandStreams.value.filter((stream) => stream.projectSlug === props.projectSlug && stream.status === "RUNNING").length,
-);
+  () => configStore.commandStreams.value.filter(stream => stream.projectSlug === props.projectSlug && stream.status === 'RUNNING').length
+)
 </script>
 
 <template>

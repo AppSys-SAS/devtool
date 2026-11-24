@@ -1,13 +1,13 @@
-import type { AgentDefinition } from "@appsys/devtool-shared";
-import { agentUrl } from "@appsys/devtool-shared";
-import wsStore from "@/stores/ws";
+import type { AgentDefinition } from '@appsys/devtool-shared'
+import { agentUrl } from '@appsys/devtool-shared'
+import wsStore from '@/stores/ws'
 
 /** Where an agent works: a project, or one of its directories, and its folder. */
 export interface AgentPlace {
-  projectSlug: string;
+  projectSlug: string
   /** The directory, null for the project itself. */
-  directorySlug: string | null;
-  path: string;
+  directorySlug: string | null
+  path: string
 }
 
 /**
@@ -18,15 +18,15 @@ export interface AgentPlace {
  * @param prompt The prompt.
  * @param name The name of the terminal.
  */
-export function startAgent(agent: AgentDefinition, place: AgentPlace, prompt: string, name: string): void {
+export function startAgent (agent: AgentDefinition, place: AgentPlace, prompt: string, name: string): void {
   if (agent.args) {
-    wsStore.agentStart(agent.slug, place.projectSlug, place.directorySlug, prompt, name);
-    return;
+    wsStore.agentStart(agent.slug, place.projectSlug, place.directorySlug, prompt, name)
+    return
   }
-  const url = agentUrl(agent, prompt, place.path);
+  const url = agentUrl(agent, prompt, place.path)
   if (/^https?:/i.test(url)) {
-    window.open(url, "_blank", "noopener");
+    window.open(url, '_blank', 'noopener')
   } else {
-    window.location.assign(url);
+    window.location.assign(url)
   }
 }

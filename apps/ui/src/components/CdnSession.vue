@@ -1,26 +1,26 @@
 <script setup lang="ts">
-import { computed } from "vue";
-import { LogIn, LogOut, UserRound } from "@lucide/vue";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import sessionStore from "@/stores/session";
-import wsStore from "@/stores/ws";
+import { computed } from 'vue'
+import { LogIn, LogOut, UserRound } from '@lucide/vue'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import sessionStore from '@/stores/session'
+import wsStore from '@/stores/ws'
 
-const state = sessionStore.state;
+const state = sessionStore.state
 
-const displayName = computed(() => state.value?.user?.name ?? state.value?.user?.username ?? "Signed in");
+const displayName = computed(() => state.value?.user?.name ?? state.value?.user?.username ?? 'Signed in')
 
 const initials = computed(() => {
-  const words = (state.value?.user?.name ?? state.value?.user?.username ?? "").split(/[\s._-]+/).filter((word) => word !== "");
-  return words.slice(0, 2).map((word) => word[0]?.toUpperCase()).join("");
-});
+  const words = (state.value?.user?.name ?? state.value?.user?.username ?? '').split(/[\s._-]+/).filter(word => word !== '')
+  return words.slice(0, 2).map(word => word[0]?.toUpperCase()).join('')
+})
 
 /**
  * Starts a sign-in, in a new tab.
  */
-function login(): void {
-  sessionStore.openLoginWindow();
-  wsStore.cdnLogin();
+function login (): void {
+  sessionStore.openLoginWindow()
+  wsStore.cdnLogin()
 }
 </script>
 

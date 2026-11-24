@@ -1,13 +1,13 @@
 <script setup lang="ts">
-import { useClipboard } from "@vueuse/core";
-import { Check, Copy } from "@lucide/vue";
-import { Button } from "@/components/ui/button";
+import { useClipboard } from '@vueuse/core'
+import { Check, Copy } from '@lucide/vue'
+import { Button } from '@/components/ui/button'
 
 defineProps<{
-  text: string;
-}>();
+  text: string
+}>()
 
-const { copy, copied } = useClipboard({ copiedDuring: 1500 });
+const { copy, copied } = useClipboard({ copiedDuring: 1500 })
 </script>
 
 <template>

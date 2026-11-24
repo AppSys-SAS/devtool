@@ -1,58 +1,58 @@
 <script setup lang="ts">
-import { computed, useTemplateRef, watchEffect } from "vue";
-import { Icon } from "@iconify/vue";
-import { ExternalLink, RotateCw } from "@lucide/vue";
-import { integrationKey } from "@appsys/devtool-shared";
-import ForgeItemDetail from "@/components/forge/ForgeItemDetail.vue";
-import ForgeItemList from "@/components/forge/ForgeItemList.vue";
-import SidebarToggle from "@/components/SidebarToggle.vue";
-import { Button } from "@/components/ui/button";
-import type { AgentPlace } from "@/lib/agents";
-import configStore from "@/stores/config";
-import embedStore from "@/stores/embeds";
-import forgeItemsStore from "@/stores/forge-items";
-import wsStore from "@/stores/ws";
+import { computed, useTemplateRef, watchEffect } from 'vue'
+import { Icon } from '@iconify/vue'
+import { ExternalLink, RotateCw } from '@lucide/vue'
+import { integrationKey } from '@appsys/devtool-shared'
+import ForgeItemDetail from '@/components/forge/ForgeItemDetail.vue'
+import ForgeItemList from '@/components/forge/ForgeItemList.vue'
+import SidebarToggle from '@/components/SidebarToggle.vue'
+import { Button } from '@/components/ui/button'
+import type { AgentPlace } from '@/lib/agents'
+import configStore from '@/stores/config'
+import embedStore from '@/stores/embeds'
+import forgeItemsStore from '@/stores/forge-items'
+import wsStore from '@/stores/ws'
 
 const props = defineProps<{
-  integration: string;
-  projectSlug?: string;
-  directorySlug?: string;
+  integration: string
+  projectSlug?: string
+  directorySlug?: string
   /** The number of the pull request or issue shown, none for the list. */
-  number?: string;
-}>();
+  number?: string
+}>()
 
 const place = computed<AgentPlace | null>(() => {
-  const section = props.projectSlug ? configStore.projects.value?.[props.projectSlug] : undefined;
+  const section = props.projectSlug ? configStore.projects.value?.[props.projectSlug] : undefined
   if (!section) {
-    return null;
+    return null
   }
   if (!props.directorySlug) {
-    return { projectSlug: section.slug, directorySlug: null, path: section.path };
+    return { projectSlug: section.slug, directorySlug: null, path: section.path }
   }
-  const directory = section.directories[props.directorySlug];
-  return directory ? { projectSlug: section.slug, directorySlug: directory.slug, path: directory.path } : null;
-});
+  const directory = section.directories[props.directorySlug]
+  return directory ? { projectSlug: section.slug, directorySlug: directory.slug, path: directory.path } : null
+})
 const integrations = computed(() => {
   if (!props.projectSlug) {
-    return configStore.integrations.value;
+    return configStore.integrations.value
   }
-  const section = configStore.projects.value?.[props.projectSlug];
-  return (props.directorySlug ? section?.directories[props.directorySlug]?.integrations : section?.integrations) ?? [];
-});
-const definition = computed(() => integrations.value.find((item) => item.slug === props.integration) ?? null);
-const forgeKey = computed(() => (definition.value && definition.value.type !== "web" && place.value ? integrationKey(place.value.projectSlug, place.value.directorySlug, props.integration) : null));
-const forgeState = computed(() => (forgeKey.value ? forgeItemsStore.get(forgeKey.value) : null));
-const frameArea = useTemplateRef<HTMLElement>("frameArea");
+  const section = configStore.projects.value?.[props.projectSlug]
+  return (props.directorySlug ? section?.directories[props.directorySlug]?.integrations : section?.integrations) ?? []
+})
+const definition = computed(() => integrations.value.find(item => item.slug === props.integration) ?? null)
+const forgeKey = computed(() => (definition.value && definition.value.type !== 'web' && place.value ? integrationKey(place.value.projectSlug, place.value.directorySlug, props.integration) : null))
+const forgeState = computed(() => (forgeKey.value ? forgeItemsStore.get(forgeKey.value) : null))
+const frameArea = useTemplateRef<HTMLElement>('frameArea')
 
-watchEffect((onCleanup) => {
-  const element = frameArea.value;
-  const integration = definition.value;
+watchEffect(onCleanup => {
+  const element = frameArea.value
+  const integration = definition.value
   if (!element || !integration?.embed) {
-    return;
+    return
   }
-  embedStore.show({ url: integration.url, title: integration.name }, element);
-  onCleanup(() => embedStore.hide(element));
-});
+  embedStore.show({ url: integration.url, title: integration.name }, element)
+  onCleanup(() => embedStore.hide(element))
+})
 </script>
 
 <template>

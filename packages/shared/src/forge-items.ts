@@ -1,35 +1,35 @@
-import { replaceVariables } from "./command-args.js";
-import type { AgentAction, AgentDefinition, ForgeItemBase, ForgeItemsPayload, ForgeKind, IssuePayload, PullRequestPayload } from "./types.js";
+import { replaceVariables } from './command-args.js'
+import type { AgentAction, AgentDefinition, ForgeItemBase, ForgeItemsPayload, ForgeKind, IssuePayload, PullRequestPayload } from './types.js'
 
 /** What agents may do with the items of each kind, in the order offered. */
 export const AGENT_ACTIONS: Record<ForgeKind, readonly AgentAction[]> = {
-  pullRequests: ["review"],
-  issues: ["analyze", "fix"],
-};
+  pullRequests: ['review'],
+  issues: ['analyze', 'fix']
+}
 
 /** The prompt of each action of agents when neither the integration nor the devtool settings give one. */
 export const DEFAULT_AGENT_PROMPTS: Record<AgentAction, string> = {
   review:
-    'Review the pull request %{ADT:PR_URL} (#%{ADT:PR_NUMBER} "%{ADT:PR_TITLE}", %{ADT:PR_BRANCH} into %{ADT:PR_BASE}). ' +
-    "Read its changes without checking out its branch, then list the problems you find by file and line, the most severe first.",
+    'Review the pull request %{ADT:PR_URL} (#%{ADT:PR_NUMBER} "%{ADT:PR_TITLE}", %{ADT:PR_BRANCH} into %{ADT:PR_BASE}). '
+    + 'Read its changes without checking out its branch, then list the problems you find by file and line, the most severe first.',
   analyze:
-    'Analyze the issue %{ADT:ISSUE_URL} (#%{ADT:ISSUE_NUMBER} "%{ADT:ISSUE_TITLE}"). Read it and its comments, find the code involved, ' +
-    "then explain the cause and propose a plan to solve it. Do not change any file.",
+    'Analyze the issue %{ADT:ISSUE_URL} (#%{ADT:ISSUE_NUMBER} "%{ADT:ISSUE_TITLE}"). Read it and its comments, find the code involved, '
+    + 'then explain the cause and propose a plan to solve it. Do not change any file.',
   fix:
-    'Fix the issue %{ADT:ISSUE_URL} (#%{ADT:ISSUE_NUMBER} "%{ADT:ISSUE_TITLE}"). Read it and its comments, create a branch named after it, ' +
-    "implement and test the fix, then summarize what changed.",
-};
+    'Fix the issue %{ADT:ISSUE_URL} (#%{ADT:ISSUE_NUMBER} "%{ADT:ISSUE_TITLE}"). Read it and its comments, create a branch named after it, '
+    + 'implement and test the fix, then summarize what changed.'
+}
 
 /** An item of a forge with its kind. */
-export type ForgeEntry = { kind: "pullRequests"; item: PullRequestPayload } | { kind: "issues"; item: IssuePayload };
+export type ForgeEntry = { kind: 'pullRequests', item: PullRequestPayload } | { kind: 'issues', item: IssuePayload }
 
 /**
  * Lists the items of an integration with their kind.
  * @param state The items of the integration.
  * @returns Each item with its kind, in order.
  */
-export function forgeEntries(state: ForgeItemsPayload): ForgeEntry[] {
-  return state.kind === "pullRequests" ? state.items.map((item) => ({ kind: "pullRequests", item })) : state.items.map((item) => ({ kind: "issues", item }));
+export function forgeEntries (state: ForgeItemsPayload): ForgeEntry[] {
+  return state.kind === 'pullRequests' ? state.items.map(item => ({ kind: 'pullRequests', item })) : state.items.map(item => ({ kind: 'issues', item }))
 }
 
 /**
@@ -39,8 +39,8 @@ export function forgeEntries(state: ForgeItemsPayload): ForgeEntry[] {
  * @param slug The slug of the integration.
  * @returns Its key, `<section>[/<project>]/<slug>`.
  */
-export function integrationKey(section: string, project: string | null, slug: string): string {
-  return project === null ? `${section}/${slug}` : `${section}/${project}/${slug}`;
+export function integrationKey (section: string, project: string | null, slug: string): string {
+  return project === null ? `${section}/${slug}` : `${section}/${project}/${slug}`
 }
 
 /**
@@ -50,11 +50,11 @@ export function integrationKey(section: string, project: string | null, slug: st
  * @param entry The pull request or the issue.
  * @returns The prompt.
  */
-export function agentPrompt(template: string, entry: ForgeEntry): string {
-  if (entry.kind === "pullRequests") {
-    return replaceVariables(template, { ...itemValues("PR", entry.item), PR_BRANCH: entry.item.branch, PR_BASE: entry.item.base });
+export function agentPrompt (template: string, entry: ForgeEntry): string {
+  if (entry.kind === 'pullRequests') {
+    return replaceVariables(template, { ...itemValues('PR', entry.item), PR_BRANCH: entry.item.branch, PR_BASE: entry.item.base })
   }
-  return replaceVariables(template, itemValues("ISSUE", entry.item));
+  return replaceVariables(template, itemValues('ISSUE', entry.item))
 }
 
 /**
@@ -63,13 +63,13 @@ export function agentPrompt(template: string, entry: ForgeEntry): string {
  * @param item The item.
  * @returns The values, by variable name.
  */
-function itemValues(prefix: string, item: ForgeItemBase): Record<string, string> {
+function itemValues (prefix: string, item: ForgeItemBase): Record<string, string> {
   return {
     [`${prefix}_URL`]: item.url,
     [`${prefix}_NUMBER`]: String(item.number),
     [`${prefix}_TITLE`]: item.title,
-    [`${prefix}_AUTHOR`]: item.author ?? "",
-  };
+    [`${prefix}_AUTHOR`]: item.author ?? ''
+  }
 }
 
 /**
@@ -79,6 +79,6 @@ function itemValues(prefix: string, item: ForgeItemBase): Record<string, string>
  * @param cwd The folder the agent works in.
  * @returns The link.
  */
-export function agentUrl(agent: AgentDefinition, prompt: string, cwd: string): string {
-  return replaceVariables(agent.url ?? "", { PROMPT: prompt, CWD: cwd }, encodeURIComponent);
+export function agentUrl (agent: AgentDefinition, prompt: string, cwd: string): string {
+  return replaceVariables(agent.url ?? '', { PROMPT: prompt, CWD: cwd }, encodeURIComponent)
 }

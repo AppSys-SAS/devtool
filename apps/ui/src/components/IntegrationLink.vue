@@ -1,16 +1,16 @@
 <script setup lang="ts">
-import { Icon } from "@iconify/vue";
-import { RouterLink } from "vue-router";
-import type { IntegrationDefinition } from "@appsys/devtool-shared";
-import { hasIntegrationPage, integrationRoute } from "@/lib/shortcuts";
+import { Icon } from '@iconify/vue'
+import { RouterLink } from 'vue-router'
+import type { IntegrationDefinition } from '@appsys/devtool-shared'
+import { hasIntegrationPage, integrationRoute } from '@/lib/shortcuts'
 
 defineProps<{
-  integration: IntegrationDefinition;
+  integration: IntegrationDefinition
   /** The project declaring it, or holding the directory declaring it, if any. */
-  projectSlug?: string;
+  projectSlug?: string
   /** The directory declaring it, if any. */
-  directorySlug?: string;
-}>();
+  directorySlug?: string
+}>()
 </script>
 
 <template>

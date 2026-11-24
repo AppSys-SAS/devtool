@@ -1,112 +1,112 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { FitAddon } from "@xterm/addon-fit";
-import { SearchAddon } from "@xterm/addon-search";
-import { Unicode11Addon } from "@xterm/addon-unicode11";
-import { WebLinksAddon } from "@xterm/addon-web-links";
-import { Terminal } from "@xterm/xterm";
-import { Eraser, Play, RotateCcw, Search, Square, Trash2 } from "@lucide/vue";
-import router from "@/router";
-import PortConflictBanner from "@/components/PortConflictBanner.vue";
-import SidebarToggle from "@/components/SidebarToggle.vue";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Separator } from "@/components/ui/separator";
-import configStore from "@/stores/config";
-import wsStore from "@/stores/ws";
-import type { CommandStreamLine } from "@/types";
-import type { CommandStreamOutputStore } from "@/stores/command-stream-output";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { FitAddon } from '@xterm/addon-fit'
+import { SearchAddon } from '@xterm/addon-search'
+import { Unicode11Addon } from '@xterm/addon-unicode11'
+import { WebLinksAddon } from '@xterm/addon-web-links'
+import { Terminal } from '@xterm/xterm'
+import { Eraser, Play, RotateCcw, Search, Square, Trash2 } from '@lucide/vue'
+import router from '@/router'
+import PortConflictBanner from '@/components/PortConflictBanner.vue'
+import SidebarToggle from '@/components/SidebarToggle.vue'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Separator } from '@/components/ui/separator'
+import configStore from '@/stores/config'
+import wsStore from '@/stores/ws'
+import type { CommandStreamLine } from '@/types'
+import type { CommandStreamOutputStore } from '@/stores/command-stream-output'
 
 const props = withDefaults(
   defineProps<{
-    streamSlug: string;
-    projectSlug?: string | null;
-    directorySlug?: string | null;
+    streamSlug: string
+    projectSlug?: string | null
+    directorySlug?: string | null
   }>(),
   {
     projectSlug: null,
-    directorySlug: null,
-  },
-);
+    directorySlug: null
+  }
+)
 
-const terminalElement = ref<HTMLElement | null>(null);
-const searchVisible = ref(false);
-const searchQuery = ref("");
-const withInformation = ref(false);
+const terminalElement = ref<HTMLElement | null>(null)
+const searchVisible = ref(false)
+const searchQuery = ref('')
+const withInformation = ref(false)
 
 const stream = computed(
   () =>
-    configStore.commandStreams.value.find((item) => {
+    configStore.commandStreams.value.find(item => {
       if (item.slug !== props.streamSlug) {
-        return false;
+        return false
       }
 
       if (props.projectSlug && item.projectSlug !== props.projectSlug) {
-        return false;
+        return false
       }
 
       if (props.directorySlug && item.directorySlug !== props.directorySlug) {
-        return false;
+        return false
       }
 
-      return true;
-    }) ?? null,
-);
-const outputStoreRef = computed(() => configStore.getCommandStreamsOutput(props.streamSlug));
-const cwd = computed(() => stream.value?.cwd ?? "N/A");
-const runningDate = computed(() => (stream.value?.runningDate ? formatDate(stream.value.runningDate) : null));
+      return true
+    }) ?? null
+)
+const outputStoreRef = computed(() => configStore.getCommandStreamsOutput(props.streamSlug))
+const cwd = computed(() => stream.value?.cwd ?? 'N/A')
+const runningDate = computed(() => (stream.value?.runningDate ? formatDate(stream.value.runningDate) : null))
 const stoppedDate = computed(() =>
-  stream.value?.stoppedDate ? formatDate(stream.value.stoppedDate, stream.value.runningDate ?? undefined) : null,
-);
+  stream.value?.stoppedDate ? formatDate(stream.value.stoppedDate, stream.value.runningDate ?? undefined) : null
+)
 
-const args = computed(() => Object.entries(stream.value?.args ?? {}).map(([key, value]) => `${value}`));
-const exitCode = computed(() => stream.value?.exitCode ?? null);
-const env = computed(() => Object.entries(stream.value?.env ?? {}).map(([key, value]) => `${key}=${value}`));
-const fullName = computed(() => stream.value?.name ?? "N/A");
+const args = computed(() => Object.entries(stream.value?.args ?? {}).map(([key, value]) => `${value}`))
+const exitCode = computed(() => stream.value?.exitCode ?? null)
+const env = computed(() => Object.entries(stream.value?.env ?? {}).map(([key, value]) => `${key}=${value}`))
+const fullName = computed(() => stream.value?.name ?? 'N/A')
 
-let terminal: Terminal | null = null;
-let fitAddon: FitAddon | null = null;
-let searchAddon: SearchAddon | null = null;
-let resizeObserver: ResizeObserver | null = null;
-let outputStore: CommandStreamOutputStore | null = null;
-let fitFrame: number | null = null;
-let replaying = false;
+let terminal: Terminal | null = null
+let fitAddon: FitAddon | null = null
+let searchAddon: SearchAddon | null = null
+let resizeObserver: ResizeObserver | null = null
+let outputStore: CommandStreamOutputStore | null = null
+let fitFrame: number | null = null
+let replaying = false
 
 const outputListener = (event: Event): void => {
   if (!(event instanceof CustomEvent) || !terminal) {
-    return;
+    return
   }
-  writeLine(event.detail as CommandStreamLine);
-};
-
-function writeLine(line: CommandStreamLine): void {
-  if (!terminal) {
-    return;
-  }
-  if (line.type === "stdout" || line.type === "stderr" || line.type === "stdin") {
-    terminal.write(line.content);
-    return;
-  }
-  terminal.writeln(`\r\n${line.content}`);
+  writeLine(event.detail as CommandStreamLine)
 }
 
-function formatDate(value: number, diffWith?: number): string {
-  const date = new Date(value);
-  const hours = String(date.getHours()).padStart(2, "0");
-  const minutes = String(date.getMinutes()).padStart(2, "0");
-  const seconds = String(date.getSeconds()).padStart(2, "0");
-  const milliseconds = String(date.getMilliseconds()).padStart(3, "0");
-  const str = `${hours}:${minutes}:${seconds}.${milliseconds}`;
+function writeLine (line: CommandStreamLine): void {
+  if (!terminal) {
+    return
+  }
+  if (line.type === 'stdout' || line.type === 'stderr' || line.type === 'stdin') {
+    terminal.write(line.content)
+    return
+  }
+  terminal.writeln(`\r\n${line.content}`)
+}
 
-  if (typeof diffWith === "number") {
-    const diff = Math.round((value - diffWith) / 100) / 10;
+function formatDate (value: number, diffWith?: number): string {
+  const date = new Date(value)
+  const hours = String(date.getHours()).padStart(2, '0')
+  const minutes = String(date.getMinutes()).padStart(2, '0')
+  const seconds = String(date.getSeconds()).padStart(2, '0')
+  const milliseconds = String(date.getMilliseconds()).padStart(3, '0')
+  const str = `${hours}:${minutes}:${seconds}.${milliseconds}`
+
+  if (typeof diffWith === 'number') {
+    const diff = Math.round((value - diffWith) / 100) / 10
     if (diff < 5 * 60) {
-      return `${str} (${diff}s)`;
+      return `${str} (${diff}s)`
     }
-    return `${str} (${Math.round((diff / 60) * 10) / 10} min)`;
+    return `${str} (${Math.round((diff / 60) * 10) / 10} min)`
   }
 
-  return str;
+  return str
 }
 
 /**
@@ -114,98 +114,98 @@ function formatDate(value: number, diffWith?: number): string {
  * written, the answers the terminal gives to the queries it holds are not sent to the command, which
  * asked them long ago.
  */
-function syncOutputStore(): void {
+function syncOutputStore (): void {
   if (!terminal) {
-    return;
+    return
   }
 
   if (outputStore) {
-    outputStore.removeEventListener("output", outputListener);
+    outputStore.removeEventListener('output', outputListener)
   }
 
-  outputStore = outputStoreRef.value;
-  terminal.clear();
-  replaying = true;
+  outputStore = outputStoreRef.value
+  terminal.clear()
+  replaying = true
   for (const line of outputStore?.output ?? []) {
-    writeLine(line);
+    writeLine(line)
   }
-  terminal.write("", () => {
-    replaying = false;
-  });
-  terminal.scrollToBottom();
+  terminal.write('', () => {
+    replaying = false
+  })
+  terminal.scrollToBottom()
 
   if (outputStore) {
-    outputStore.addEventListener("output", outputListener);
+    outputStore.addEventListener('output', outputListener)
   }
 }
 
-function fitTerminal(): void {
+function fitTerminal (): void {
   if (!terminal || !fitAddon || !terminalElement.value) {
-    return;
+    return
   }
 
   if (fitFrame !== null) {
-    window.cancelAnimationFrame(fitFrame);
+    window.cancelAnimationFrame(fitFrame)
   }
 
   fitFrame = window.requestAnimationFrame(() => {
     if (!terminal || !fitAddon || !terminalElement.value) {
-      return;
+      return
     }
 
-    fitAddon.fit();
-    terminal.scrollToBottom();
-    wsStore.streamResize(props.streamSlug, terminal.cols, terminal.rows);
-    fitFrame = null;
-  });
+    fitAddon.fit()
+    terminal.scrollToBottom()
+    wsStore.streamResize(props.streamSlug, terminal.cols, terminal.rows)
+    fitFrame = null
+  })
 }
 
-function toggleSearch(): void {
-  searchVisible.value = !searchVisible.value;
+function toggleSearch (): void {
+  searchVisible.value = !searchVisible.value
   if (!searchVisible.value) {
-    return;
+    return
   }
   void nextTick(() => {
-    const input = document.getElementById("stream-search-input");
+    const input = document.getElementById('stream-search-input')
     if (input instanceof HTMLInputElement) {
-      input.focus();
+      input.focus()
     }
-  });
+  })
 }
 
-function searchNext(): void {
+function searchNext (): void {
   if (!searchAddon) {
-    return;
+    return
   }
-  searchAddon.findNext(searchQuery.value);
+  searchAddon.findNext(searchQuery.value)
 }
 
-function searchPrevious(): void {
+function searchPrevious (): void {
   if (!searchAddon) {
-    return;
+    return
   }
-  searchAddon.findPrevious(searchQuery.value);
+  searchAddon.findPrevious(searchQuery.value)
 }
 
-function actionStart(): void {
-  wsStore.updateCommandStream(props.streamSlug, "start");
+function actionStart (): void {
+  wsStore.updateCommandStream(props.streamSlug, 'start')
 }
 
-function actionStop(): void {
-  wsStore.updateCommandStream(props.streamSlug, "stop");
+function actionStop (): void {
+  wsStore.updateCommandStream(props.streamSlug, 'stop')
 }
 
-function actionRestart(): void {
-  wsStore.updateCommandStream(props.streamSlug, "restart");
+function actionRestart (): void {
+  wsStore.updateCommandStream(props.streamSlug, 'restart')
 }
 
-function actionClear(): void {
-  configStore.getCommandStreamsOutput(props.streamSlug)?.clear();
-  terminal?.clear();
+function actionClear (): void {
+  configStore.getCommandStreamsOutput(props.streamSlug)?.clear()
+  terminal?.clear()
 }
 
-function actionClose(): void {
-  wsStore.updateCommandStream(props.streamSlug, "close");
+function actionClose (): void {
+  wsStore.updateCommandStream(props.streamSlug, 'close')
 }
 
 onMounted(() => {
@@ -214,121 +214,121 @@ onMounted(() => {
     cursorBlink: true,
     fontSize: 13,
     lineHeight: 1.1,
-    fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, Courier New, monospace",
+    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, Courier New, monospace',
     allowProposedApi: true,
     theme: {
       overviewRulerBorder: 'black'
     },
     overviewRuler: {
-      width: 9,
-    },
-  });
+      width: 9
+    }
+  })
 
-  fitAddon = new FitAddon();
-  searchAddon = new SearchAddon();
+  fitAddon = new FitAddon()
+  searchAddon = new SearchAddon()
 
-  terminal.loadAddon(fitAddon);
-  terminal.loadAddon(searchAddon);
-  terminal.loadAddon(new Unicode11Addon());
+  terminal.loadAddon(fitAddon)
+  terminal.loadAddon(searchAddon)
+  terminal.loadAddon(new Unicode11Addon())
   terminal.loadAddon(
     new WebLinksAddon((_, url) => {
-      window.open(url, "_blank", "noreferrer");
-    }),
-  );
+      window.open(url, '_blank', 'noreferrer')
+    })
+  )
 
-  terminal.unicode.activeVersion = "11";
-  terminal.onData((data) => {
+  terminal.unicode.activeVersion = '11'
+  terminal.onData(data => {
     if (!replaying) {
-      wsStore.streamInput(props.streamSlug, data);
+      wsStore.streamInput(props.streamSlug, data)
     }
-  });
-  terminal.onKey((event) => {
-    if (event.domEvent.ctrlKey && event.domEvent.key === "f") {
-      event.domEvent.preventDefault();
-      toggleSearch();
+  })
+  terminal.onKey(event => {
+    if (event.domEvent.ctrlKey && event.domEvent.key === 'f') {
+      event.domEvent.preventDefault()
+      toggleSearch()
     }
 
-    if (event.domEvent.ctrlKey && event.domEvent.key === "l") {
-      event.domEvent.preventDefault();
-      actionClear();
+    if (event.domEvent.ctrlKey && event.domEvent.key === 'l') {
+      event.domEvent.preventDefault()
+      actionClear()
     }
-  });
+  })
 
   if (terminalElement.value) {
-    terminal.open(terminalElement.value);
-    resizeObserver = new ResizeObserver(() => fitTerminal());
-    resizeObserver.observe(terminalElement.value);
+    terminal.open(terminalElement.value)
+    resizeObserver = new ResizeObserver(() => fitTerminal())
+    resizeObserver.observe(terminalElement.value)
   }
 
-  window.addEventListener("resize", fitTerminal);
-  fitTerminal();
-  syncOutputStore();
-});
+  window.addEventListener('resize', fitTerminal)
+  fitTerminal()
+  syncOutputStore()
+})
 
 onBeforeUnmount(() => {
   if (outputStore) {
-    outputStore.removeEventListener("output", outputListener);
+    outputStore.removeEventListener('output', outputListener)
   }
-  resizeObserver?.disconnect();
-  window.removeEventListener("resize", fitTerminal);
+  resizeObserver?.disconnect()
+  window.removeEventListener('resize', fitTerminal)
   if (fitFrame !== null) {
-    window.cancelAnimationFrame(fitFrame);
+    window.cancelAnimationFrame(fitFrame)
   }
-  terminal?.dispose();
-  outputStore = null;
-  terminal = null;
-  fitAddon = null;
-  searchAddon = null;
-  resizeObserver = null;
-  fitFrame = null;
-});
+  terminal?.dispose()
+  outputStore = null
+  terminal = null
+  fitAddon = null
+  searchAddon = null
+  resizeObserver = null
+  fitFrame = null
+})
 
 watch(
   () => props.streamSlug,
   () => {
-    syncOutputStore();
-    fitTerminal();
-  },
-);
+    syncOutputStore()
+    fitTerminal()
+  }
+)
 
 watch(
   () => outputStoreRef.value,
   () => {
-    syncOutputStore();
-  },
-);
+    syncOutputStore()
+  }
+)
 
 watch(
   () => [wsStore.connected.value, wsStore.loading.value, stream.value] as const,
   ([connected, loading, currentStream]) => {
     if (!connected || loading || currentStream) {
-      return;
+      return
     }
 
     if (props.projectSlug && props.directorySlug) {
-      void router.replace({ name: "directory", params: { projectSlug: props.projectSlug, directorySlug: props.directorySlug } });
-      return;
+      void router.replace({ name: 'directory', params: { projectSlug: props.projectSlug, directorySlug: props.directorySlug } })
+      return
     }
 
     if (props.projectSlug) {
-      void router.replace({ name: "project", params: { projectSlug: props.projectSlug } });
-      return;
+      void router.replace({ name: 'project', params: { projectSlug: props.projectSlug } })
+      return
     }
 
-    void router.replace({ name: "dashboard" });
+    void router.replace({ name: 'dashboard' })
   },
-  { immediate: true },
-);
+  { immediate: true }
+)
 
 watch(
   () => stream.value?.unread,
-  (unread) => {
+  unread => {
     if (unread && stream.value) {
-      configStore.markAsRead(stream.value.slug);
+      configStore.markAsRead(stream.value.slug)
     }
   },
-  { immediate: true },
-);
+  { immediate: true }
+)
 </script>
 
 <template>

@@ -1,30 +1,30 @@
-import { type ChildProcess, spawn } from "node:child_process";
-import { once } from "node:events";
-import { Readable } from "node:stream";
-import { pipeline } from "node:stream/promises";
+import { type ChildProcess, spawn } from 'node:child_process'
+import { once } from 'node:events'
+import { Readable } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
 
 /** Database engines a local container can run. */
-export type DatabaseEngineName = "postgres" | "mariadb" | "mongodb";
+export type DatabaseEngineName = 'postgres' | 'mariadb' | 'mongodb'
 
 /** Dump and restore operations of a database engine, run inside its container. */
 export interface DatabaseEngine {
   /** Lists the tables of the database, as identifiers usable in SQL. */
-  listTables(container: string): Promise<string[]>;
+  listTables(container: string): Promise<string[]>
   /** Dumps the schema of the database, without data. */
-  dumpSchema(container: string): AsyncIterable<Buffer>;
+  dumpSchema(container: string): AsyncIterable<Buffer>
   /** Dumps the rows of a table, without its definition. */
-  dumpTable(container: string, table: string): AsyncIterable<Buffer>;
+  dumpTable(container: string, table: string): AsyncIterable<Buffer>
   /** Drops and recreates the database, empty. */
-  reset(container: string): Promise<void>;
+  reset(container: string): Promise<void>
   /** Runs a schema dump. */
-  importSchema(container: string, sql: AsyncIterable<Buffer>): Promise<void>;
+  importSchema(container: string, sql: AsyncIterable<Buffer>): Promise<void>
   /** Loads the rows of a table, foreign keys unchecked, emptying the table first when asked. */
-  importTable(container: string, table: string, sql: AsyncIterable<Buffer>, replace: boolean): Promise<void>;
+  importTable(container: string, table: string, sql: AsyncIterable<Buffer>, replace: boolean): Promise<void>
   /** Brings what depends on loaded rows, such as sequences, in line with them. */
-  finish(container: string): Promise<void>;
+  finish(container: string): Promise<void>
 }
 
-const STDERR_TAIL_BYTES = 4096;
+const STDERR_TAIL_BYTES = 4096
 
 /**
  * Keeps the end of the error output of a process.
@@ -32,13 +32,13 @@ const STDERR_TAIL_BYTES = 4096;
  * @param child - The process.
  * @returns A function giving the collected text.
  */
-function collectErrors(child: ChildProcess): () => string {
-  let tail = "";
-  child.stderr?.on("data", (chunk: Buffer) => {
-    tail = (tail + chunk.toString("utf-8")).slice(-STDERR_TAIL_BYTES);
-  });
+function collectErrors (child: ChildProcess): () => string {
+  let tail = ''
+  child.stderr?.on('data', (chunk: Buffer) => {
+    tail = (tail + chunk.toString('utf-8')).slice(-STDERR_TAIL_BYTES)
+  })
 
-  return () => tail.trim();
+  return () => tail.trim()
 }
 
 /**
@@ -48,10 +48,10 @@ function collectErrors(child: ChildProcess): () => string {
  * @param errors - The collected error output.
  * @param label - What the process does, for the error message.
  */
-async function assertExit(child: ChildProcess, errors: () => string, label: string): Promise<void> {
-  const [code] = (child.exitCode !== null ? [child.exitCode] : await once(child, "close")) as [number | null];
+async function assertExit (child: ChildProcess, errors: () => string, label: string): Promise<void> {
+  const [code] = (child.exitCode !== null ? [child.exitCode] : await once(child, 'close')) as [number | null]
   if (code !== 0) {
-    throw new Error(`${label} failed (exit ${code}): ${errors()}`);
+    throw new Error(`${label} failed (exit ${code}): ${errors()}`)
   }
 }
 
@@ -63,19 +63,19 @@ async function assertExit(child: ChildProcess, errors: () => string, label: stri
  * @param args - The arguments of the script.
  * @returns The output, failing at its end when the script failed.
  */
-async function* scriptOutput(container: string, script: string, args: string[] = []): AsyncGenerator<Buffer> {
-  const child = spawn("docker", ["exec", container, "sh", "-c", script, "sh", ...args], { stdio: ["ignore", "pipe", "pipe"] });
-  const errors = collectErrors(child);
-  const exited = assertExit(child, errors, `docker exec ${container}`);
-  exited.catch(() => undefined);
+async function* scriptOutput (container: string, script: string, args: string[] = []): AsyncGenerator<Buffer> {
+  const child = spawn('docker', ['exec', container, 'sh', '-c', script, 'sh', ...args], { stdio: ['ignore', 'pipe', 'pipe'] })
+  const errors = collectErrors(child)
+  const exited = assertExit(child, errors, `docker exec ${container}`)
+  exited.catch(() => undefined)
   try {
-    for await (const chunk of child.stdout as Readable) {
-      yield chunk as Buffer;
+    for await (const chunk of child.stdout) {
+      yield chunk as Buffer
     }
-    await exited;
+    await exited
   } finally {
     if (child.exitCode === null) {
-      child.kill();
+      child.kill()
     }
   }
 }
@@ -87,13 +87,13 @@ async function* scriptOutput(container: string, script: string, args: string[] =
  * @param script - The script.
  * @returns The output text.
  */
-async function scriptText(container: string, script: string): Promise<string> {
-  const chunks: Buffer[] = [];
+async function scriptText (container: string, script: string): Promise<string> {
+  const chunks: Buffer[] = []
   for await (const chunk of scriptOutput(container, script)) {
-    chunks.push(chunk);
+    chunks.push(chunk)
   }
 
-  return Buffer.concat(chunks).toString("utf-8");
+  return Buffer.concat(chunks).toString('utf-8')
 }
 
 /**
@@ -104,14 +104,14 @@ async function scriptText(container: string, script: string): Promise<string> {
  * @param input - The standard input of the script.
  * @param args - The arguments of the script.
  */
-async function scriptInput(container: string, script: string, input: AsyncIterable<Buffer>, args: string[] = []): Promise<void> {
-  const child = spawn("docker", ["exec", "-i", container, "sh", "-c", script, "sh", ...args], { stdio: ["pipe", "ignore", "pipe"] });
-  const errors = collectErrors(child);
-  const piped = pipeline(Readable.from(input), child.stdin!).then(() => null, (error: unknown) => error);
-  await assertExit(child, errors, `docker exec ${container}`);
-  const pipeError = await piped;
+async function scriptInput (container: string, script: string, input: AsyncIterable<Buffer>, args: string[] = []): Promise<void> {
+  const child = spawn('docker', ['exec', '-i', container, 'sh', '-c', script, 'sh', ...args], { stdio: ['pipe', 'ignore', 'pipe'] })
+  const errors = collectErrors(child)
+  const piped = pipeline(Readable.from(input), child.stdin).then(() => null, (error: unknown) => error)
+  await assertExit(child, errors, `docker exec ${container}`)
+  const pipeError = await piped
   if (pipeError) {
-    throw pipeError;
+    throw pipeError
   }
 }
 
@@ -122,9 +122,9 @@ async function scriptInput(container: string, script: string, input: AsyncIterab
  * @param body - The stream.
  * @returns The concatenation.
  */
-async function* prefixed(prefix: string, body: AsyncIterable<Buffer>): AsyncGenerator<Buffer> {
-  yield Buffer.from(prefix);
-  yield* body;
+async function* prefixed (prefix: string, body: AsyncIterable<Buffer>): AsyncGenerator<Buffer> {
+  yield Buffer.from(prefix)
+  yield* body
 }
 
 /**
@@ -133,11 +133,11 @@ async function* prefixed(prefix: string, body: AsyncIterable<Buffer>): AsyncGene
  * @param text - The text.
  * @returns A stream of one chunk.
  */
-async function* textStream(text: string): AsyncGenerator<Buffer> {
-  yield Buffer.from(text);
+async function* textStream (text: string): AsyncGenerator<Buffer> {
+  yield Buffer.from(text)
 }
 
-const POSTGRES_CLIENT = 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -X -q -v ON_ERROR_STOP=1';
+const POSTGRES_CLIENT = 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -X -q -v ON_ERROR_STOP=1'
 const POSTGRES_SEQUENCES_SQL = `DO $$
 DECLARE c record;
 BEGIN
@@ -153,39 +153,39 @@ BEGIN
     END IF;
   END LOOP;
 END $$;
-`;
+`
 
 /** PostgreSQL of the official image: local socket, credentials from the container environment. */
 const postgres: DatabaseEngine = {
-  async listTables(container) {
+  async listTables (container) {
     const text = await scriptText(
       container,
-      `${POSTGRES_CLIENT} -At -c "SELECT format('%I.%I', schemaname, tablename) FROM pg_tables WHERE schemaname NOT IN ('pg_catalog', 'information_schema') ORDER BY 1"`,
-    );
-    return text.split("\n").filter((line) => line !== "");
+      `${POSTGRES_CLIENT} -At -c "SELECT format('%I.%I', schemaname, tablename) FROM pg_tables WHERE schemaname NOT IN ('pg_catalog', 'information_schema') ORDER BY 1"`
+    )
+    return text.split('\n').filter(line => line !== '')
   },
-  dumpSchema(container) {
-    return scriptOutput(container, 'pg_dump -U "$POSTGRES_USER" --schema-only --no-owner --no-privileges "$POSTGRES_DB"');
+  dumpSchema (container) {
+    return scriptOutput(container, 'pg_dump -U "$POSTGRES_USER" --schema-only --no-owner --no-privileges "$POSTGRES_DB"')
   },
-  dumpTable(container, table) {
-    return scriptOutput(container, 'pg_dump -U "$POSTGRES_USER" --data-only --no-owner --no-privileges -t "$1" "$POSTGRES_DB"', [table]);
+  dumpTable (container, table) {
+    return scriptOutput(container, 'pg_dump -U "$POSTGRES_USER" --data-only --no-owner --no-privileges -t "$1" "$POSTGRES_DB"', [table])
   },
-  async reset(container) {
-    await scriptText(container, 'dropdb -U "$POSTGRES_USER" --force --if-exists "$POSTGRES_DB" && createdb -U "$POSTGRES_USER" "$POSTGRES_DB"');
+  async reset (container) {
+    await scriptText(container, 'dropdb -U "$POSTGRES_USER" --force --if-exists "$POSTGRES_DB" && createdb -U "$POSTGRES_USER" "$POSTGRES_DB"')
   },
-  async importSchema(container, sql) {
-    await scriptInput(container, POSTGRES_CLIENT, sql);
+  async importSchema (container, sql) {
+    await scriptInput(container, POSTGRES_CLIENT, sql)
   },
-  async importTable(container, table, sql, replace) {
-    const preamble = `SET session_replication_role = replica;\n${replace ? `DELETE FROM ${table};\n` : ""}`;
-    await scriptInput(container, POSTGRES_CLIENT, prefixed(preamble, sql));
+  async importTable (container, table, sql, replace) {
+    const preamble = `SET session_replication_role = replica;\n${replace ? `DELETE FROM ${table};\n` : ''}`
+    await scriptInput(container, POSTGRES_CLIENT, prefixed(preamble, sql))
   },
-  async finish(container) {
-    await scriptInput(container, POSTGRES_CLIENT, textStream(POSTGRES_SEQUENCES_SQL));
-  },
-};
+  async finish (container) {
+    await scriptInput(container, POSTGRES_CLIENT, textStream(POSTGRES_SEQUENCES_SQL))
+  }
+}
 
-const MARIADB_ROOT = 'export MYSQL_PWD="$MARIADB_ROOT_PASSWORD";';
+const MARIADB_ROOT = 'export MYSQL_PWD="$MARIADB_ROOT_PASSWORD";'
 
 /**
  * Quotes a MariaDB identifier.
@@ -193,44 +193,44 @@ const MARIADB_ROOT = 'export MYSQL_PWD="$MARIADB_ROOT_PASSWORD";';
  * @param name - The identifier.
  * @returns The quoted identifier.
  */
-function quoteMariadb(name: string): string {
-  return `\`${name.replaceAll("`", "``")}\``;
+function quoteMariadb (name: string): string {
+  return `\`${name.replaceAll('`', '``')}\``
 }
 
 /** MariaDB of the official image: root account, credentials from the container environment. */
 const mariadb: DatabaseEngine = {
-  async listTables(container) {
-    const text = await scriptText(container, `${MARIADB_ROOT} mariadb -uroot -N -B -e "SHOW FULL TABLES WHERE Table_type = 'BASE TABLE'" "$MARIADB_DATABASE"`);
+  async listTables (container) {
+    const text = await scriptText(container, `${MARIADB_ROOT} mariadb -uroot -N -B -e "SHOW FULL TABLES WHERE Table_type = 'BASE TABLE'" "$MARIADB_DATABASE"`)
     return text
-      .split("\n")
-      .filter((line) => line !== "")
-      .map((line) => line.split("\t")[0]);
+      .split('\n')
+      .filter(line => line !== '')
+      .map(line => line.split('\t')[0])
   },
-  dumpSchema(container) {
-    return scriptOutput(container, `${MARIADB_ROOT} mariadb-dump -uroot --no-data --routines --triggers --events --skip-comments "$MARIADB_DATABASE"`);
+  dumpSchema (container) {
+    return scriptOutput(container, `${MARIADB_ROOT} mariadb-dump -uroot --no-data --routines --triggers --events --skip-comments "$MARIADB_DATABASE"`)
   },
-  dumpTable(container, table) {
+  dumpTable (container, table) {
     return scriptOutput(
       container,
       `${MARIADB_ROOT} mariadb-dump -uroot --no-create-info --skip-triggers --skip-comments --single-transaction "$MARIADB_DATABASE" "$1"`,
-      [table],
-    );
+      [table]
+    )
   },
-  async reset(container) {
+  async reset (container) {
     await scriptText(
       container,
-      `${MARIADB_ROOT} mariadb -uroot -e "DROP DATABASE IF EXISTS \\\`$MARIADB_DATABASE\\\`; CREATE DATABASE \\\`$MARIADB_DATABASE\\\`; GRANT ALL PRIVILEGES ON \\\`$MARIADB_DATABASE\\\`.* TO '$MARIADB_USER'@'%'"`,
-    );
+      `${MARIADB_ROOT} mariadb -uroot -e "DROP DATABASE IF EXISTS \\\`$MARIADB_DATABASE\\\`; CREATE DATABASE \\\`$MARIADB_DATABASE\\\`; GRANT ALL PRIVILEGES ON \\\`$MARIADB_DATABASE\\\`.* TO '$MARIADB_USER'@'%'"`
+    )
   },
-  async importSchema(container, sql) {
-    await scriptInput(container, `${MARIADB_ROOT} mariadb -uroot "$MARIADB_DATABASE"`, sql);
+  async importSchema (container, sql) {
+    await scriptInput(container, `${MARIADB_ROOT} mariadb -uroot "$MARIADB_DATABASE"`, sql)
   },
-  async importTable(container, table, sql, replace) {
-    const preamble = `SET FOREIGN_KEY_CHECKS = 0;\n${replace ? `DELETE FROM ${quoteMariadb(table)};\n` : ""}`;
-    await scriptInput(container, `${MARIADB_ROOT} mariadb -uroot "$MARIADB_DATABASE"`, prefixed(preamble, sql));
+  async importTable (container, table, sql, replace) {
+    const preamble = `SET FOREIGN_KEY_CHECKS = 0;\n${replace ? `DELETE FROM ${quoteMariadb(table)};\n` : ''}`
+    await scriptInput(container, `${MARIADB_ROOT} mariadb -uroot "$MARIADB_DATABASE"`, prefixed(preamble, sql))
   },
-  async finish() {},
-};
+  async finish () {}
+}
 
 /**
  * Prefix of the MongoDB scripts: `$DB`, the database of the container, and `auth`, running a MongoDB
@@ -245,50 +245,50 @@ auth() {
     "$@"
   fi
 }
-`;
+`
 
 /**
  * Gives an empty stream.
  *
  * @returns A stream without chunk.
  */
-async function* emptyStream(): AsyncGenerator<Buffer> {}
+async function* emptyStream (): AsyncGenerator<Buffer> {}
 
 /** MongoDB of the official image: collections as tables, the database and credentials from the container environment. */
 const mongodb: DatabaseEngine = {
-  async listTables(container) {
+  async listTables (container) {
     const text = await scriptText(
       container,
-      `${MONGODB_SETUP}auth mongosh "$DB" --quiet --eval 'db.getCollectionNames().filter((name) => !name.startsWith("system.")).sort().forEach((name) => print(name))'`,
-    );
-    return text.split("\n").filter((line) => line !== "");
+      `${MONGODB_SETUP}auth mongosh "$DB" --quiet --eval 'db.getCollectionNames().filter((name) => !name.startsWith("system.")).sort().forEach((name) => print(name))'`
+    )
+    return text.split('\n').filter(line => line !== '')
   },
-  dumpSchema() {
-    return emptyStream();
+  dumpSchema () {
+    return emptyStream()
   },
-  dumpTable(container, table) {
-    return scriptOutput(container, `${MONGODB_SETUP}auth mongodump --quiet --archive --db "$DB" --collection "$1"`, [table]);
+  dumpTable (container, table) {
+    return scriptOutput(container, `${MONGODB_SETUP}auth mongodump --quiet --archive --db "$DB" --collection "$1"`, [table])
   },
-  async reset(container) {
-    await scriptText(container, `${MONGODB_SETUP}auth mongosh "$DB" --quiet --eval 'db.dropDatabase()'`);
+  async reset (container) {
+    await scriptText(container, `${MONGODB_SETUP}auth mongosh "$DB" --quiet --eval 'db.dropDatabase()'`)
   },
-  async importSchema(_container, sql) {
+  async importSchema (_container, sql) {
     for await (const chunk of sql) {
-      void chunk;
+      void chunk
     }
   },
-  async importTable(container, table, sql, replace) {
+  async importTable (container, table, sql, replace) {
     await scriptInput(
       container,
-      `${MONGODB_SETUP}auth mongorestore --quiet --archive --nsInclude "*.$1" --nsFrom "\\$db\\$.$1" --nsTo "$DB.$1"${replace ? " --drop" : ""}`,
+      `${MONGODB_SETUP}auth mongorestore --quiet --archive --nsInclude "*.$1" --nsFrom "\\$db\\$.$1" --nsTo "$DB.$1"${replace ? ' --drop' : ''}`,
       sql,
-      [table],
-    );
+      [table]
+    )
   },
-  async finish() {},
-};
+  async finish () {}
+}
 
-const ENGINES: Record<DatabaseEngineName, DatabaseEngine> = { postgres, mariadb, mongodb };
+const ENGINES: Record<DatabaseEngineName, DatabaseEngine> = { postgres, mariadb, mongodb }
 
 /**
  * Tells whether a name is a supported database engine.
@@ -296,8 +296,8 @@ const ENGINES: Record<DatabaseEngineName, DatabaseEngine> = { postgres, mariadb,
  * @param name - The name.
  * @returns True for a supported engine.
  */
-export function isDatabaseEngineName(name: unknown): name is DatabaseEngineName {
-  return typeof name === "string" && Object.hasOwn(ENGINES, name);
+export function isDatabaseEngineName (name: unknown): name is DatabaseEngineName {
+  return typeof name === 'string' && Object.hasOwn(ENGINES, name)
 }
 
 /**
@@ -306,6 +306,6 @@ export function isDatabaseEngineName(name: unknown): name is DatabaseEngineName 
  * @param name - The engine.
  * @returns Its operations.
  */
-export function databaseEngine(name: DatabaseEngineName): DatabaseEngine {
-  return ENGINES[name];
+export function databaseEngine (name: DatabaseEngineName): DatabaseEngine {
+  return ENGINES[name]
 }

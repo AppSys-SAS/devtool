@@ -1,56 +1,56 @@
 <script setup lang="ts">
-import { computed } from "vue";
-import { RouterLink } from "vue-router";
-import { Icon } from "@iconify/vue";
-import { FolderTree, Globe, Play, RotateCcw, ScrollText, Sparkles, Square } from "@lucide/vue";
-import type { DirectoryDefinition, HostAccess } from "@appsys/devtool-shared";
-import SummaryRow from "@/components/project/SummaryRow.vue";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
-import { commandLine, commandName, iconFromMeta, runDirectoryCommand, startDefaultCommand } from "@/lib/directory-commands";
-import { defaultShortcut } from "@/lib/shortcuts";
-import { cn } from "@/lib/utils";
-import configStore from "@/stores/config";
-import wsStore from "@/stores/ws";
-import type { CommandStreamStatus } from "@/types";
+import { computed } from 'vue'
+import { RouterLink } from 'vue-router'
+import { Icon } from '@iconify/vue'
+import { FolderTree, Globe, Play, RotateCcw, ScrollText, Sparkles, Square } from '@lucide/vue'
+import type { DirectoryDefinition, HostAccess } from '@appsys/devtool-shared'
+import SummaryRow from '@/components/project/SummaryRow.vue'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardDescription, CardHeader } from '@/components/ui/card'
+import { commandLine, commandName, iconFromMeta, runDirectoryCommand, startDefaultCommand } from '@/lib/directory-commands'
+import { defaultShortcut } from '@/lib/shortcuts'
+import { cn } from '@/lib/utils'
+import configStore from '@/stores/config'
+import wsStore from '@/stores/ws'
+import type { CommandStreamStatus } from '@/types'
 
 const props = defineProps<{
-  projectSlug: string;
-  directory: DirectoryDefinition;
-}>();
+  projectSlug: string
+  directory: DirectoryDefinition
+}>()
 
-const CHIP = "inline-flex max-w-full items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition-colors hover:bg-accent/60";
+const CHIP = 'inline-flex max-w-full items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition-colors hover:bg-accent/60'
 const STATUS_DOT: Record<CommandStreamStatus, string> = {
-  RUNNING: "bg-valid",
-  STOPPED: "bg-muted-foreground/40",
-  ERROR: "bg-destructive",
-};
+  RUNNING: 'bg-valid',
+  STOPPED: 'bg-muted-foreground/40',
+  ERROR: 'bg-destructive'
+}
 
 const streams = computed(() =>
-  configStore.commandStreams.value.filter((stream) => stream.projectSlug === props.projectSlug && stream.directorySlug === props.directory.slug),
-);
-const primary = computed(() => streams.value.find((stream) => stream.primary) ?? null);
-const terminals = computed(() => streams.value.filter((stream) => !stream.primary));
-const commands = computed(() => Object.values(props.directory.extras).filter((command) => !command.script));
-const scripts = computed(() => Object.values(props.directory.extras).filter((command) => command.script));
-const files = computed(() => Object.values(props.directory.files));
+  configStore.commandStreams.value.filter(stream => stream.projectSlug === props.projectSlug && stream.directorySlug === props.directory.slug)
+)
+const primary = computed(() => streams.value.find(stream => stream.primary) ?? null)
+const terminals = computed(() => streams.value.filter(stream => !stream.primary))
+const commands = computed(() => Object.values(props.directory.extras).filter(command => !command.script))
+const scripts = computed(() => Object.values(props.directory.extras).filter(command => command.script))
+const files = computed(() => Object.values(props.directory.files))
 
 const services = computed(() => {
-  const hosts = new Map<string, HostAccess>();
+  const hosts = new Map<string, HostAccess>()
   for (const rule of Object.values(props.directory.loadBalancer)) {
     for (const host of rule.hosts) {
-      if (hosts.get(host) !== "network") {
-        hosts.set(host, rule.access);
+      if (hosts.get(host) !== 'network') {
+        hosts.set(host, rule.access)
       }
     }
   }
 
-  return [...hosts].map(([host, access]) => ({ host, access }));
-});
+  return [...hosts].map(([host, access]) => ({ host, access }))
+})
 
-const defaultAction = computed(() => defaultShortcut(props.projectSlug, props.directory));
+const defaultAction = computed(() => defaultShortcut(props.projectSlug, props.directory))
 
-const directoryRoute = computed(() => ({ name: "directory", params: { projectSlug: props.projectSlug, directorySlug: props.directory.slug } }));
+const directoryRoute = computed(() => ({ name: 'directory', params: { projectSlug: props.projectSlug, directorySlug: props.directory.slug } }))
 </script>
 
 <template>

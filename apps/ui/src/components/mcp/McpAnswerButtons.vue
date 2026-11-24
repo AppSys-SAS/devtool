@@ -1,19 +1,19 @@
 <script setup lang="ts">
-import type { McpAnswer, McpRequestPayload } from "@appsys/devtool-shared";
-import { Button } from "@/components/ui/button";
-import { ANSWERS } from "@/lib/mcp";
+import type { McpAnswer, McpRequestPayload } from '@appsys/devtool-shared'
+import { Button } from '@/components/ui/button'
+import { ANSWERS } from '@/lib/mcp'
 
 defineProps<{
-  grantable: McpRequestPayload["grantable"];
+  grantable: McpRequestPayload['grantable']
   /** Whether allowing once is offered, accepting a client lasting at least for its session. */
-  once: boolean;
+  once: boolean
   /** Whether allowing is impossible, a required input being missing. */
-  blocked?: boolean;
-}>();
+  blocked?: boolean
+}>()
 
 const emit = defineEmits<{
-  answer: [answer: McpAnswer];
-}>();
+  answer: [answer: McpAnswer]
+}>()
 </script>
 
 <template>

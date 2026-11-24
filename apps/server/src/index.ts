@@ -1,29 +1,29 @@
-import { execFile, spawn } from "node:child_process";
-import { existsSync, watch } from "node:fs";
-import path from "node:path";
-import { promisify } from "node:util";
-import { loadMergedConfig, type RawConfig, resolveDefaultConfigPaths } from "@appsys/devtool-config";
-import { logger, type RuntimeConfig } from "@appsys/devtool-shared";
-import pkg from "../package.json" with { type: "json" };
-import { prepareRenewal } from "./certificates.js";
-import { CommandSecrets } from "./command-automation.js";
-import { certificateAutomationKey, DevtoolConfigure } from "./configure.js";
-import { DevtoolLB } from "./lb.js";
-import { DevtoolServer } from "./server.js";
-import { mergeDeep, toRecord, toStringArray } from "./utils.js";
-import type { ConfigProvider, LoadBalancerContext, ServerBootstrapOptions } from "./types.js";
+import { execFile, spawn } from 'node:child_process'
+import { existsSync, watch } from 'node:fs'
+import path from 'node:path'
+import { promisify } from 'node:util'
+import { loadMergedConfig, type RawConfig, resolveDefaultConfigPaths } from '@appsys/devtool-config'
+import { logger, type RuntimeConfig } from '@appsys/devtool-shared'
+import pkg from '../package.json' with { type: 'json' }
+import { prepareRenewal } from './certificates.js'
+import { CommandSecrets } from './command-automation.js'
+import { certificateAutomationKey, DevtoolConfigure } from './configure.js'
+import { DevtoolLB } from './lb.js'
+import { DevtoolServer } from './server.js'
+import { mergeDeep, toRecord, toStringArray } from './utils.js'
+import type { ConfigProvider, LoadBalancerContext, ServerBootstrapOptions } from './types.js'
 
-export { relaunchUnderApp } from "./app-launcher.js";
+export { relaunchUnderApp } from './app-launcher.js'
 
-const CONFIG_CHANGE_DELAY_MS = 200;
-const execFileAsync = promisify(execFile);
+const CONFIG_CHANGE_DELAY_MS = 200
+const execFileAsync = promisify(execFile)
 
-function readKillSignal(record: Record<string, unknown>): unknown {
-  return record.killSignal ?? record.killsignal;
+function readKillSignal (record: Record<string, unknown>): unknown {
+  return record.killSignal ?? record.killsignal
 }
 
-function readShell(record: Record<string, unknown>): unknown {
-  return record.shell;
+function readShell (record: Record<string, unknown>): unknown {
+  return record.shell
 }
 
 /**
@@ -33,57 +33,57 @@ function readShell(record: Record<string, unknown>): unknown {
  * @param config The raw configuration.
  * @returns The configuration with projects of directories.
  */
-function normalizeProjectsShape(config: RawConfig): RawConfig {
-  const sections = toRecord(config.sections);
-  const projects = toRecord(config.projects);
-  const firstProject = Object.keys(projects).length ? toRecord(projects[Object.keys(projects)[0]]) : null;
+function normalizeProjectsShape (config: RawConfig): RawConfig {
+  const sections = toRecord(config.sections)
+  const projects = toRecord(config.projects)
+  const firstProject = Object.keys(projects).length ? toRecord(projects[Object.keys(projects)[0]]) : null
 
   if (!Object.keys(sections).length || !Object.keys(projects).length) {
-    return config;
+    return config
   }
 
-  if (firstProject && typeof firstProject.directories === "object") {
-    return config;
+  if (firstProject && typeof firstProject.directories === 'object') {
+    return config
   }
 
   if (!toRecord(sections.uncategorized).name) {
-    sections.uncategorized = { name: "Uncategorized", path: "." };
+    sections.uncategorized = { name: 'Uncategorized', path: '.' }
   }
 
   for (const [projectSlug, rawProject] of Object.entries(projects)) {
-    const project = toRecord(rawProject);
-    const sectionSlug = typeof project.section === "string" ? project.section : "uncategorized";
-    const section = toRecord(sections[sectionSlug]);
-    const sectionProjects = Array.isArray(section.projects) ? section.projects.filter((item): item is string => typeof item === "string") : [];
-    const sectionDirectories = toRecord(section.directories);
-    const commands = toRecord(project.commands);
-    const services = toRecord(project.services);
+    const project = toRecord(rawProject)
+    const sectionSlug = typeof project.section === 'string' ? project.section : 'uncategorized'
+    const section = toRecord(sections[sectionSlug])
+    const sectionProjects = Array.isArray(section.projects) ? section.projects.filter((item): item is string => typeof item === 'string') : []
+    const sectionDirectories = toRecord(section.directories)
+    const commands = toRecord(project.commands)
+    const services = toRecord(project.services)
 
-    if (typeof section.path !== "string") {
-      section.path = ".";
+    if (typeof section.path !== 'string') {
+      section.path = '.'
     }
 
-    let args: unknown = null;
-    let env: unknown = project.env;
-    let shell: unknown = readShell(project);
-    let killSignal: unknown = readKillSignal(project);
-    const action = toRecord(project.default).action;
-    const defaultCommandSlug = typeof action === "string" && action.startsWith("command:") ? action.slice("command:".length) : null;
+    let args: unknown = null
+    let env: unknown = project.env
+    let shell: unknown = readShell(project)
+    let killSignal: unknown = readKillSignal(project)
+    const action = toRecord(project.default).action
+    const defaultCommandSlug = typeof action === 'string' && action.startsWith('command:') ? action.slice('command:'.length) : null
     if (defaultCommandSlug && defaultCommandSlug in commands) {
-      const defaultCommand = toRecord(commands[defaultCommandSlug]);
-      args = defaultCommand.args;
-      if ("env" in defaultCommand) {
-        env = defaultCommand.env;
+      const defaultCommand = toRecord(commands[defaultCommandSlug])
+      args = defaultCommand.args
+      if ('env' in defaultCommand) {
+        env = defaultCommand.env
       }
-      if ("shell" in defaultCommand) {
-        shell = readShell(defaultCommand);
+      if ('shell' in defaultCommand) {
+        shell = readShell(defaultCommand)
       }
-      if ("killSignal" in defaultCommand || "killsignal" in defaultCommand) {
-        killSignal = readKillSignal(defaultCommand);
+      if ('killSignal' in defaultCommand || 'killsignal' in defaultCommand) {
+        killSignal = readKillSignal(defaultCommand)
       }
     }
 
-    sectionProjects.push(projectSlug);
+    sectionProjects.push(projectSlug)
     sectionDirectories[projectSlug] = {
       ...project,
       args,
@@ -91,26 +91,26 @@ function normalizeProjectsShape(config: RawConfig): RawConfig {
       shell,
       killSignal,
       extras: commands,
-      loadBalancer: services,
-    };
-
-    section.projects = sectionProjects;
-    section.directories = sectionDirectories;
-    sections[sectionSlug] = section;
-  }
-
-  const normalizedSections: Record<string, unknown> = {};
-  for (const [sectionSlug, sectionRaw] of Object.entries(sections)) {
-    const section = toRecord(sectionRaw);
-    const sectionDirectories = toRecord(section.directories);
-    if (!Object.keys(sectionDirectories).length) {
-      continue;
+      loadBalancer: services
     }
-    normalizedSections[sectionSlug] = section;
+
+    section.projects = sectionProjects
+    section.directories = sectionDirectories
+    sections[sectionSlug] = section
   }
 
-  config.projects = normalizedSections;
-  return config;
+  const normalizedSections: Record<string, unknown> = {}
+  for (const [sectionSlug, sectionRaw] of Object.entries(sections)) {
+    const section = toRecord(sectionRaw)
+    const sectionDirectories = toRecord(section.directories)
+    if (!Object.keys(sectionDirectories).length) {
+      continue
+    }
+    normalizedSections[sectionSlug] = section
+  }
+
+  config.projects = normalizedSections
+  return config
 }
 
 /**
@@ -120,62 +120,62 @@ function normalizeProjectsShape(config: RawConfig): RawConfig {
  * @param options The startup options.
  * @returns The configuration the server runs with.
  */
-export function createRuntimeConfig(raw: RawConfig, options: Pick<ServerBootstrapOptions, "serverPort" | "loadBalancerPort"> & { ssl: string | null; uiPath: string | null }): RawConfig {
-  const adtRuntimeOverrides: Record<string, unknown> = {};
+export function createRuntimeConfig (raw: RawConfig, options: Pick<ServerBootstrapOptions, 'serverPort' | 'loadBalancerPort'> & { ssl: string | null, uiPath: string | null }): RawConfig {
+  const adtRuntimeOverrides: Record<string, unknown> = {}
 
-  const portOverrides: Record<string, number> = {};
-  if (Number.isInteger(options.serverPort) && (options.serverPort as number) > 0) {
-    portOverrides.server = options.serverPort as number;
+  const portOverrides: Record<string, number> = {}
+  if (Number.isInteger(options.serverPort) && (options.serverPort!) > 0) {
+    portOverrides.server = options.serverPort!
   }
-  if (Number.isInteger(options.loadBalancerPort) && (options.loadBalancerPort as number) > 0) {
-    portOverrides.loadBalancer = options.loadBalancerPort as number;
+  if (Number.isInteger(options.loadBalancerPort) && (options.loadBalancerPort!) > 0) {
+    portOverrides.loadBalancer = options.loadBalancerPort!
   }
   if (Object.keys(portOverrides).length > 0) {
-    adtRuntimeOverrides.ports = portOverrides;
+    adtRuntimeOverrides.ports = portOverrides
   }
 
-  if (typeof options.ssl === "string" && options.ssl.length > 0) {
-    adtRuntimeOverrides.host = options.ssl;
-    adtRuntimeOverrides.secure = true;
+  if (typeof options.ssl === 'string' && options.ssl.length > 0) {
+    adtRuntimeOverrides.host = options.ssl
+    adtRuntimeOverrides.secure = true
   }
 
   const base = mergeDeep(
     {
       loadBalancers: {},
       adt: {
-        notifications: true,
-      },
+        notifications: true
+      }
     },
     raw,
     {
-      adt: adtRuntimeOverrides,
-    },
-  ) as RawConfig;
+      adt: adtRuntimeOverrides
+    }
+  ) as RawConfig
 
-  const serverConfig = toRecord(base.server);
-  const serverHosts = toStringArray(serverConfig.hosts);
-  const adtConfig = toRecord(base.adt);
-  adtConfig.hosts = serverHosts ?? [];
-  delete adtConfig.uiPath;
+  const serverConfig = toRecord(base.server)
+  const serverHosts = toStringArray(serverConfig.hosts)
+  const adtConfig = toRecord(base.adt)
+  adtConfig.hosts = serverHosts ?? []
+  delete adtConfig.uiPath
   if (options.uiPath) {
-    adtConfig.uiPath = options.uiPath;
+    adtConfig.uiPath = options.uiPath
   }
-  base.adt = adtConfig;
+  base.adt = adtConfig
 
-  const serverDomains = toRecord(serverConfig.domains);
-  const loadBalancers = toRecord(base.loadBalancers);
+  const serverDomains = toRecord(serverConfig.domains)
+  const loadBalancers = toRecord(base.loadBalancers)
   for (const [domain, optionsValue] of Object.entries(serverDomains)) {
-    const domainConfig = toRecord(optionsValue);
-    if (typeof domainConfig.certificate === "string" && typeof domainConfig.key === "string") {
+    const domainConfig = toRecord(optionsValue)
+    if (typeof domainConfig.certificate === 'string' && typeof domainConfig.key === 'string') {
       loadBalancers[domain] = {
         crt: domainConfig.certificate,
-        key: domainConfig.key,
-      };
+        key: domainConfig.key
+      }
     }
   }
-  base.loadBalancers = loadBalancers;
+  base.loadBalancers = loadBalancers
 
-  return normalizeProjectsShape(base);
+  return normalizeProjectsShape(base)
 }
 
 /**
@@ -183,10 +183,10 @@ export function createRuntimeConfig(raw: RawConfig, options: Pick<ServerBootstra
  * @param configPaths Paths of the configuration files.
  * @returns The paths of the configuration files.
  */
-function resolveConfigPaths(configPaths: string[] | undefined): string[] {
-  const resolvedPaths = configPaths?.length ? configPaths : resolveDefaultConfigPaths();
-  logger.info("Server", "Startup", `Config paths: ${resolvedPaths.join(", ")}`);
-  return resolvedPaths;
+function resolveConfigPaths (configPaths: string[] | undefined): string[] {
+  const resolvedPaths = configPaths?.length ? configPaths : resolveDefaultConfigPaths()
+  logger.info('Server', 'Startup', `Config paths: ${resolvedPaths.join(', ')}`)
+  return resolvedPaths
 }
 
 /**
@@ -195,20 +195,20 @@ function resolveConfigPaths(configPaths: string[] | undefined): string[] {
  * @param configPaths Paths of the configuration files.
  * @returns The configuration loader.
  */
-function createConfigProvider({ serverPort, loadBalancerPort, ssl, uiPath }: ServerBootstrapOptions, configPaths: string[]): ConfigProvider {
+function createConfigProvider ({ serverPort, loadBalancerPort, ssl, uiPath }: ServerBootstrapOptions, configPaths: string[]): ConfigProvider {
   return async () => {
-    const { config, loadedPaths, sources, localPath } = await loadMergedConfig(configPaths);
+    const { config, loadedPaths, sources, localPath } = await loadMergedConfig(configPaths)
     return {
       raw: createRuntimeConfig(config, {
         serverPort,
         loadBalancerPort,
         ssl: ssl ?? null,
-        uiPath: uiPath ?? null,
+        uiPath: uiPath ?? null
       }),
       loadedPaths,
-      origin: { sources, localPath, sharedPath: loadedPaths.find((loadedPath) => loadedPath !== localPath) ?? null },
-    };
-  };
+      origin: { sources, localPath, sharedPath: loadedPaths.find(loadedPath => loadedPath !== localPath) ?? null }
+    }
+  }
 }
 
 /**
@@ -216,11 +216,11 @@ function createConfigProvider({ serverPort, loadBalancerPort, ssl, uiPath }: Ser
  * @param configProvider Loads the configuration.
  * @returns The runtime configuration.
  */
-async function loadRuntimeConfig(configProvider: ConfigProvider): Promise<RuntimeConfig> {
-  const { raw, origin } = await configProvider();
-  const configure = new DevtoolConfigure(raw, origin);
-  await configure.reconfigure();
-  return configure.runtimeConfig;
+async function loadRuntimeConfig (configProvider: ConfigProvider): Promise<RuntimeConfig> {
+  const { raw, origin } = await configProvider()
+  const configure = new DevtoolConfigure(raw, origin)
+  await configure.reconfigure()
+  return configure.runtimeConfig
 }
 
 /**
@@ -228,25 +228,25 @@ async function loadRuntimeConfig(configProvider: ConfigProvider): Promise<Runtim
  * @param configPaths Paths of the files.
  * @param onChange Called once per burst of changes.
  */
-function watchConfigFiles(configPaths: string[], onChange: () => void): void {
-  let changeTimer: ReturnType<typeof setTimeout> | null = null;
-  const absolutePaths = configPaths.map((configPath) => path.resolve(configPath));
+function watchConfigFiles (configPaths: string[], onChange: () => void): void {
+  let changeTimer: ReturnType<typeof setTimeout> | null = null
+  const absolutePaths = configPaths.map(configPath => path.resolve(configPath))
 
-  for (const directory of new Set(absolutePaths.map((configPath) => path.dirname(configPath)))) {
+  for (const directory of new Set(absolutePaths.map(configPath => path.dirname(configPath)))) {
     if (!existsSync(directory)) {
-      continue;
+      continue
     }
 
     watch(directory, (_event, changed) => {
       if (!changed || !absolutePaths.includes(path.join(directory, changed))) {
-        return;
+        return
       }
 
       if (changeTimer) {
-        clearTimeout(changeTimer);
+        clearTimeout(changeTimer)
       }
-      changeTimer = setTimeout(onChange, CONFIG_CHANGE_DELAY_MS);
-    });
+      changeTimer = setTimeout(onChange, CONFIG_CHANGE_DELAY_MS)
+    })
   }
 }
 
@@ -255,9 +255,9 @@ function watchConfigFiles(configPaths: string[], onChange: () => void): void {
  * @param options Ports, SSL domain, UI path, configuration files of the server and whether it runs the load balancer.
  * @returns The running server.
  */
-export default async function runServer(options: ServerBootstrapOptions = {}): Promise<DevtoolServer> {
-  const configPaths = resolveConfigPaths(options.configPaths);
-  return DevtoolServer.run(createConfigProvider(options, configPaths), pkg.version, options.loadBalancer ?? true);
+export default async function runServer (options: ServerBootstrapOptions = {}): Promise<DevtoolServer> {
+  const configPaths = resolveConfigPaths(options.configPaths)
+  return DevtoolServer.run(createConfigProvider(options, configPaths), pkg.version, options.loadBalancer ?? true)
 }
 
 /**
@@ -267,46 +267,46 @@ export default async function runServer(options: ServerBootstrapOptions = {}): P
  * @param configPaths Configuration files, the default ones when empty.
  * @throws When a certificate is unknown or its renewal fails.
  */
-export async function renewCertificates(names: string[], configPaths: string[] = []): Promise<void> {
-  const configure = new DevtoolConfigure((await createConfigProvider({}, resolveConfigPaths(configPaths))()).raw);
-  await configure.reconfigure();
+export async function renewCertificates (names: string[], configPaths: string[] = []): Promise<void> {
+  const configure = new DevtoolConfigure((await createConfigProvider({}, resolveConfigPaths(configPaths))()).raw)
+  await configure.reconfigure()
   const certificates = Object.fromEntries(
     Object.entries(configure.runtimeConfig.loadBalancers)
-      .map(([domain, certificate]) => [domain.replace(/^\./, ""), certificate] as const)
-      .filter(([, certificate]) => certificate.acme),
-  );
-  const unknown = names.filter((name) => !certificates[name]);
+      .map(([domain, certificate]) => [domain.replace(/^\./, ''), certificate] as const)
+      .filter(([, certificate]) => certificate.acme)
+  )
+  const unknown = names.filter(name => !certificates[name])
   if (unknown.length) {
-    throw new Error(`no renewed certificate named ${unknown.join(", ")} (renewed: ${Object.keys(certificates).join(", ") || "none"})`);
+    throw new Error(`no renewed certificate named ${unknown.join(', ')} (renewed: ${Object.keys(certificates).join(', ') || 'none'})`)
   }
 
   for (const name of names.length ? names : Object.keys(certificates)) {
-    const certificate = certificates[name];
-    const renewal = await prepareRenewal(name, certificate, configure.runtimeConfig.adt.cacheDir, true, (line) => logger.info("Certificates", name, line));
-    const automation = configure.automations[certificateAutomationKey(name)];
-    const secrets = new CommandSecrets(automation?.opAccount ?? null, renewal.cwd, async (command) => (await execFileAsync("/bin/sh", ["-c", command], { cwd: renewal.cwd })).stdout.replace(/\n+$/, ""));
+    const certificate = certificates[name]
+    const renewal = await prepareRenewal(name, certificate, configure.runtimeConfig.adt.cacheDir, true, line => logger.info('Certificates', name, line))
+    const automation = configure.automations[certificateAutomationKey(name)]
+    const secrets = new CommandSecrets(automation?.opAccount ?? null, renewal.cwd, async command => (await execFileAsync('/bin/sh', ['-c', command], { cwd: renewal.cwd })).stdout.replace(/\n+$/, ''))
     try {
-      const env: Record<string, string> = {};
+      const env: Record<string, string> = {}
       for (const [key, value] of Object.entries(certificate.acme?.env ?? {})) {
-        env[key] = await secrets.resolve(value);
+        env[key] = await secrets.resolve(value)
       }
-      const args: string[] = [];
+      const args: string[] = []
       for (const arg of renewal.args) {
-        args.push(await secrets.resolve(arg));
+        args.push(await secrets.resolve(arg))
       }
-      logger.info("Certificates", name, `Renewing in ${renewal.cwd}`);
+      logger.info('Certificates', name, `Renewing in ${renewal.cwd}`)
       const exitCode = await new Promise<number>((resolve, reject) => {
-        spawn(args[0], args.slice(1), { cwd: renewal.cwd, env: { ...process.env, ...env }, stdio: "inherit" })
-          .on("error", reject)
-          .on("exit", (code) => resolve(code ?? 1));
-      });
+        spawn(args[0], args.slice(1), { cwd: renewal.cwd, env: { ...process.env, ...env }, stdio: 'inherit' })
+          .on('error', reject)
+          .on('exit', code => resolve(code ?? 1))
+      })
       if (exitCode !== 0) {
-        throw new Error(`renewal of ${name} exited with code ${exitCode}`);
+        throw new Error(`renewal of ${name} exited with code ${exitCode}`)
       }
-      await renewal.finish();
-      logger.info("Certificates", name, `Renewed: ${certificate.crt}`);
+      await renewal.finish()
+      logger.info('Certificates', name, `Renewed: ${certificate.crt}`)
     } finally {
-      secrets.close();
+      secrets.close()
     }
   }
 }
@@ -317,27 +317,27 @@ export async function renewCertificates(names: string[], configPaths: string[] =
  * @param options Ports, SSL domain, UI path and configuration files of the load balancer.
  * @returns The running load balancer.
  */
-export async function runLoadBalancer(options: ServerBootstrapOptions = {}): Promise<DevtoolLB> {
-  const configPaths = resolveConfigPaths(options.configPaths);
-  const configProvider = createConfigProvider(options, configPaths);
-  const context: LoadBalancerContext = { config: await loadRuntimeConfig(configProvider) };
-  const lb = await DevtoolLB.create(context);
-  await lb.listen();
+export async function runLoadBalancer (options: ServerBootstrapOptions = {}): Promise<DevtoolLB> {
+  const configPaths = resolveConfigPaths(options.configPaths)
+  const configProvider = createConfigProvider(options, configPaths)
+  const context: LoadBalancerContext = { config: await loadRuntimeConfig(configProvider) }
+  const lb = await DevtoolLB.create(context)
+  await lb.listen()
 
   const certificateFiles = Object.values(context.config.loadBalancers)
-    .flatMap((certificate) => [certificate.crt, certificate.key])
-    .filter((file) => !file.trimStart().startsWith("-----BEGIN "));
+    .flatMap(certificate => [certificate.crt, certificate.key])
+    .filter(file => !file.trimStart().startsWith('-----BEGIN '))
   watchConfigFiles([...configPaths, ...certificateFiles], () => {
     void (async () => {
-      context.config = await loadRuntimeConfig(configProvider);
+      context.config = await loadRuntimeConfig(configProvider)
       if (await lb.reload(context.config)) {
-        await lb.recreate();
+        await lb.recreate()
       }
-      logger.info("LoadBalancer", "Config", "Reloaded");
+      logger.info('LoadBalancer', 'Config', 'Reloaded')
     })().catch((error: unknown) => {
-      logger.warn("LoadBalancer", "Config", `Not reloaded: ${error instanceof Error ? error.message : String(error)}`);
-    });
-  });
+      logger.warn('LoadBalancer', 'Config', `Not reloaded: ${error instanceof Error ? error.message : String(error)}`)
+    })
+  })
 
-  return lb;
+  return lb
 }

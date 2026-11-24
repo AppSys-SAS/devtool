@@ -1,37 +1,37 @@
-import fs from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
-import { parseEnv } from "node:util";
-import { parse as parseYaml } from "yaml";
-import { OpTerminal } from "./op-terminal.js";
-import { stripAnsi } from "./utils.js";
+import fs from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
+import { parseEnv } from 'node:util'
+import { parse as parseYaml } from 'yaml'
+import { OpTerminal } from './op-terminal.js'
+import { stripAnsi } from './utils.js'
 
-const VALUE_BLOCK = /\{\{\s*(.*?)\s*\}\}/gs;
-const SECRET_REFERENCE = /^op:\/\/[^\r\n]+$/;
-const FILE_REFERENCE = /^file:\/\/([^#\r\n]+)(?:#(\/[^\r\n]*))?$/;
-const SHELL_SUBSTITUTION = /^\$\((.+)\)$/s;
-const MAX_OUTPUT_LENGTH = 8192;
-const MIN_SCRUBBED_LENGTH = 4;
-const SCRUBBED = "••••";
+const VALUE_BLOCK = /\{\{\s*(.*?)\s*\}\}/gs
+const SECRET_REFERENCE = /^op:\/\/[^\r\n]+$/
+const FILE_REFERENCE = /^file:\/\/([^#\r\n]+)(?:#(\/[^\r\n]*))?$/
+const SHELL_SUBSTITUTION = /^\$\((.+)\)$/s
+const MAX_OUTPUT_LENGTH = 8192
+const MIN_SCRUBBED_LENGTH = 4
+const SCRUBBED = '••••'
 
 /** An answer the server types when the output of a command asks its question. */
 export interface CommandAnswer {
-  pattern: RegExp;
+  pattern: RegExp
   /** The answer, its value blocks read when its question shows. */
-  value: string;
+  value: string
 }
 
 /** What the server does on its own around a command of the configuration. */
 export interface CommandAutomation {
   /** A command whose success makes the command needless, null to always run it. */
-  unless: string[] | null;
+  unless: string[] | null
   /** The 1Password account the references are read from, null for the default one. */
-  opAccount: string | null;
-  answers: CommandAnswer[];
+  opAccount: string | null
+  answers: CommandAnswer[]
 }
 
 /** Runs a shell command and gives its standard output, failing when the command fails. */
-export type ShellRunner = (command: string) => Promise<string>;
+export type ShellRunner = (command: string) => Promise<string>
 
 /**
  * Lists the value blocks of a text that are neither a 1Password reference, a file reference nor a
@@ -39,10 +39,10 @@ export type ShellRunner = (command: string) => Promise<string>;
  * @param text The text.
  * @returns Each invalid block, as written.
  */
-export function findInvalidValueBlocks(text: string): string[] {
+export function findInvalidValueBlocks (text: string): string[] {
   return [...text.matchAll(VALUE_BLOCK)]
     .filter(([, expression]) => !SECRET_REFERENCE.test(expression) && !FILE_REFERENCE.test(expression) && !SHELL_SUBSTITUTION.test(expression))
-    .map(([block]) => block);
+    .map(([block]) => block)
 }
 
 /**
@@ -51,18 +51,18 @@ export function findInvalidValueBlocks(text: string): string[] {
  * @param content Its content.
  * @returns The parsed document.
  */
-function parseValueFile(file: string, content: string): unknown {
-  const name = path.basename(file);
+function parseValueFile (file: string, content: string): unknown {
+  const name = path.basename(file)
   if (/\.ya?ml$/i.test(name)) {
-    return parseYaml(content);
+    return parseYaml(content)
   }
   if (/\.json$/i.test(name)) {
-    return JSON.parse(content);
+    return JSON.parse(content)
   }
   if (/^\.env(\..+)?$|\.env$/i.test(name)) {
-    return parseEnv(content);
+    return parseEnv(content)
   }
-  throw new Error(`unknown format of ${file}, expected .yml, .yaml, .json or .env`);
+  throw new Error(`unknown format of ${file}, expected .yml, .yaml, .json or .env`)
 }
 
 /**
@@ -72,19 +72,19 @@ function parseValueFile(file: string, content: string): unknown {
  * value read from the output.
  */
 export class CommandSecrets {
-  private readonly _values = new Map<string, string>();
+  private readonly _values = new Map<string, string>()
 
-  private _terminal: OpTerminal | null = null;
+  private _terminal: OpTerminal | null = null
 
   /**
    * @param _account The 1Password account the references are read from, null for the default one.
    * @param _folder The folder relative file references are resolved from.
    * @param _runShell Runs the shell commands of the substitutions.
    */
-  constructor(
+  constructor (
     private readonly _account: string | null,
     private readonly _folder: string,
-    private readonly _runShell: ShellRunner,
+    private readonly _runShell: ShellRunner
   ) {}
 
   /**
@@ -92,23 +92,23 @@ export class CommandSecrets {
    * @param text The text.
    * @returns The text with the values read.
    */
-  async resolve(text: string): Promise<string> {
-    let resolved = "";
-    let end = 0;
+  async resolve (text: string): Promise<string> {
+    let resolved = ''
+    let end = 0
     for (const match of text.matchAll(VALUE_BLOCK)) {
-      resolved += text.slice(end, match.index) + (await this.read(match[1]));
-      end = match.index + match[0].length;
+      resolved += text.slice(end, match.index) + (await this.read(match[1]))
+      end = match.index + match[0].length
     }
 
-    return resolved + text.slice(end);
+    return resolved + text.slice(end)
   }
 
   /**
    * Closes the 1Password terminal, the next run of the command asking 1Password again.
    */
-  close(): void {
-    this._terminal?.close();
-    this._terminal = null;
+  close (): void {
+    this._terminal?.close()
+    this._terminal = null
   }
 
   /**
@@ -116,14 +116,14 @@ export class CommandSecrets {
    * @param text The output.
    * @returns The output, each value replaced by a mask.
    */
-  scrub(text: string): string {
-    let scrubbed = text;
+  scrub (text: string): string {
+    let scrubbed = text
     for (const value of this._values.values()) {
       if (value.length >= MIN_SCRUBBED_LENGTH) {
-        scrubbed = scrubbed.replaceAll(value, SCRUBBED);
+        scrubbed = scrubbed.replaceAll(value, SCRUBBED)
       }
     }
-    return scrubbed;
+    return scrubbed
   }
 
   /**
@@ -131,13 +131,13 @@ export class CommandSecrets {
    * @param expression The expression, between the braces.
    * @returns Its value.
    */
-  private async read(expression: string): Promise<string> {
-    let value = this._values.get(expression);
+  private async read (expression: string): Promise<string> {
+    let value = this._values.get(expression)
     if (value === undefined) {
-      value = await this.readOnce(expression);
-      this._values.set(expression, value);
+      value = await this.readOnce(expression)
+      this._values.set(expression, value)
     }
-    return value;
+    return value
   }
 
   /**
@@ -145,23 +145,23 @@ export class CommandSecrets {
    * @param expression The expression, between the braces.
    * @returns Its value.
    */
-  private async readOnce(expression: string): Promise<string> {
+  private async readOnce (expression: string): Promise<string> {
     if (SECRET_REFERENCE.test(expression)) {
-      this._terminal ??= OpTerminal.open(this._account);
-      return this._terminal.read(expression);
+      this._terminal ??= OpTerminal.open(this._account)
+      return this._terminal.read(expression)
     }
 
-    const reference = FILE_REFERENCE.exec(expression);
+    const reference = FILE_REFERENCE.exec(expression)
     if (reference) {
-      return this.readFile(reference[1], reference[2] ?? null);
+      return this.readFile(reference[1], reference[2] ?? null)
     }
 
-    const substitution = SHELL_SUBSTITUTION.exec(expression);
+    const substitution = SHELL_SUBSTITUTION.exec(expression)
     if (substitution) {
-      return (await this._runShell(substitution[1])).replace(/[\r\n]+$/, "");
+      return (await this._runShell(substitution[1])).replace(/[\r\n]+$/, '')
     }
 
-    throw new Error(`Unknown value block {{ ${expression} }}`);
+    throw new Error(`Unknown value block {{ ${expression} }}`)
   }
 
   /**
@@ -170,25 +170,25 @@ export class CommandSecrets {
    * @param pointer A JSON pointer such as `/hosts/0/token`, null for the whole file.
    * @returns The content of the file without its trailing newlines, or the value as text.
    */
-  private async readFile(filePath: string, pointer: string | null): Promise<string> {
-    const file = path.resolve(this._folder, filePath.startsWith("~/") ? path.join(os.homedir(), filePath.slice(2)) : filePath);
-    const content = await fs.readFile(file, "utf8");
+  private async readFile (filePath: string, pointer: string | null): Promise<string> {
+    const file = path.resolve(this._folder, filePath.startsWith('~/') ? path.join(os.homedir(), filePath.slice(2)) : filePath)
+    const content = await fs.readFile(file, 'utf8')
     if (pointer === null) {
-      return content.replace(/[\r\n]+$/, "");
+      return content.replace(/[\r\n]+$/, '')
     }
 
-    let value = parseValueFile(file, content);
-    const keys = pointer.split("/").slice(1).map((key) => key.replaceAll("~1", "/").replaceAll("~0", "~"));
+    let value = parseValueFile(file, content)
+    const keys = pointer.split('/').slice(1).map(key => key.replaceAll('~1', '/').replaceAll('~0', '~'))
     for (const [index, key] of keys.entries()) {
-      if (value === null || typeof value !== "object" || !Object.hasOwn(value, key)) {
-        throw new Error(`file://${filePath}#${pointer}: no key /${keys.slice(0, index + 1).join("/")}`);
+      if (value === null || typeof value !== 'object' || !Object.hasOwn(value, key)) {
+        throw new Error(`file://${filePath}#${pointer}: no key /${keys.slice(0, index + 1).join('/')}`)
       }
-      value = (value as Record<string, unknown>)[key];
+      value = (value as Record<string, unknown>)[key]
     }
-    if (typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean") {
-      throw new Error(`file://${filePath}#${pointer}: not a text, number or boolean`);
+    if (typeof value !== 'string' && typeof value !== 'number' && typeof value !== 'boolean') {
+      throw new Error(`file://${filePath}#${pointer}: not a text, number or boolean`)
     }
-    return String(value);
+    return String(value)
   }
 }
 
@@ -197,15 +197,15 @@ export class CommandSecrets {
  * answer asks one of the declared questions, each answered once, the way expect does.
  */
 export class AnswerMatcher {
-  private _output = "";
+  private _output = ''
 
-  private readonly _pending: CommandAnswer[];
+  private readonly _pending: CommandAnswer[]
 
   /**
    * @param answers The answers, tried in this order.
    */
-  constructor(answers: CommandAnswer[]) {
-    this._pending = [...answers];
+  constructor (answers: CommandAnswer[]) {
+    this._pending = [...answers]
   }
 
   /**
@@ -213,19 +213,19 @@ export class AnswerMatcher {
    * @param data The output.
    * @returns The answer to type, its value blocks not read yet, null when the output asks nothing declared.
    */
-  feed(data: string): string | null {
+  feed (data: string): string | null {
     if (!this._pending.length) {
-      return null;
+      return null
     }
 
-    this._output = `${this._output}${stripAnsi(data)}`.slice(-MAX_OUTPUT_LENGTH);
+    this._output = `${this._output}${stripAnsi(data)}`.slice(-MAX_OUTPUT_LENGTH)
     for (const [index, answer] of this._pending.entries()) {
-      const match = answer.pattern.exec(this._output);
+      const match = answer.pattern.exec(this._output)
       if (match) {
-        this._output = this._output.slice(match.index + match[0].length);
-        return this._pending.splice(index, 1)[0].value;
+        this._output = this._output.slice(match.index + match[0].length)
+        return this._pending.splice(index, 1)[0].value
       }
     }
-    return null;
+    return null
   }
 }

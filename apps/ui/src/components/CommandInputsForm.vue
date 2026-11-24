@@ -1,44 +1,44 @@
 <script setup lang="ts">
-import { computed, shallowRef } from "vue";
-import { MessageSquare, Play, X } from "@lucide/vue";
-import { commandInputs, defaultCommandInputs, expandCommandArgs, missingCommandInputs, type CommandInput, type CommandInputValue, type DirectoryExtra } from "@appsys/devtool-shared";
-import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Input } from "@/components/ui/input";
-import { Select } from "@/components/ui/select";
-import { cn } from "@/lib/utils";
+import { computed, shallowRef } from 'vue'
+import { MessageSquare, Play, X } from '@lucide/vue'
+import { commandInputs, defaultCommandInputs, expandCommandArgs, missingCommandInputs, type CommandInput, type CommandInputValue, type DirectoryExtra } from '@appsys/devtool-shared'
+import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Input } from '@/components/ui/input'
+import { Select } from '@/components/ui/select'
+import { cn } from '@/lib/utils'
 
 const props = defineProps<{
-  command: DirectoryExtra;
+  command: DirectoryExtra
   /** The values the inputs start with, their defaults when absent. */
-  initial?: CommandInputValue[] | null;
-}>();
+  initial?: CommandInputValue[] | null
+}>()
 
 const emit = defineEmits<{
-  run: [inputs: CommandInputValue[]];
-}>();
+  run: [inputs: CommandInputValue[]]
+}>()
 
 defineSlots<{
   /** Shown under the form in place of its run button, given the values of the inputs and whether a required one is missing. */
-  actions?: (props: { inputs: CommandInputValue[]; missing: boolean }) => unknown;
-}>();
+  actions?: (props: { inputs: CommandInputValue[], missing: boolean }) => unknown
+}>()
 
-const fields = computed(() => commandInputs(props.command.args));
-const values = shallowRef<CommandInputValue[]>(props.initial ?? defaultCommandInputs(props.command.args));
-const inputs = computed(() => fields.value.map((_, index) => values.value[index] ?? ""));
+const fields = computed(() => commandInputs(props.command.args))
+const values = shallowRef<CommandInputValue[]>(props.initial ?? defaultCommandInputs(props.command.args))
+const inputs = computed(() => fields.value.map((_, index) => values.value[index] ?? ''))
 
-const preview = computed(() => expandCommandArgs(props.command.args, inputs.value).map((arg) => (/[\s"']/.test(arg) ? JSON.stringify(arg) : arg)).join(" "));
-const missing = computed(() => missingCommandInputs(props.command.args, inputs.value).length > 0);
+const preview = computed(() => expandCommandArgs(props.command.args, inputs.value).map(arg => (/[\s"']/.test(arg) ? JSON.stringify(arg) : arg)).join(' '))
+const missing = computed(() => missingCommandInputs(props.command.args, inputs.value).length > 0)
 
 /**
  * Sets the value of an input.
  * @param index The position of the input.
  * @param value The value.
  */
-function set(index: number, value: CommandInputValue): void {
-  const next = [...inputs.value];
-  next[index] = value;
-  values.value = next;
+function set (index: number, value: CommandInputValue): void {
+  const next = [...inputs.value]
+  next[index] = value
+  values.value = next
 }
 
 /**
@@ -47,8 +47,8 @@ function set(index: number, value: CommandInputValue): void {
  * @param field The choice.
  * @param choice The value.
  */
-function pick(index: number, field: CommandInput, choice: string): void {
-  set(index, field.optional && inputs.value[index] === choice ? "" : choice);
+function pick (index: number, field: CommandInput, choice: string): void {
+  set(index, field.optional && inputs.value[index] === choice ? '' : choice)
 }
 </script>
 

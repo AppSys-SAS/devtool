@@ -1,52 +1,52 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
-import { RouterLink } from "vue-router";
-import { ArrowLeft } from "@lucide/vue";
-import type { ForgeItemsPayload, IntegrationDefinition } from "@appsys/devtool-shared";
-import { forgeEntries, integrationKey } from "@appsys/devtool-shared";
-import MarkdownPreview from "@/components/files/MarkdownPreview.vue";
-import ForgeItemActions from "@/components/forge/ForgeItemActions.vue";
-import ForgeItemSummary from "@/components/forge/ForgeItemSummary.vue";
-import ForgeTimeline from "@/components/forge/ForgeTimeline.vue";
-import { Button } from "@/components/ui/button";
-import type { AgentPlace } from "@/lib/agents";
-import { FORGE_ICONS, startForgeAction } from "@/lib/forge";
-import { integrationRoute } from "@/lib/shortcuts";
-import forgeItemsStore from "@/stores/forge-items";
-import wsStore from "@/stores/ws";
+import { computed, ref, watch } from 'vue'
+import { RouterLink } from 'vue-router'
+import { ArrowLeft } from '@lucide/vue'
+import type { ForgeItemsPayload, IntegrationDefinition } from '@appsys/devtool-shared'
+import { forgeEntries, integrationKey } from '@appsys/devtool-shared'
+import MarkdownPreview from '@/components/files/MarkdownPreview.vue'
+import ForgeItemActions from '@/components/forge/ForgeItemActions.vue'
+import ForgeItemSummary from '@/components/forge/ForgeItemSummary.vue'
+import ForgeTimeline from '@/components/forge/ForgeTimeline.vue'
+import { Button } from '@/components/ui/button'
+import type { AgentPlace } from '@/lib/agents'
+import { FORGE_ICONS, startForgeAction } from '@/lib/forge'
+import { integrationRoute } from '@/lib/shortcuts'
+import forgeItemsStore from '@/stores/forge-items'
+import wsStore from '@/stores/ws'
 
 const props = defineProps<{
-  integration: IntegrationDefinition;
+  integration: IntegrationDefinition
   /** The section or project declaring the integration, where the agents work. */
-  place: AgentPlace;
+  place: AgentPlace
   /** The items, as last read. */
-  state: ForgeItemsPayload;
+  state: ForgeItemsPayload
   /** The number of the item shown. */
-  number: number;
-}>();
+  number: number
+}>()
 
-const entry = computed(() => forgeEntries(props.state).find((item) => item.item.number === props.number) ?? null);
-const key = computed(() => integrationKey(props.place.projectSlug, props.place.directorySlug, props.integration.slug));
-const timeline = computed(() => forgeItemsStore.timelineOf(key.value, props.number));
-const listRoute = computed(() => integrationRoute(props.integration, props.place.projectSlug, props.place.directorySlug ?? undefined));
-const loadingPrevious = ref(false);
+const entry = computed(() => forgeEntries(props.state).find(item => item.item.number === props.number) ?? null)
+const key = computed(() => integrationKey(props.place.projectSlug, props.place.directorySlug, props.integration.slug))
+const timeline = computed(() => forgeItemsStore.timelineOf(key.value, props.number))
+const listRoute = computed(() => integrationRoute(props.integration, props.place.projectSlug, props.place.directorySlug ?? undefined))
+const loadingPrevious = ref(false)
 
 watch(
   [key, () => props.number],
   ([integration, number]) => wsStore.forgeTimelineRead(integration, number),
-  { immediate: true },
-);
+  { immediate: true }
+)
 watch(timeline, () => {
-  loadingPrevious.value = false;
-});
+  loadingPrevious.value = false
+})
 
 /**
  * Asks for the events of the timeline before those shown.
  */
-function loadPrevious(): void {
+function loadPrevious (): void {
   if (timeline.value?.before) {
-    loadingPrevious.value = true;
-    wsStore.forgeTimelineRead(key.value, props.number, timeline.value.before);
+    loadingPrevious.value = true
+    wsStore.forgeTimelineRead(key.value, props.number, timeline.value.before)
   }
 }
 </script>

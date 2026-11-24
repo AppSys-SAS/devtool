@@ -8,17 +8,17 @@ import { Badge } from '@/components/ui/badge'
 import type { CommandStream } from '@/types'
 
 const props = defineProps<{
-  stream: CommandStream;
-  route: RouteLocationRaw;
-  label: string;
-  icon?: string;
+  stream: CommandStream
+  route: RouteLocationRaw
+  label: string
+  icon?: string
 }>()
 
 const emit = defineEmits<{
-  start: [slug: string];
-  stop: [slug: string];
-  restart: [slug: string];
-  close: [slug: string];
+  start: [slug: string]
+  stop: [slug: string]
+  restart: [slug: string]
+  close: [slug: string]
 }>()
 
 const isRunning = computed(() => props.stream.status === 'RUNNING')
@@ -40,8 +40,9 @@ const isRunning = computed(() => props.stream.status === 'RUNNING')
     >
       <span class="relative flex size-3">
         <span
-          class="absolute inline-flex h-full w-full animate-ping rounded-full bg-sky-400 opacity-75"></span>
-        <span class="relative inline-flex size-3 rounded-full bg-sky-500"></span>
+          class="absolute inline-flex h-full w-full animate-ping rounded-full bg-sky-400 opacity-75"
+        />
+        <span class="relative inline-flex size-3 rounded-full bg-sky-500" />
       </span>
     </span>
     <Icon

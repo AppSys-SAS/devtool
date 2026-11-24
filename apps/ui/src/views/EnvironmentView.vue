@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
-import { RouterLink } from "vue-router";
+import { computed, onMounted, ref, watch } from 'vue'
+import { RouterLink } from 'vue-router'
 import {
   ArrowDownToLine,
   ArrowUpFromLine,
@@ -18,153 +18,153 @@ import {
   SkipForward,
   TriangleAlert,
   UserRound,
-  X,
-} from "@lucide/vue";
-import type { EnvironmentCopyPayload, EnvironmentItemPayload, EnvironmentKeyChoicePayload, EnvironmentStepPayload } from "@appsys/devtool-shared";
-import ConfirmDialog from "@/components/ConfirmDialog.vue";
-import ConfigKeyChooser from "@/components/ConfigKeyChooser.vue";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Input } from "@/components/ui/input";
-import { expiryClass, expiryLabel } from "@/lib/expiry";
-import { formatBytes, formatRelativeDate } from "@/lib/format";
-import { cn } from "@/lib/utils";
-import environmentStore from "@/stores/environment";
-import sessionStore from "@/stores/session";
-import wsStore from "@/stores/ws";
+  X
+} from '@lucide/vue'
+import type { EnvironmentCopyPayload, EnvironmentItemPayload, EnvironmentKeyChoicePayload, EnvironmentStepPayload } from '@appsys/devtool-shared'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
+import ConfigKeyChooser from '@/components/ConfigKeyChooser.vue'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card } from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Input } from '@/components/ui/input'
+import { expiryClass, expiryLabel } from '@/lib/expiry'
+import { formatBytes, formatRelativeDate } from '@/lib/format'
+import { cn } from '@/lib/utils'
+import environmentStore from '@/stores/environment'
+import sessionStore from '@/stores/session'
+import wsStore from '@/stores/ws'
 
 interface SyncStatus {
-  label: string;
-  tone: "remote" | "local" | "conflict" | "muted" | "synced";
+  label: string
+  tone: 'remote' | 'local' | 'conflict' | 'muted' | 'synced'
 }
 
-type Side = EnvironmentKeyChoicePayload["side"];
+type Side = EnvironmentKeyChoicePayload['side']
 
 interface ItemSelection {
-  tables: string[] | null;
-  keys: Record<string, Side> | null;
+  tables: string[] | null
+  keys: Record<string, Side> | null
 }
 
-const SAME_DATE_TOLERANCE_MS = 1000;
-const TONE_CLASSES: Record<SyncStatus["tone"], string> = {
-  remote: "border-sky-500/40 text-sky-600 dark:text-sky-400",
-  local: "border-amber-500/40 text-amber-600 dark:text-amber-400",
-  conflict: "border-destructive/40 text-destructive",
-  muted: "text-muted-foreground",
-  synced: "border-emerald-500/40 text-emerald-600 dark:text-emerald-400",
-};
+const SAME_DATE_TOLERANCE_MS = 1000
+const TONE_CLASSES: Record<SyncStatus['tone'], string> = {
+  remote: 'border-sky-500/40 text-sky-600 dark:text-sky-400',
+  local: 'border-amber-500/40 text-amber-600 dark:text-amber-400',
+  conflict: 'border-destructive/40 text-destructive',
+  muted: 'text-muted-foreground',
+  synced: 'border-emerald-500/40 text-emerald-600 dark:text-emerald-400'
+}
 
-const state = environmentStore.state;
-const session = sessionStore.state;
-const selected = ref<Record<string, ItemSelection>>({});
-const tableFilters = ref<Record<string, string>>({});
-const confirmOpen = ref(false);
-const pullingConfig = ref(false);
+const state = environmentStore.state
+const session = sessionStore.state
+const selected = ref<Record<string, ItemSelection>>({})
+const tableFilters = ref<Record<string, string>>({})
+const confirmOpen = ref(false)
+const pullingConfig = ref(false)
 
-const signedIn = computed(() => session.value?.signedIn === true);
-const running = computed(() => state.value?.run?.finished === false);
+const signedIn = computed(() => session.value?.signedIn === true)
+const running = computed(() => state.value?.run?.finished === false)
 
-watch(running, (isRunning) => {
+watch(running, isRunning => {
   if (isRunning) {
-    return;
+    return
   }
 
   for (const [path, selection] of Object.entries(selected.value)) {
     if (selection.keys !== null) {
-      chooseWholeFile(path, false);
+      chooseWholeFile(path, false)
     }
   }
-});
+})
 
 const groups = computed(() => {
-  const byProject = new Map<string, EnvironmentItemPayload[]>();
+  const byProject = new Map<string, EnvironmentItemPayload[]>()
   for (const item of state.value?.items ?? []) {
-    const project = item.path.split("/")[0];
-    byProject.set(project, [...(byProject.get(project) ?? []), item]);
+    const project = item.path.split('/')[0]
+    byProject.set(project, [...(byProject.get(project) ?? []), item])
   }
 
-  return [...byProject.entries()].map(([project, items]) => ({ project, items }));
-});
+  return [...byProject.entries()].map(([project, items]) => ({ project, items }))
+})
 
 const targets = computed(() =>
   Object.entries(selected.value).map(([path, { tables, keys }]) => {
-    const entries = keys ? environmentStore.keys.value[path]?.entries : undefined;
-    const item = state.value?.items.find((candidate) => candidate.path === path);
+    const entries = keys ? environmentStore.keys.value[path]?.entries : undefined
+    const item = state.value?.items.find(candidate => candidate.path === path)
     return {
       path,
       tables,
-      keys: entries && keys ? entries.map((entry) => ({ path: entry.path, side: keys[JSON.stringify(entry.path)] ?? (item ? defaultSideOf(item) : "remote") })) : null,
-    };
-  }),
-);
+      keys: entries && keys ? entries.map(entry => ({ path: entry.path, side: keys[JSON.stringify(entry.path)] ?? (item ? defaultSideOf(item) : 'remote') })) : null
+    }
+  })
+)
 const incomplete = computed(() =>
   Object.entries(selected.value).some(
-    ([path, { tables, keys }]) => (tables !== null && tables.length === 0) || (keys !== null && (!environmentStore.keys.value[path] || environmentStore.keys.value[path].error !== null)),
-  ),
-);
-const canRun = computed(() => signedIn.value && !running.value && targets.value.length > 0 && !incomplete.value);
+    ([path, { tables, keys }]) => (tables !== null && tables.length === 0) || (keys !== null && (!environmentStore.keys.value[path] || environmentStore.keys.value[path].error !== null))
+  )
+)
+const canRun = computed(() => signedIn.value && !running.value && targets.value.length > 0 && !incomplete.value)
 
 const overwritten = computed(() =>
   targets.value
-    .map((target) => ({ target, item: state.value?.items.find((item) => item.path === target.path) }))
-    .filter(({ item }) => item && item.kind !== "file")
+    .map(target => ({ target, item: state.value?.items.find(item => item.path === target.path) }))
+    .filter(({ item }) => item && item.kind !== 'file')
     .map(({ target, item }) => {
-      if (item?.kind === "bucket") {
-        return `${item.path}: bucket ${item.bucket} emptied and reloaded`;
+      if (item?.kind === 'bucket') {
+        return `${item.path}: bucket ${item.bucket} emptied and reloaded`
       }
 
-      if (item?.kind === "redis") {
+      if (item?.kind === 'redis') {
         return target.tables
-          ? `${target.path}: key groups ${target.tables.join(", ")} emptied and reloaded`
-          : `${item.path}: Redis database ${item.redis} emptied and reloaded`;
+          ? `${target.path}: key groups ${target.tables.join(', ')} emptied and reloaded`
+          : `${item.path}: Redis database ${item.redis} emptied and reloaded`
       }
 
       return target.tables
-        ? `${target.path}: tables ${target.tables.join(", ")} emptied and reloaded`
-        : `${target.path}: database of container ${item?.container} dropped and recreated`;
-    }),
-);
+        ? `${target.path}: tables ${target.tables.join(', ')} emptied and reloaded`
+        : `${target.path}: database of container ${item?.container} dropped and recreated`
+    })
+)
 
 /**
  * Compares the local copy of an item with its copy on the CDN.
  * @param item The item.
  * @returns The status to show, or null when the CDN copies are unknown.
  */
-function syncStatus(item: EnvironmentItemPayload): SyncStatus | null {
-  if (item.remote === "unknown") {
-    return null;
+function syncStatus (item: EnvironmentItemPayload): SyncStatus | null {
+  if (item.remote === 'unknown') {
+    return null
   }
 
   if (!item.remote) {
-    return item.local ? { label: "Only local", tone: "local" } : { label: "Missing", tone: "muted" };
+    return item.local ? { label: 'Only local', tone: 'local' } : { label: 'Missing', tone: 'muted' }
   }
 
   if (!item.local) {
-    return { label: "Only on CDN", tone: "remote" };
+    return { label: 'Only on CDN', tone: 'remote' }
   }
 
   if (item.synced) {
-    const localChanged = Math.abs(new Date(item.local.updatedAt).getTime() - new Date(item.synced.localUpdatedAt).getTime()) > SAME_DATE_TOLERANCE_MS;
-    const remoteChanged = Math.abs(new Date(item.remote.updatedAt).getTime() - new Date(item.synced.remoteUpdatedAt).getTime()) > SAME_DATE_TOLERANCE_MS;
+    const localChanged = Math.abs(new Date(item.local.updatedAt).getTime() - new Date(item.synced.localUpdatedAt).getTime()) > SAME_DATE_TOLERANCE_MS
+    const remoteChanged = Math.abs(new Date(item.remote.updatedAt).getTime() - new Date(item.synced.remoteUpdatedAt).getTime()) > SAME_DATE_TOLERANCE_MS
     if (localChanged && remoteChanged) {
-      return { label: "Changed on both", tone: "conflict" };
+      return { label: 'Changed on both', tone: 'conflict' }
     }
 
     if (localChanged || remoteChanged) {
-      return localChanged ? { label: "Newer locally", tone: "local" } : { label: "Newer on CDN", tone: "remote" };
+      return localChanged ? { label: 'Newer locally', tone: 'local' } : { label: 'Newer on CDN', tone: 'remote' }
     }
 
-    return { label: "Up to date", tone: "synced" };
+    return { label: 'Up to date', tone: 'synced' }
   }
 
-  const difference = new Date(item.remote.updatedAt).getTime() - new Date(item.local.updatedAt).getTime();
+  const difference = new Date(item.remote.updatedAt).getTime() - new Date(item.local.updatedAt).getTime()
   if (Math.abs(difference) <= SAME_DATE_TOLERANCE_MS) {
-    return { label: "Up to date", tone: "synced" };
+    return { label: 'Up to date', tone: 'synced' }
   }
 
-  return difference > 0 ? { label: "Newer on CDN", tone: "remote" } : { label: "Newer locally", tone: "local" };
+  return difference > 0 ? { label: 'Newer on CDN', tone: 'remote' } : { label: 'Newer locally', tone: 'local' }
 }
 
 /**
@@ -172,19 +172,19 @@ function syncStatus(item: EnvironmentItemPayload): SyncStatus | null {
  * @param item The item.
  * @returns A short description.
  */
-function describeItem(item: EnvironmentItemPayload): string {
+function describeItem (item: EnvironmentItemPayload): string {
   switch (item.kind) {
-    case "database":
-      return `${item.engine} · container ${item.container}`;
-    case "bucket":
-      return `bucket ${item.bucket}`;
-    case "redis":
-      return `redis · ${item.redis}`;
+    case 'database':
+      return `${item.engine} · container ${item.container}`
+    case 'bucket':
+      return `bucket ${item.bucket}`
+    case 'redis':
+      return `redis · ${item.redis}`
     default:
-      if (item.pem?.kind === "certificate") {
-        return "certificate";
+      if (item.pem?.kind === 'certificate') {
+        return 'certificate'
       }
-      return item.pem?.kind === "privateKey" ? "private key" : "file";
+      return item.pem?.kind === 'privateKey' ? 'private key' : 'file'
   }
 }
 
@@ -193,14 +193,14 @@ function describeItem(item: EnvironmentItemPayload): string {
  * @param item The item.
  * @param checked Whether it is selected.
  */
-function toggleItem(item: EnvironmentItemPayload, checked: boolean): void {
-  const next = { ...selected.value };
+function toggleItem (item: EnvironmentItemPayload, checked: boolean): void {
+  const next = { ...selected.value }
   if (checked) {
-    next[item.path] = { tables: null, keys: null };
+    next[item.path] = { tables: null, keys: null }
   } else {
-    delete next[item.path];
+    delete next[item.path]
   }
-  selected.value = next;
+  selected.value = next
 }
 
 /**
@@ -208,8 +208,8 @@ function toggleItem(item: EnvironmentItemPayload, checked: boolean): void {
  * @param item The database or Redis item.
  * @returns "key groups" for a Redis database, "tables" otherwise.
  */
-function partsOf(item: EnvironmentItemPayload): string {
-  return item.kind === "redis" ? "key groups" : "tables";
+function partsOf (item: EnvironmentItemPayload): string {
+  return item.kind === 'redis' ? 'key groups' : 'tables'
 }
 
 /**
@@ -217,10 +217,10 @@ function partsOf(item: EnvironmentItemPayload): string {
  * @param path The path of the database or Redis item.
  * @param whole Whether the whole database is transferred.
  */
-function chooseWhole(path: string, whole: boolean): void {
-  selected.value = { ...selected.value, [path]: { tables: whole ? null : [], keys: null } };
+function chooseWhole (path: string, whole: boolean): void {
+  selected.value = { ...selected.value, [path]: { tables: whole ? null : [], keys: null } }
   if (!whole && !environmentStore.tables.value[path]) {
-    wsStore.envTables(path);
+    wsStore.envTables(path)
   }
 }
 
@@ -229,8 +229,8 @@ function chooseWhole(path: string, whole: boolean): void {
  * @param item The item.
  * @returns True for such a file.
  */
-function hasKeys(item: EnvironmentItemPayload): boolean {
-  return item.keyed && item.local !== null && item.remote !== null && item.remote !== "unknown";
+function hasKeys (item: EnvironmentItemPayload): boolean {
+  return item.keyed && item.local !== null && item.remote !== null && item.remote !== 'unknown'
 }
 
 /**
@@ -238,8 +238,8 @@ function hasKeys(item: EnvironmentItemPayload): boolean {
  * @param item The configuration file item.
  * @returns The CDN when its copy is newer, the local copy otherwise.
  */
-function defaultSideOf(item: EnvironmentItemPayload): Side {
-  return syncStatus(item)?.tone === "local" ? "local" : "remote";
+function defaultSideOf (item: EnvironmentItemPayload): Side {
+  return syncStatus(item)?.tone === 'local' ? 'local' : 'remote'
 }
 
 /**
@@ -247,11 +247,11 @@ function defaultSideOf(item: EnvironmentItemPayload): Side {
  * @param path The path of the configuration file item.
  * @param whole Whether the whole file is transferred.
  */
-function chooseWholeFile(path: string, whole: boolean): void {
-  selected.value = { ...selected.value, [path]: { tables: null, keys: whole ? null : {} } };
+function chooseWholeFile (path: string, whole: boolean): void {
+  selected.value = { ...selected.value, [path]: { tables: null, keys: whole ? null : {} } }
   if (!whole) {
-    environmentStore.forgetKeys(path);
-    wsStore.envKeys(path);
+    environmentStore.forgetKeys(path)
+    wsStore.envKeys(path)
   }
 }
 
@@ -260,8 +260,8 @@ function chooseWholeFile(path: string, whole: boolean): void {
  * @param path The path of the configuration file item.
  * @param keys The copy of each key.
  */
-function setKeys(path: string, keys: Record<string, Side>): void {
-  selected.value = { ...selected.value, [path]: { tables: null, keys } };
+function setKeys (path: string, keys: Record<string, Side>): void {
+  selected.value = { ...selected.value, [path]: { tables: null, keys } }
 }
 
 /**
@@ -269,10 +269,10 @@ function setKeys(path: string, keys: Record<string, Side>): void {
  * @param path The path of the database item.
  * @param table The table.
  */
-function toggleTable(path: string, table: string): void {
-  const tables = selected.value[path]?.tables ?? [];
-  const next = tables.includes(table) ? tables.filter((candidate) => candidate !== table) : [...tables, table];
-  selected.value = { ...selected.value, [path]: { tables: next, keys: null } };
+function toggleTable (path: string, table: string): void {
+  const tables = selected.value[path]?.tables ?? []
+  const next = tables.includes(table) ? tables.filter(candidate => candidate !== table) : [...tables, table]
+  selected.value = { ...selected.value, [path]: { tables: next, keys: null } }
 }
 
 /**
@@ -280,38 +280,38 @@ function toggleTable(path: string, table: string): void {
  * @param path The path of the database item.
  * @returns The tables.
  */
-function visibleTables(path: string): string[] {
-  const filter = (tableFilters.value[path] ?? "").toLowerCase();
-  return (environmentStore.tables.value[path]?.tables ?? []).filter((table) => table.toLowerCase().includes(filter));
+function visibleTables (path: string): string[] {
+  const filter = (tableFilters.value[path] ?? '').toLowerCase()
+  return (environmentStore.tables.value[path]?.tables ?? []).filter(table => table.toLowerCase().includes(filter))
 }
 
 /**
  * Selects the items whose CDN copy is newer than the local one, or only on the CDN.
  */
-function selectNewerOnCdn(): void {
+function selectNewerOnCdn (): void {
   selected.value = Object.fromEntries(
-    (state.value?.items ?? []).filter((item) => syncStatus(item)?.tone === "remote").map((item) => [item.path, { tables: null, keys: null }]),
-  );
+    (state.value?.items ?? []).filter(item => syncStatus(item)?.tone === 'remote').map(item => [item.path, { tables: null, keys: null }])
+  )
 }
 
 /**
  * Pulls the selected items, after confirmation when local data is replaced.
  */
-function pull(): void {
+function pull (): void {
   if (overwritten.value.length > 0) {
-    confirmOpen.value = true;
-    return;
+    confirmOpen.value = true
+    return
   }
 
-  wsStore.envRun("pull", targets.value);
+  wsStore.envRun('pull', targets.value)
 }
 
 /**
  * Starts a sign-in, in a new tab.
  */
-function login(): void {
-  sessionStore.openLoginWindow();
-  wsStore.cdnLogin();
+function login (): void {
+  sessionStore.openLoginWindow()
+  wsStore.cdnLogin()
 }
 
 /**
@@ -319,8 +319,8 @@ function login(): void {
  * @param copy The copy.
  * @returns Its relative date and size.
  */
-function copyLabel(copy: EnvironmentCopyPayload): string {
-  return `${formatRelativeDate(copy.updatedAt)} · ${formatBytes(copy.size)}`;
+function copyLabel (copy: EnvironmentCopyPayload): string {
+  return `${formatRelativeDate(copy.updatedAt)} · ${formatBytes(copy.size)}`
 }
 
 /**
@@ -328,34 +328,34 @@ function copyLabel(copy: EnvironmentCopyPayload): string {
  * @param step The step.
  * @returns The icon component and its classes.
  */
-function stepIcon(step: EnvironmentStepPayload): { icon: unknown; class: string } {
+function stepIcon (step: EnvironmentStepPayload): { icon: unknown, class: string } {
   switch (step.status) {
-    case "running":
-      return { icon: Loader2, class: "animate-spin text-sky-500" };
-    case "done":
-      return { icon: Check, class: "text-emerald-500" };
-    case "skipped":
-      return { icon: SkipForward, class: "text-amber-500" };
-    case "failed":
-      return { icon: X, class: "text-destructive" };
+    case 'running':
+      return { icon: Loader2, class: 'animate-spin text-sky-500' }
+    case 'done':
+      return { icon: Check, class: 'text-emerald-500' }
+    case 'skipped':
+      return { icon: SkipForward, class: 'text-amber-500' }
+    case 'failed':
+      return { icon: X, class: 'text-destructive' }
     default:
-      return { icon: CircleDashed, class: "text-muted-foreground" };
+      return { icon: CircleDashed, class: 'text-muted-foreground' }
   }
 }
 
 /**
  * Downloads the shared devtool configuration, which declares the environment.
  */
-function pullConfig(): void {
-  pullingConfig.value = true;
-  wsStore.envPullConfig();
+function pullConfig (): void {
+  pullingConfig.value = true
+  wsStore.envPullConfig()
 }
 
 watch(state, () => {
-  pullingConfig.value = false;
-});
+  pullingConfig.value = false
+})
 
-onMounted(() => wsStore.envRefresh());
+onMounted(() => wsStore.envRefresh())
 </script>
 
 <template>

@@ -1,66 +1,66 @@
 <script setup lang="ts">
-import { computed, nextTick, shallowRef, useTemplateRef, watch } from "vue";
-import { DialogContent, DialogDescription, DialogOverlay, DialogPortal, DialogRoot, DialogTitle } from "reka-ui";
-import { CircleCheck, CircleX, Loader2, Send, Square } from "@lucide/vue";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { pendingPrompt, terminalText } from "@/lib/command-prompt";
-import { STREAM_STATUS } from "@/stores/command-stream";
-import configStore from "@/stores/config";
-import wsStore from "@/stores/ws";
+import { computed, nextTick, shallowRef, useTemplateRef, watch } from 'vue'
+import { DialogContent, DialogDescription, DialogOverlay, DialogPortal, DialogRoot, DialogTitle } from 'reka-ui'
+import { CircleCheck, CircleX, Loader2, Send, Square } from '@lucide/vue'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { pendingPrompt, terminalText } from '@/lib/command-prompt'
+import { STREAM_STATUS } from '@/stores/command-stream'
+import configStore from '@/stores/config'
+import wsStore from '@/stores/ws'
 
 const props = defineProps<{
-  tag: string;
-  title: string;
-}>();
+  tag: string
+  title: string
+}>()
 
 const emit = defineEmits<{
-  finished: [];
-  closed: [];
-}>();
+  finished: []
+  closed: []
+}>()
 
-const outputElement = useTemplateRef<HTMLPreElement>("output");
-const answer = shallowRef("");
+const outputElement = useTemplateRef<HTMLPreElement>('output')
+const answer = shallowRef('')
 
-const stream = computed(() => configStore.commandStreams.value.find((item) => item.tag === props.tag) ?? null);
-const running = computed(() => stream.value?.status === STREAM_STATUS.RUNNING);
+const stream = computed(() => configStore.commandStreams.value.find(item => item.tag === props.tag) ?? null)
+const running = computed(() => stream.value?.status === STREAM_STATUS.RUNNING)
 const text = computed(() => {
-  const output = stream.value ? (configStore.getCommandStreamsOutput(stream.value.slug)?.output ?? []) : [];
-  return terminalText(output.map((line) => (line.type === "info" ? `\n${line.content}\n` : line.content))).replace(/^\n+/, "");
-});
-const prompt = computed(() => (running.value ? pendingPrompt(text.value) : null));
+  const output = stream.value ? (configStore.getCommandStreamsOutput(stream.value.slug)?.output ?? []) : []
+  return terminalText(output.map(line => (line.type === 'info' ? `\n${line.content}\n` : line.content))).replace(/^\n+/, '')
+})
+const prompt = computed(() => (running.value ? pendingPrompt(text.value) : null))
 
 watch(running, (isRunning, wasRunning) => {
   if (wasRunning && !isRunning) {
-    emit("finished");
+    emit('finished')
   }
-});
+})
 
 watch(text, async () => {
-  await nextTick();
-  outputElement.value?.scrollTo({ top: outputElement.value.scrollHeight });
-});
+  await nextTick()
+  outputElement.value?.scrollTo({ top: outputElement.value.scrollHeight })
+})
 
 /**
  * Answers the question of the command.
  * @param value The answer, sent with a line break.
  */
-function send(value: string): void {
+function send (value: string): void {
   if (stream.value) {
-    wsStore.streamInput(stream.value.slug, `${value}\r`);
+    wsStore.streamInput(stream.value.slug, `${value}\r`)
   }
-  answer.value = "";
+  answer.value = ''
 }
 
 /**
  * Closes the dialog, forgetting the command once it is finished; a running command goes on.
  */
-function close(): void {
+function close (): void {
   if (stream.value && !running.value) {
-    wsStore.updateCommandStream(stream.value.slug, "close");
+    wsStore.updateCommandStream(stream.value.slug, 'close')
   }
-  emit("closed");
+  emit('closed')
 }
 </script>
 

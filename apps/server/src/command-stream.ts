@@ -1,112 +1,112 @@
-import { spawn as spawnDetached } from "node:child_process";
-import { EventEmitter } from "node:events";
-import { chmodSync, existsSync, readdirSync, statSync } from "node:fs";
-import path from "node:path";
-import { createRequire } from "node:module";
-import xtermHeadless, { type Terminal as ScreenTerminal } from "@xterm/headless";
-import { spawn as spawnPty, type IPty } from "node-pty";
-import treeKill from "tree-kill";
-import type { CommandArg, CommandInputValue, PortConflict, PortConflictAction, StreamOutputLine, StreamUpdatePayload } from "@appsys/devtool-shared";
-import { expandCommandArgs, logger, missingCommandInputs, replaceVariables } from "@appsys/devtool-shared";
-import type { WebSocket } from "ws";
-import { AnswerMatcher, type CommandAutomation, CommandSecrets } from "./command-automation.js";
-import { killPortOwners, PortConflictWatcher } from "./ports.js";
-import type { CommandStreamCreatePayload } from "./types.js";
-import type { DevtoolServer } from "./server.js";
+import { spawn as spawnDetached } from 'node:child_process'
+import { EventEmitter } from 'node:events'
+import { chmodSync, existsSync, readdirSync, statSync } from 'node:fs'
+import path from 'node:path'
+import { createRequire } from 'node:module'
+import xtermHeadless, { type Terminal as ScreenTerminal } from '@xterm/headless'
+import { spawn as spawnPty, type IPty } from 'node-pty'
+import treeKill from 'tree-kill'
+import type { CommandArg, CommandInputValue, PortConflict, PortConflictAction, StreamOutputLine, StreamUpdatePayload } from '@appsys/devtool-shared'
+import { expandCommandArgs, logger, missingCommandInputs, replaceVariables } from '@appsys/devtool-shared'
+import type { WebSocket } from 'ws'
+import { AnswerMatcher, type CommandAutomation, CommandSecrets } from './command-automation.js'
+import { killPortOwners, PortConflictWatcher } from './ports.js'
+import type { CommandStreamCreatePayload } from './types.js'
+import type { DevtoolServer } from './server.js'
 
 /** What the server adds to a command it starts itself, never asked for by an interface. */
 export interface CommandStreamHooks {
   /** The automation of the command, its value blocks read when it starts. */
-  automation?: CommandAutomation | null;
+  automation?: CommandAutomation | null
   /** Called each time the process ends, with its exit code, -1 when it was stopped. */
-  onExit?: (exitCode: number) => void;
+  onExit?: (exitCode: number) => void
 }
 
 /** What a stream tells its listeners: each piece of output, each change of state, and its closing. */
 export interface CommandStreamEvents {
-  output: [StreamOutputLine];
-  update: [];
-  close: [];
+  output: [StreamOutputLine]
+  update: []
+  close: []
 }
 
-const MAX_OUTPUT = 2048;
-const LOCAL_HOSTNAMES = new Set(["127.0.0.1", "localhost", "[::1]"]);
-const STOP_TIMEOUT_MS = 10_000;
-const ANSI_RESET = "\u001b[0m";
-const ANSI_INFO_PREFIX = "\u001b[38;5;195m\u001b[48;5;27m";
+const MAX_OUTPUT = 2048
+const LOCAL_HOSTNAMES = new Set(['127.0.0.1', 'localhost', '[::1]'])
+const STOP_TIMEOUT_MS = 10_000
+const ANSI_RESET = '\u001b[0m'
+const ANSI_INFO_PREFIX = '\u001b[38;5;195m\u001b[48;5;27m'
 
-function randomSlug(): string {
-  const now = Date.now();
-  return `${Math.random().toString(36).slice(2)}${now.toString(36)}`;
+function randomSlug (): string {
+  const now = Date.now()
+  return `${Math.random().toString(36).slice(2)}${now.toString(36)}`
 }
 
-function shellEscapePosix(arg: string): string {
-  return `'${arg.replace(/'/g, `'\\''`)}'`;
+function shellEscapePosix (arg: string): string {
+  return `'${arg.replace(/'/g, `'\\''`)}'`
 }
 
-function normalizeKillSignal(killSignal: string | null | undefined): string | null {
-  if (typeof killSignal !== "string") {
-    return null;
+function normalizeKillSignal (killSignal: string | null | undefined): string | null {
+  if (typeof killSignal !== 'string') {
+    return null
   }
 
-  const normalized = killSignal.trim().toUpperCase();
+  const normalized = killSignal.trim().toUpperCase()
   if (!normalized.length) {
-    return null;
+    return null
   }
 
-  if (normalized.startsWith("SIG")) {
-    return normalized;
+  if (normalized.startsWith('SIG')) {
+    return normalized
   }
 
-  return `SIG${normalized}`;
+  return `SIG${normalized}`
 }
 
-function normalizeShell(shell: string | null | undefined): string | null {
-  if (typeof shell !== "string") {
-    return null;
+function normalizeShell (shell: string | null | undefined): string | null {
+  if (typeof shell !== 'string') {
+    return null
   }
 
-  const normalized = shell.trim();
+  const normalized = shell.trim()
   if (!normalized.length) {
-    return null;
+    return null
   }
 
-  return normalized;
+  return normalized
 }
 
-function getShellCandidates(preferredShell: string | null = null): string[] {
-  const candidates = [preferredShell, process.env.SHELL, "/bin/zsh", "/bin/bash", "/bin/sh"].filter(
-    (item): item is string => Boolean(item && item.length),
-  );
+function getShellCandidates (preferredShell: string | null = null): string[] {
+  const candidates = [preferredShell, process.env.SHELL, '/bin/zsh', '/bin/bash', '/bin/sh'].filter(
+    (item): item is string => Boolean(item?.length)
+  )
 
-  const seen = new Set<string>();
-  const unique: string[] = [];
+  const seen = new Set<string>()
+  const unique: string[] = []
   for (const candidate of candidates) {
     if (seen.has(candidate)) {
-      continue;
+      continue
     }
-    seen.add(candidate);
-    unique.push(candidate);
+    seen.add(candidate)
+    unique.push(candidate)
   }
 
-  return unique;
+  return unique
 }
 
-function canAttemptShell(shell: string): boolean {
+function canAttemptShell (shell: string): boolean {
   if (!shell.includes(path.sep)) {
-    return true;
+    return true
   }
 
-  return existsSync(shell);
+  return existsSync(shell)
 }
 
-function getShellArgs(shell: string, command: string): string[] {
+function getShellArgs (shell: string, command: string): string[] {
   if (!command.length) {
-    return [];
+    return []
   }
 
-  const flag = shell.includes("zsh") || shell.includes("bash") ? "-lic" : "-lc";
-  return [flag, command];
+  const flag = shell.includes('zsh') || shell.includes('bash') ? '-lic' : '-lc'
+  return [flag, command]
 }
 
 /**
@@ -115,54 +115,54 @@ function getShellArgs(shell: string, command: string): string[] {
  * @param right The arguments of the second command.
  * @returns True when both commands exist with the same arguments.
  */
-function areArgsEqual(left: CommandArg[] | null, right: string[]): boolean {
+function areArgsEqual (left: CommandArg[] | null, right: string[]): boolean {
   if (!left || left.length !== right.length) {
-    return false;
+    return false
   }
 
   for (let index = 0; index < left.length; index += 1) {
     if (left[index] !== right[index]) {
-      return false;
+      return false
     }
   }
 
-  return true;
+  return true
 }
 
-let didCheckNodePtyPermissions = false;
+let didCheckNodePtyPermissions = false
 
-function ensureNodePtySpawnHelperExecutable(): void {
-  if (didCheckNodePtyPermissions || process.platform !== "darwin") {
-    return;
+function ensureNodePtySpawnHelperExecutable (): void {
+  if (didCheckNodePtyPermissions || process.platform !== 'darwin') {
+    return
   }
-  didCheckNodePtyPermissions = true;
+  didCheckNodePtyPermissions = true
 
   try {
-    const require = createRequire(import.meta.url);
-    const entry = require.resolve("node-pty");
-    const packageRoot = path.dirname(path.dirname(entry));
-    const prebuildsDir = path.join(packageRoot, "prebuilds");
+    const require = createRequire(import.meta.url)
+    const entry = require.resolve('node-pty')
+    const packageRoot = path.dirname(path.dirname(entry))
+    const prebuildsDir = path.join(packageRoot, 'prebuilds')
 
     if (!existsSync(prebuildsDir)) {
-      return;
+      return
     }
 
     for (const directory of readdirSync(prebuildsDir)) {
-      if (!directory.startsWith("darwin-")) {
-        continue;
+      if (!directory.startsWith('darwin-')) {
+        continue
       }
 
-      const spawnHelperPath = path.join(prebuildsDir, directory, "spawn-helper");
+      const spawnHelperPath = path.join(prebuildsDir, directory, 'spawn-helper')
       if (!existsSync(spawnHelperPath)) {
-        continue;
+        continue
       }
 
-      const mode = statSync(spawnHelperPath).mode;
+      const mode = statSync(spawnHelperPath).mode
       if ((mode & 0o111) !== 0) {
-        continue;
+        continue
       }
 
-      chmodSync(spawnHelperPath, mode | 0o755);
+      chmodSync(spawnHelperPath, mode | 0o755)
     }
   } catch {
     // Silent fallback: spawn logic below will surface detailed errors if it still fails.
@@ -170,129 +170,129 @@ function ensureNodePtySpawnHelperExecutable(): void {
 }
 
 export class DevtoolCommandStream {
-  private readonly server: DevtoolServer;
+  private readonly server: DevtoolServer
 
-  public readonly creationDate: number;
+  public readonly creationDate: number
 
-  public readonly slug: string;
+  public readonly slug: string
 
-  public projectSlug: string | null;
+  public projectSlug: string | null
 
-  public directorySlug: string | null;
+  public directorySlug: string | null
 
-  public primary: boolean;
+  public primary: boolean
 
-  public name: string;
+  public name: string
 
   /** Identifies the stream for the interface that started it. */
-  public tag: string | null;
+  public tag: string | null
 
   /** The agent that started the stream, null when a person did. */
-  public origin: string | null;
+  public origin: string | null
 
-  public readonly events = new EventEmitter<CommandStreamEvents>();
+  public readonly events = new EventEmitter<CommandStreamEvents>()
 
   /** How many pieces of output were dropped from the start of `output`. */
-  private _outputStart = 0;
+  private _outputStart = 0
 
   /** The screen of the terminal as a person would see it, rendered once first asked for. */
-  private _screen: ScreenTerminal | null = null;
+  private _screen: ScreenTerminal | null = null
 
-  private automation: CommandAutomation | null;
+  private automation: CommandAutomation | null
 
-  public args: string[];
+  public args: string[]
 
   /** The command of the directory in the configuration the stream runs, null for any other command. */
-  public command: string | null;
+  public command: string | null
 
   /** The arguments of the command of the configuration, its inputs not yet replaced; null for any other command. */
-  private _template: CommandArg[] | null;
+  private _template: CommandArg[] | null
 
   /** The values typed for the inputs of the template, in order. */
-  private _inputs: CommandInputValue[];
+  private _inputs: CommandInputValue[]
 
   /** The values of the variables `%{ADT:<NAME>}` of its arguments, by name. */
-  private _values: Record<string, string>;
+  private _values: Record<string, string>
 
   /** Called each time the process ends, with its exit code, -1 when it was stopped. */
-  private _onExit: ((exitCode: number) => void) | null = null;
+  private _onExit: ((exitCode: number) => void) | null = null
 
-  public cwd: string;
+  public cwd: string
 
-  public env: Record<string, string>;
+  public env: Record<string, string>
 
-  public shell: string | null;
+  public shell: string | null
 
-  public killSignal: string | null;
+  public killSignal: string | null
 
-  public notifications: boolean;
+  public notifications: boolean
 
-  public runningDate: number | null;
+  public runningDate: number | null
 
-  public runningArgs: string[] | null;
+  public runningArgs: string[] | null
 
-  public stoppedDate: number | null;
+  public stoppedDate: number | null
 
-  public exitCode: number | null;
+  public exitCode: number | null
 
-  public portConflict: PortConflict | null;
+  public portConflict: PortConflict | null
 
-  public output: StreamOutputLine[];
+  public output: StreamOutputLine[]
 
-  private portWatcher: PortConflictWatcher | null;
+  private portWatcher: PortConflictWatcher | null
 
-  private proc: IPty | null;
+  private proc: IPty | null
 
-  private exited: Promise<void> | null;
+  private exited: Promise<void> | null
 
-  private readonly defaultEnv: Record<string, string>;
+  private readonly defaultEnv: Record<string, string>
 
-  private cols: number;
+  private cols: number
 
-  private rows: number;
+  private rows: number
 
   /**
    * Creates a stopped command, its environment holding what every command of the devtool receives.
    * @param server The server running the command.
    */
-  private constructor(server: DevtoolServer) {
-    this.server = server;
-    this.creationDate = Date.now();
-    this.slug = randomSlug();
-    this.projectSlug = null;
-    this.directorySlug = null;
-    this.primary = false;
-    this.name = "N/A";
-    this.tag = null;
-    this.origin = null;
-    this.automation = null;
-    this.args = [];
-    this.command = null;
-    this._template = null;
-    this._inputs = [];
-    this._values = {};
-    this.cwd = process.cwd();
-    this.env = {};
-    this.shell = null;
-    this.killSignal = null;
-    this.notifications = false;
-    this.runningDate = null;
-    this.runningArgs = null;
-    this.stoppedDate = null;
-    this.exitCode = null;
-    this.portConflict = null;
-    this.output = [];
-    this.portWatcher = null;
-    this.proc = null;
-    this.exited = null;
+  private constructor (server: DevtoolServer) {
+    this.server = server
+    this.creationDate = Date.now()
+    this.slug = randomSlug()
+    this.projectSlug = null
+    this.directorySlug = null
+    this.primary = false
+    this.name = 'N/A'
+    this.tag = null
+    this.origin = null
+    this.automation = null
+    this.args = []
+    this.command = null
+    this._template = null
+    this._inputs = []
+    this._values = {}
+    this.cwd = process.cwd()
+    this.env = {}
+    this.shell = null
+    this.killSignal = null
+    this.notifications = false
+    this.runningDate = null
+    this.runningArgs = null
+    this.stoppedDate = null
+    this.exitCode = null
+    this.portConflict = null
+    this.output = []
+    this.portWatcher = null
+    this.proc = null
+    this.exited = null
     this.defaultEnv = {
-      APPSYS_DEVTOOL: "true",
+      APPSYS_DEVTOOL: 'true',
       APPSYS_DEVTOOL_CACHE_DIR: server.config.adt.cacheDir,
-      FORCE_COLOR: "3",
-      TERM: "xterm-256color",
-    };
-    this.cols = 120;
-    this.rows = 30;
+      FORCE_COLOR: '3',
+      TERM: 'xterm-256color'
+    }
+    this.cols = 120
+    this.rows = 30
   }
 
   /**
@@ -303,26 +303,26 @@ export class DevtoolCommandStream {
    * @param hooks What the server adds to a command it starts itself.
    * @returns The command.
    */
-  static async create(server: DevtoolServer, data: CommandStreamCreatePayload, detached = false, hooks: CommandStreamHooks = {}): Promise<DevtoolCommandStream> {
-    const instance = new DevtoolCommandStream(server);
-    instance._onExit = hooks.onExit ?? null;
-    await instance.create(data);
+  static async create (server: DevtoolServer, data: CommandStreamCreatePayload, detached = false, hooks: CommandStreamHooks = {}): Promise<DevtoolCommandStream> {
+    const instance = new DevtoolCommandStream(server)
+    instance._onExit = hooks.onExit ?? null
+    await instance.create(data)
     if (hooks.automation) {
-      instance.automation = hooks.automation;
+      instance.automation = hooks.automation
     }
 
     if (detached) {
-      await instance.startDetached();
-      return instance;
+      await instance.startDetached()
+      return instance
     }
 
-    await instance.sendUpdate();
+    await instance.sendUpdate()
     if (data.options?.redirect) {
-      await instance.sendToWsConnections("streamRedirect", { streamSlug: instance.slug });
+      await instance.sendToWsConnections('streamRedirect', { streamSlug: instance.slug })
     }
-    await instance.start({ withUpdate: false });
+    await instance.start({ withUpdate: false })
 
-    return instance;
+    return instance
   }
 
   /**
@@ -332,7 +332,7 @@ export class DevtoolCommandStream {
    * @param data The command asked for by the interface.
    * @throws When a choice the command needs has no valid value.
    */
-  async create({
+  async create ({
     projectSlug,
     directorySlug,
     primary = false,
@@ -342,55 +342,55 @@ export class DevtoolCommandStream {
     killSignal = null,
     name = null,
     notifications = false,
-    options = {},
+    options = {}
   }: CommandStreamCreatePayload): Promise<void> {
-    let cwd = process.cwd();
+    let cwd = process.cwd()
 
-    if (typeof options.cwd === "string") {
-      cwd = options.cwd;
+    if (typeof options.cwd === 'string') {
+      cwd = options.cwd
     } else if (projectSlug && this.server.config.projects[projectSlug]) {
-      const project = this.server.config.projects[projectSlug];
+      const project = this.server.config.projects[projectSlug]
       if (directorySlug && project.directories[directorySlug]) {
-        cwd = project.directories[directorySlug].path;
+        cwd = project.directories[directorySlug].path
       } else {
-        cwd = project.path;
+        cwd = project.path
       }
     }
 
-    const command = projectSlug && directorySlug && typeof options.command === "string" ? this.server.config.projects[projectSlug]?.directories[directorySlug]?.extras[options.command] : undefined;
-    const restoredProject = projectSlug && options.restore === true ? this.server.config.projects[projectSlug] : undefined;
-    const missingFolder = directorySlug ? restoredProject?.directories[directorySlug] : restoredProject;
-    const restoreArgs = missingFolder?.missing && missingFolder.restore ? missingFolder.restore.args.map((arg) => arg.replaceAll("%{ADT:PATH}", missingFolder.path)) : null;
+    const command = projectSlug && directorySlug && typeof options.command === 'string' ? this.server.config.projects[projectSlug]?.directories[directorySlug]?.extras[options.command] : undefined
+    const restoredProject = projectSlug && options.restore === true ? this.server.config.projects[projectSlug] : undefined
+    const missingFolder = directorySlug ? restoredProject?.directories[directorySlug] : restoredProject
+    const restoreArgs = missingFolder?.missing && missingFolder.restore ? missingFolder.restore.args.map(arg => arg.replaceAll('%{ADT:PATH}', missingFolder.path)) : null
     if (restoreArgs && missingFolder) {
-      cwd = path.dirname(missingFolder.path);
+      cwd = path.dirname(missingFolder.path)
     }
 
-    const inputs = (Array.isArray(options.inputs) ? options.inputs : []).map((value: unknown) => (typeof value === "string" || typeof value === "boolean" ? value : ""));
-    const missing = command && !restoreArgs ? missingCommandInputs(command.args, inputs) : [];
+    const inputs = (Array.isArray(options.inputs) ? options.inputs : []).map((value: unknown) => (typeof value === 'string' || typeof value === 'boolean' ? value : ''))
+    const missing = command && !restoreArgs ? missingCommandInputs(command.args, inputs) : []
     if (missing.length) {
-      throw new Error(`${command?.slug}: no value for ${missing.join(", ")}`);
+      throw new Error(`${command?.slug}: no value for ${missing.join(', ')}`)
     }
 
-    this.projectSlug = projectSlug ?? null;
-    this.directorySlug = directorySlug ?? null;
-    this.primary = primary;
-    this.command = restoreArgs ? null : (command?.slug ?? null);
-    this._template = restoreArgs ? null : (command?.args ?? null);
-    this._inputs = inputs;
-    this._values = Object.fromEntries(Object.entries(options.values ?? {}).filter(([, value]) => typeof value === "string"));
-    this.args = restoreArgs ?? (this._template ? expandCommandArgs(this._template, inputs) : args);
-    this.name = name ?? this.args.join(" ");
-    this.tag = typeof options.tag === "string" ? options.tag : null;
-    this.origin = typeof options.origin === "string" ? options.origin : null;
-    this.automation = command && projectSlug && directorySlug ? this.server.commandAutomation(projectSlug, directorySlug, command.slug) : null;
-    this.cwd = cwd;
-    this.env = command?.env ?? env ?? {};
-    this.shell = normalizeShell(shell) ?? this.resolveShellFromConfig() ?? normalizeShell(this.server.config.adt.shell);
-    this.killSignal = normalizeKillSignal(killSignal) ?? this.resolveKillSignalFromConfig();
-    this.notifications = notifications;
-    this.runningDate = Date.now();
+    this.projectSlug = projectSlug ?? null
+    this.directorySlug = directorySlug ?? null
+    this.primary = primary
+    this.command = restoreArgs ? null : (command?.slug ?? null)
+    this._template = restoreArgs ? null : (command?.args ?? null)
+    this._inputs = inputs
+    this._values = Object.fromEntries(Object.entries(options.values ?? {}).filter(([, value]) => typeof value === 'string'))
+    this.args = restoreArgs ?? (this._template ? expandCommandArgs(this._template, inputs) : args)
+    this.name = name ?? this.args.join(' ')
+    this.tag = typeof options.tag === 'string' ? options.tag : null
+    this.origin = typeof options.origin === 'string' ? options.origin : null
+    this.automation = command && projectSlug && directorySlug ? this.server.commandAutomation(projectSlug, directorySlug, command.slug) : null
+    this.cwd = cwd
+    this.env = command?.env ?? env ?? {}
+    this.shell = normalizeShell(shell) ?? this.resolveShellFromConfig() ?? normalizeShell(this.server.config.adt.shell)
+    this.killSignal = normalizeKillSignal(killSignal) ?? this.resolveKillSignalFromConfig()
+    this.notifications = notifications
+    this.runningDate = Date.now()
 
-    logger.info("Command", `${this.projectSlug ?? "global"}/${this.directorySlug ?? "-"}`, this.args.join(" "));
+    logger.info('Command', `${this.projectSlug ?? 'global'}/${this.directorySlug ?? '-'}`, this.args.join(' '))
   }
 
   /**
@@ -400,34 +400,34 @@ export class DevtoolCommandStream {
    * @param update.options.args The arguments to start with, ignored for a command of the
    * configuration, which keeps its own.
    */
-  async update({
+  async update ({
     action,
-    options = {},
+    options = {}
   }: {
-    action: "start" | "stop" | "restart" | "close";
+    action: 'start' | 'stop' | 'restart' | 'close'
     options?: {
-      args?: string[];
-    };
+      args?: string[]
+    }
   }): Promise<void> {
-    logger.info("Command", `${this.projectSlug ?? "global"}/${this.directorySlug ?? "-"}`, `${action}: ${this.args.join(" ")}`);
+    logger.info('Command', `${this.projectSlug ?? 'global'}/${this.directorySlug ?? '-'}`, `${action}: ${this.args.join(' ')}`)
 
-    if (action === "start") {
-      await this.start({ args: options.args ?? this.args });
-      return;
+    if (action === 'start') {
+      await this.start({ args: options.args ?? this.args })
+      return
     }
 
-    if (action === "stop") {
-      await this.stop();
-      return;
+    if (action === 'stop') {
+      await this.stop()
+      return
     }
 
-    if (action === "restart") {
-      await this.restart();
-      return;
+    if (action === 'restart') {
+      await this.restart()
+      return
     }
 
-    if (action === "close") {
-      await this.close();
+    if (action === 'close') {
+      await this.close()
     }
   }
 
@@ -435,53 +435,53 @@ export class DevtoolCommandStream {
    * Whether the process of the command is running.
    * @returns True while it runs.
    */
-  get running(): boolean {
-    return this.proc !== null;
+  get running (): boolean {
+    return this.proc !== null
   }
 
   /**
    * Gives the position in the whole output of the first piece still kept in `output`.
    * @returns How many pieces were dropped before it.
    */
-  get outputStart(): number {
-    return this._outputStart;
+  get outputStart (): number {
+    return this._outputStart
   }
 
   /**
    * Gives the size of the terminal.
    * @returns Its columns and rows.
    */
-  get size(): { cols: number; rows: number } {
-    return { cols: this.cols, rows: this.rows };
+  get size (): { cols: number, rows: number } {
+    return { cols: this.cols, rows: this.rows }
   }
 
   /**
    * Renders the visible screen of the terminal, the output kept so far replayed the first time.
    * @returns The lines of the screen, trailing spaces removed.
    */
-  async screen(): Promise<string> {
+  async screen (): Promise<string> {
     if (!this._screen) {
-      this._screen = new xtermHeadless.Terminal({ cols: this.cols, rows: this.rows, allowProposedApi: true });
+      this._screen = new xtermHeadless.Terminal({ cols: this.cols, rows: this.rows, allowProposedApi: true })
       for (const line of this.output) {
-        this._screen.write(line.content);
+        this._screen.write(line.content)
       }
     }
-    const screen = this._screen;
-    await new Promise<void>((resolve) => screen.write("", resolve));
+    const screen = this._screen
+    await new Promise<void>(resolve => screen.write('', resolve))
 
-    const buffer = screen.buffer.active;
-    const lines: string[] = [];
+    const buffer = screen.buffer.active
+    const lines: string[] = []
     for (let row = 0; row < screen.rows; row += 1) {
-      lines.push(buffer.getLine(buffer.viewportY + row)?.translateToString(true) ?? "");
+      lines.push(buffer.getLine(buffer.viewportY + row)?.translateToString(true) ?? '')
     }
-    return lines.join("\n").trimEnd();
+    return lines.join('\n').trimEnd()
   }
 
-  writeInput(data: string): void {
+  writeInput (data: string): void {
     if (!this.proc) {
-      return;
+      return
     }
-    this.proc.write(data);
+    this.proc.write(data)
   }
 
   /**
@@ -489,27 +489,27 @@ export class DevtoolCommandStream {
    * @param cols The number of columns.
    * @param rows The number of rows.
    */
-  resize(cols: number, rows: number): void {
+  resize (cols: number, rows: number): void {
     if (!Number.isInteger(cols) || !Number.isInteger(rows) || cols < 1 || rows < 1) {
-      return;
+      return
     }
 
-    this.cols = cols;
-    this.rows = rows;
-    this._screen?.resize(cols, rows);
+    this.cols = cols
+    this.rows = rows
+    this._screen?.resize(cols, rows)
 
     if (!this.proc) {
-      return;
+      return
     }
 
-    this.proc.resize(cols, rows);
+    this.proc.resize(cols, rows)
   }
 
   /**
    * Sends the state of the stream to one interface, or to every interface and its listeners.
    * @param wsInstance The connection of the interface, every connection when null.
    */
-  async sendUpdate(wsInstance: WebSocket | null = null): Promise<void> {
+  async sendUpdate (wsInstance: WebSocket | null = null): Promise<void> {
     const payload: StreamUpdatePayload = {
       slug: this.slug,
       projectSlug: this.projectSlug,
@@ -530,25 +530,25 @@ export class DevtoolCommandStream {
       runningArgs: this.runningArgs,
       stoppedDate: this.stoppedDate,
       exitCode: this.exitCode,
-      portConflict: this.portConflict,
-    };
+      portConflict: this.portConflict
+    }
 
-    await this.sendToWsConnections("streamUpdate", payload, wsInstance);
+    await this.sendToWsConnections('streamUpdate', payload, wsInstance)
     if (!wsInstance) {
-      this.events.emit("update");
+      this.events.emit('update')
     }
   }
 
-  async sendOutput(output: StreamOutputLine | null = null, wsInstance: WebSocket | null = null): Promise<void> {
+  async sendOutput (output: StreamOutputLine | null = null, wsInstance: WebSocket | null = null): Promise<void> {
     await this.sendToWsConnections(
-      "streamOutput",
+      'streamOutput',
       {
         slug: this.slug,
         output: output ? [output] : this.output,
-        initial: wsInstance !== null,
+        initial: wsInstance !== null
       },
-      wsInstance,
-    );
+      wsInstance
+    )
   }
 
   /**
@@ -557,34 +557,34 @@ export class DevtoolCommandStream {
    * @param args The arguments.
    * @returns The arguments to run.
    */
-  private replaceVariables(args: string[]): string[] {
-    return args.map((arg) => replaceVariables(arg, { ...this._values, CWD: this.cwd }));
+  private replaceVariables (args: string[]): string[] {
+    return args.map(arg => replaceVariables(arg, { ...this._values, CWD: this.cwd }))
   }
 
   /**
    * Starts the command outside of any terminal, leaving it running on its own.
    * @throws When no shell can start it.
    */
-  private async startDetached(): Promise<void> {
-    ensureNodePtySpawnHelperExecutable();
-    const finalArgs = this.replaceVariables(expandCommandArgs(this._template ?? this.args, this._inputs));
-    const env = { ...process.env, ...this.defaultEnv, ...this.env };
-    let child = null as ReturnType<typeof spawnDetached> | null;
-    const spawnErrors: string[] = [];
-    const preferredShell = normalizeShell(this.shell);
+  private async startDetached (): Promise<void> {
+    ensureNodePtySpawnHelperExecutable()
+    const finalArgs = this.replaceVariables(expandCommandArgs(this._template ?? this.args, this._inputs))
+    const env = { ...process.env, ...this.defaultEnv, ...this.env }
+    let child = null as ReturnType<typeof spawnDetached> | null
+    const spawnErrors: string[] = []
+    const preferredShell = normalizeShell(this.shell)
 
     if (!child) {
-      if (process.platform === "win32") {
+      if (process.platform === 'win32') {
         throw new Error(
-          `Unable to spawn detached command: ${finalArgs.join(" ")}${spawnErrors.length ? ` | attempts: ${spawnErrors.join(" || ")}` : ""}`,
-        );
+          `Unable to spawn detached command: ${finalArgs.join(' ')}${spawnErrors.length ? ` | attempts: ${spawnErrors.join(' || ')}` : ''}`
+        )
       }
 
-      const command = finalArgs.map(shellEscapePosix).join(" ");
+      const command = finalArgs.map(shellEscapePosix).join(' ')
       for (const shell of getShellCandidates(preferredShell)) {
         if (!canAttemptShell(shell)) {
-          spawnErrors.push(`shell ${shell}: not found`);
-          continue;
+          spawnErrors.push(`shell ${shell}: not found`)
+          continue
         }
 
         try {
@@ -592,28 +592,28 @@ export class DevtoolCommandStream {
             cwd: this.cwd,
             env,
             detached: true,
-            stdio: "ignore",
-          });
-          break;
+            stdio: 'ignore'
+          })
+          break
         } catch (error) {
-          spawnErrors.push(`shell ${shell}: ${error instanceof Error ? error.message : String(error)}`);
+          spawnErrors.push(`shell ${shell}: ${error instanceof Error ? error.message : String(error)}`)
         }
       }
 
       if (!child) {
         throw new Error(
-          `Unable to spawn detached command in shells: ${finalArgs.join(" ")}${
-            spawnErrors.length ? ` | attempts: ${spawnErrors.join(" || ")}` : ""
-          }`,
-        );
+          `Unable to spawn detached command in shells: ${finalArgs.join(' ')}${
+            spawnErrors.length ? ` | attempts: ${spawnErrors.join(' || ')}` : ''
+          }`
+        )
       }
     }
 
-    child.on("error", (error) => {
-      logger.warn("CommandDetached", this.slug, error.message);
-    });
+    child.on('error', error => {
+      logger.warn('CommandDetached', this.slug, error.message)
+    })
 
-    child.unref();
+    child.unref()
   }
 
   /**
@@ -624,50 +624,50 @@ export class DevtoolCommandStream {
    * @param options.args The arguments of the command, ignored for a command of the configuration.
    * @param options.notifications Whether the interfaces notify the end of the process.
    */
-  private async start({
+  private async start ({
     withUpdate = true,
     args = this.args,
-    notifications = this.notifications,
+    notifications = this.notifications
   }: {
-    withUpdate?: boolean;
-    args?: string[];
-    notifications?: boolean;
+    withUpdate?: boolean
+    args?: string[]
+    notifications?: boolean
   } = {}): Promise<void> {
-    ensureNodePtySpawnHelperExecutable();
-    const template = this._template ?? args;
-    const finalArgs = this.replaceVariables(expandCommandArgs(template, this._inputs));
+    ensureNodePtySpawnHelperExecutable()
+    const template = this._template ?? args
+    const finalArgs = this.replaceVariables(expandCommandArgs(template, this._inputs))
     if (this.proc) {
-      throw new Error("Command already running");
+      throw new Error('Command already running')
     }
 
-    const secrets = new CommandSecrets(this.automation?.opAccount ?? null, this.cwd, (command) => this.runInShell(command));
-    let resolvedArgs = finalArgs;
-    let resolvedEnv = this.env;
+    const secrets = new CommandSecrets(this.automation?.opAccount ?? null, this.cwd, command => this.runInShell(command))
+    let resolvedArgs = finalArgs
+    let resolvedEnv = this.env
     if (this.automation) {
       if (this.automation.unless && (await this.alreadyDone(this.automation.unless))) {
-        await this.sendUpdate();
-        return;
+        await this.sendUpdate()
+        return
       }
 
       try {
-        const resolvedTemplate: CommandArg[] = [];
+        const resolvedTemplate: CommandArg[] = []
         for (const arg of template) {
-          resolvedTemplate.push(typeof arg === "string" ? await secrets.resolve(arg) : arg);
+          resolvedTemplate.push(typeof arg === 'string' ? await secrets.resolve(arg) : arg)
         }
-        resolvedArgs = this.replaceVariables(expandCommandArgs(resolvedTemplate, this._inputs));
-        resolvedEnv = {};
+        resolvedArgs = this.replaceVariables(expandCommandArgs(resolvedTemplate, this._inputs))
+        resolvedEnv = {}
         for (const [key, value] of Object.entries(this.env)) {
-          resolvedEnv[key] = await secrets.resolve(value);
+          resolvedEnv[key] = await secrets.resolve(value)
         }
       } catch (error) {
-        secrets.close();
-        await this.handleStartFailure(error);
-        await this.sendUpdate();
-        return;
+        secrets.close()
+        await this.handleStartFailure(error)
+        await this.sendUpdate()
+        return
       }
     }
 
-    await this.addOutput("info", finalArgs.length ? `Execute Command: ${finalArgs.join(" ")}\n` : "Execute Shell\n");
+    await this.addOutput('info', finalArgs.length ? `Execute Command: ${finalArgs.join(' ')}\n` : 'Execute Shell\n')
     // await this.addOutput("info", this.cwd);
 
     const spawnOptions = {
@@ -675,99 +675,99 @@ export class DevtoolCommandStream {
       env: { ...process.env, ...this.defaultEnv, ...resolvedEnv },
       cols: this.cols,
       rows: this.rows,
-      name: "xterm-256color",
-    } as const;
+      name: 'xterm-256color'
+    } as const
 
-    const spawnErrors: string[] = [];
-    const preferredShell = normalizeShell(this.shell);
+    const spawnErrors: string[] = []
+    const preferredShell = normalizeShell(this.shell)
 
     if (!this.proc) {
-      if (process.platform === "win32") {
-        secrets.close();
+      if (process.platform === 'win32') {
+        secrets.close()
         await this.handleStartFailure(
           new Error(
-            `Unable to start command: ${finalArgs.join(" ")}${spawnErrors.length ? ` | attempts: ${spawnErrors.join(" || ")}` : ""}`,
-          ),
-        );
-        await this.sendUpdate();
-        return;
+            `Unable to start command: ${finalArgs.join(' ')}${spawnErrors.length ? ` | attempts: ${spawnErrors.join(' || ')}` : ''}`
+          )
+        )
+        await this.sendUpdate()
+        return
       }
 
-      const command = resolvedArgs.map(shellEscapePosix).join(" ");
+      const command = resolvedArgs.map(shellEscapePosix).join(' ')
       for (const shell of getShellCandidates(preferredShell)) {
         if (!canAttemptShell(shell)) {
-          spawnErrors.push(`shell ${shell}: not found`);
-          continue;
+          spawnErrors.push(`shell ${shell}: not found`)
+          continue
         }
 
         try {
-          this.proc = spawnPty(shell, getShellArgs(shell, command), spawnOptions);
+          this.proc = spawnPty(shell, getShellArgs(shell, command), spawnOptions)
           // await this.addOutput("info", `${preferredShell ? "Using shell" : "Using shell"}: ${shell}`);
-          break;
+          break
         } catch (fallbackError) {
-          spawnErrors.push(`shell ${shell}: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`);
+          spawnErrors.push(`shell ${shell}: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`)
         }
       }
 
       if (!this.proc) {
-        secrets.close();
+        secrets.close()
         await this.handleStartFailure(
           new Error(
-            `Unable to start command: ${finalArgs.join(" ")}${spawnErrors.length ? ` | attempts: ${spawnErrors.join(" || ")}` : ""}`,
-          ),
-        );
-        await this.sendUpdate();
-        return;
+            `Unable to start command: ${finalArgs.join(' ')}${spawnErrors.length ? ` | attempts: ${spawnErrors.join(' || ')}` : ''}`
+          )
+        )
+        await this.sendUpdate()
+        return
       }
     }
 
-    this.runningDate = Date.now();
-    this.notifications = notifications;
-    this.runningArgs = finalArgs;
-    this.stoppedDate = null;
-    this.exitCode = null;
-    this.portConflict = null;
+    this.runningDate = Date.now()
+    this.notifications = notifications
+    this.runningArgs = finalArgs
+    this.stoppedDate = null
+    this.exitCode = null
+    this.portConflict = null
 
-    const answers = new AnswerMatcher(this.automation?.answers ?? []);
-    const portWatcher = new PortConflictWatcher(this.expectedPorts());
-    this.portWatcher = portWatcher;
-    const proc = this.proc;
-    proc.onData((data) => {
-      const answer = answers.feed(data);
+    const answers = new AnswerMatcher(this.automation?.answers ?? [])
+    const portWatcher = new PortConflictWatcher(this.expectedPorts())
+    this.portWatcher = portWatcher
+    const proc = this.proc
+    proc.onData(data => {
+      const answer = answers.feed(data)
       if (answer !== null) {
-        void this.typeAnswer(proc, secrets, answer);
+        void this.typeAnswer(proc, secrets, answer)
       }
-      void this.addOutput("stdout", secrets.scrub(data));
-      void this.watchPorts(portWatcher, data);
-    });
+      void this.addOutput('stdout', secrets.scrub(data))
+      void this.watchPorts(portWatcher, data)
+    })
 
-    this.exited = new Promise<void>((resolve) => {
+    this.exited = new Promise<void>(resolve => {
       proc.onExit(({ exitCode }) => {
-        secrets.close();
-        const killed = this.stoppedDate !== null;
-        this.exitCode = exitCode;
+        secrets.close()
+        const killed = this.stoppedDate !== null
+        this.exitCode = exitCode
         if (killed) {
-          this.exitCode = 0;
-          void this.addOutput("info", "Process killed");
+          this.exitCode = 0
+          void this.addOutput('info', 'Process killed')
         } else if (exitCode) {
-          void this.addOutput("info", `Process exited with code ${exitCode}`);
+          void this.addOutput('info', `Process exited with code ${exitCode}`)
         } else {
-          void this.addOutput("info", "Process exited successfully");
+          void this.addOutput('info', 'Process exited successfully')
         }
 
-        this.stoppedDate = Date.now();
-        this.proc = null;
-        this.exited = null;
-        this.runningArgs = null;
+        this.stoppedDate = Date.now()
+        this.proc = null
+        this.exited = null
+        this.runningArgs = null
 
-        void this.sendUpdate();
-        this._onExit?.(killed ? -1 : exitCode);
-        resolve();
-      });
-    });
+        void this.sendUpdate()
+        this._onExit?.(killed ? -1 : exitCode)
+        resolve()
+      })
+    })
 
     if (withUpdate) {
-      await this.sendUpdate();
+      await this.sendUpdate()
     }
   }
 
@@ -777,39 +777,39 @@ export class DevtoolCommandStream {
    * @param unless The arguments of the check.
    * @returns True when the check succeeded.
    */
-  private async alreadyDone(unless: string[]): Promise<boolean> {
-    const result = await this.execInShell(this.replaceVariables(unless).map(shellEscapePosix).join(" "));
+  private async alreadyDone (unless: string[]): Promise<boolean> {
+    const result = await this.execInShell(this.replaceVariables(unless).map(shellEscapePosix).join(' '))
     if (result.code !== 0) {
-      return false;
+      return false
     }
 
-    this.runningDate = Date.now();
-    await this.addOutput("stdout", `${result.stdout}${result.stderr}`.replace(/\r?\n/g, "\r\n"));
-    await this.addOutput("info", `Skipped: ${unless.join(" ")} succeeded\n`);
-    this.exitCode = 0;
-    this.stoppedDate = Date.now();
-    this.runningArgs = null;
-    return true;
+    this.runningDate = Date.now()
+    await this.addOutput('stdout', `${result.stdout}${result.stderr}`.replace(/\r?\n/g, '\r\n'))
+    await this.addOutput('info', `Skipped: ${unless.join(' ')} succeeded\n`)
+    this.exitCode = 0
+    this.stoppedDate = Date.now()
+    this.runningArgs = null
+    return true
   }
 
   /**
    * Stops the processes holding the port the command could not use, or forgets the conflict.
    * @param action What to do: stop them, stop them and run the command again, or leave them.
    */
-  async resolvePortConflict(action: PortConflictAction): Promise<void> {
-    const conflict = this.portConflict;
-    this.portConflict = null;
-    if (!conflict || action === "dismiss") {
-      await this.sendUpdate();
-      return;
+  async resolvePortConflict (action: PortConflictAction): Promise<void> {
+    const conflict = this.portConflict
+    this.portConflict = null
+    if (!conflict || action === 'dismiss') {
+      await this.sendUpdate()
+      return
     }
 
-    const errors = await killPortOwners(conflict.owners);
-    const pids = conflict.owners.map((owner) => owner.pid).join(", ");
-    await this.addOutput("info", errors.length ? `Port ${conflict.port} not freed: ${errors.join(", ")}` : `Port ${conflict.port} freed: stopped pid ${pids}`);
-    await this.sendUpdate();
-    if (action === "killAndRestart" && !errors.length) {
-      await this.update({ action: this.proc ? "restart" : "start" });
+    const errors = await killPortOwners(conflict.owners)
+    const pids = conflict.owners.map(owner => owner.pid).join(', ')
+    await this.addOutput('info', errors.length ? `Port ${conflict.port} not freed: ${errors.join(', ')}` : `Port ${conflict.port} freed: stopped pid ${pids}`)
+    await this.sendUpdate()
+    if (action === 'killAndRestart' && !errors.length) {
+      await this.update({ action: this.proc ? 'restart' : 'start' })
     }
   }
 
@@ -817,12 +817,12 @@ export class DevtoolCommandStream {
    * Gives the ports of this machine the services of the directory of the command send requests to.
    * @returns The ports, none when the command belongs to no directory.
    */
-  private expectedPorts(): number[] {
-    const directory = this.projectSlug && this.directorySlug ? this.server.config.projects[this.projectSlug]?.directories[this.directorySlug] : undefined;
+  private expectedPorts (): number[] {
+    const directory = this.projectSlug && this.directorySlug ? this.server.config.projects[this.projectSlug]?.directories[this.directorySlug] : undefined
     const localTargets = Object.values(directory?.loadBalancer ?? {})
-      .flatMap((rule) => rule.targets.map((target) => new URL(target)))
-      .filter((url) => LOCAL_HOSTNAMES.has(url.hostname) && url.port);
-    return [...new Set(localTargets.map((url) => Number(url.port)))];
+      .flatMap(rule => rule.targets.map(target => new URL(target)))
+      .filter(url => LOCAL_HOSTNAMES.has(url.hostname) && url.port)
+    return [...new Set(localTargets.map(url => Number(url.port)))]
   }
 
   /**
@@ -830,11 +830,11 @@ export class DevtoolCommandStream {
    * @param watcher Follows the output of the run.
    * @param data Output of the run.
    */
-  private async watchPorts(watcher: PortConflictWatcher, data: string): Promise<void> {
-    const conflict = await watcher.feed(data);
+  private async watchPorts (watcher: PortConflictWatcher, data: string): Promise<void> {
+    const conflict = await watcher.feed(data)
     if (conflict && this.portWatcher === watcher) {
-      this.portConflict = conflict;
-      await this.sendUpdate();
+      this.portConflict = conflict
+      await this.sendUpdate()
     }
   }
 
@@ -843,21 +843,21 @@ export class DevtoolCommandStream {
    * @param command The shell command.
    * @returns Its exit code, null when it could not run, and its outputs.
    */
-  private execInShell(command: string): Promise<{ code: number | null; stdout: string; stderr: string }> {
-    const shell = getShellCandidates(normalizeShell(this.shell)).find(canAttemptShell);
+  private execInShell (command: string): Promise<{ code: number | null, stdout: string, stderr: string }> {
+    const shell = getShellCandidates(normalizeShell(this.shell)).find(canAttemptShell)
     if (!shell) {
-      return Promise.resolve({ code: null, stdout: "", stderr: "No shell found" });
+      return Promise.resolve({ code: null, stdout: '', stderr: 'No shell found' })
     }
 
-    return new Promise((resolve) => {
-      const child = spawnDetached(shell, getShellArgs(shell, command), { cwd: this.cwd, env: { ...process.env, ...this.defaultEnv, ...this.env } });
-      let stdout = "";
-      let stderr = "";
-      child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
-      child.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
-      child.on("error", (error) => resolve({ code: null, stdout, stderr: error.message }));
-      child.on("close", (code) => resolve({ code, stdout, stderr }));
-    });
+    return new Promise(resolve => {
+      const child = spawnDetached(shell, getShellArgs(shell, command), { cwd: this.cwd, env: { ...process.env, ...this.defaultEnv, ...this.env } })
+      let stdout = ''
+      let stderr = ''
+      child.stdout.on('data', (chunk: Buffer) => (stdout += chunk.toString()))
+      child.stderr.on('data', (chunk: Buffer) => (stderr += chunk.toString()))
+      child.on('error', error => resolve({ code: null, stdout, stderr: error.message }))
+      child.on('close', code => resolve({ code, stdout, stderr }))
+    })
   }
 
   /**
@@ -865,13 +865,13 @@ export class DevtoolCommandStream {
    * @param command The shell command.
    * @returns Its standard output.
    */
-  private async runInShell(command: string): Promise<string> {
-    const result = await this.execInShell(command);
+  private async runInShell (command: string): Promise<string> {
+    const result = await this.execInShell(command)
     if (result.code !== 0) {
-      const reason = result.stderr.trim().split("\n").at(-1);
-      throw new Error(`$(${command}) failed${reason ? `: ${reason}` : ` with code ${result.code}`}`);
+      const reason = result.stderr.trim().split('\n').at(-1)
+      throw new Error(`$(${command}) failed${reason ? `: ${reason}` : ` with code ${result.code}`}`)
     }
-    return result.stdout;
+    return result.stdout
   }
 
   /**
@@ -881,14 +881,14 @@ export class DevtoolCommandStream {
    * @param secrets Reads the value blocks.
    * @param answer The answer.
    */
-  private async typeAnswer(proc: IPty, secrets: CommandSecrets, answer: string): Promise<void> {
+  private async typeAnswer (proc: IPty, secrets: CommandSecrets, answer: string): Promise<void> {
     try {
-      const value = await secrets.resolve(answer);
+      const value = await secrets.resolve(answer)
       if (this.proc === proc) {
-        proc.write(`${value}\r`);
+        proc.write(`${value}\r`)
       }
     } catch (error) {
-      await this.addOutput("info", `${error instanceof Error ? error.message : String(error)}\n`);
+      await this.addOutput('info', `${error instanceof Error ? error.message : String(error)}\n`)
     }
   }
 
@@ -896,129 +896,129 @@ export class DevtoolCommandStream {
    * Marks the command as failed before it could start, showing why.
    * @param error Why it could not start.
    */
-  private async handleStartFailure(error: unknown): Promise<void> {
-    this.exitCode = 127;
-    this.runningArgs = null;
-    this.runningDate = Date.now();
-    this.stoppedDate = Date.now();
-    this.proc = null;
+  private async handleStartFailure (error: unknown): Promise<void> {
+    this.exitCode = 127
+    this.runningArgs = null
+    this.runningDate = Date.now()
+    this.stoppedDate = Date.now()
+    this.proc = null
 
-    const message = error instanceof Error ? error.message : "Unable to start process";
-    await this.addOutput("stderr", `${message}\r\n`);
-    await this.addOutput("info", "Process failed to start");
+    const message = error instanceof Error ? error.message : 'Unable to start process'
+    await this.addOutput('stderr', `${message}\r\n`)
+    await this.addOutput('info', 'Process failed to start')
   }
 
-  private resolveKillSignalFromConfig(): string | null {
+  private resolveKillSignalFromConfig (): string | null {
     if (!this.projectSlug || !this.directorySlug) {
-      return null;
+      return null
     }
 
-    const project = this.server.config.projects[this.projectSlug];
+    const project = this.server.config.projects[this.projectSlug]
     if (!project) {
-      return null;
+      return null
     }
 
-    const directory = project.directories[this.directorySlug];
+    const directory = project.directories[this.directorySlug]
     if (!directory) {
-      return null;
+      return null
     }
 
     if (this.primary && areArgsEqual(directory.args, this.args)) {
-      return normalizeKillSignal(directory.killSignal);
+      return normalizeKillSignal(directory.killSignal)
     }
 
-    const extras = Object.values(directory.extras);
+    const extras = Object.values(directory.extras)
     for (const extra of extras) {
       if (extra.name === this.name && areArgsEqual(extra.args, this.args)) {
-        return normalizeKillSignal(extra.killSignal);
+        return normalizeKillSignal(extra.killSignal)
       }
     }
 
     for (const extra of extras) {
       if (areArgsEqual(extra.args, this.args)) {
-        return normalizeKillSignal(extra.killSignal);
+        return normalizeKillSignal(extra.killSignal)
       }
     }
 
     for (const extra of extras) {
       if (extra.name === this.name) {
-        return normalizeKillSignal(extra.killSignal);
+        return normalizeKillSignal(extra.killSignal)
       }
     }
 
-    return null;
+    return null
   }
 
-  private resolveShellFromConfig(): string | null {
+  private resolveShellFromConfig (): string | null {
     if (!this.projectSlug || !this.directorySlug) {
-      return null;
+      return null
     }
 
-    const project = this.server.config.projects[this.projectSlug];
+    const project = this.server.config.projects[this.projectSlug]
     if (!project) {
-      return null;
+      return null
     }
 
-    const directory = project.directories[this.directorySlug];
+    const directory = project.directories[this.directorySlug]
     if (!directory) {
-      return null;
+      return null
     }
 
     if (this.primary && areArgsEqual(directory.args, this.args)) {
-      return normalizeShell(directory.shell);
+      return normalizeShell(directory.shell)
     }
 
-    const extras = Object.values(directory.extras);
+    const extras = Object.values(directory.extras)
     for (const extra of extras) {
       if (extra.name === this.name && areArgsEqual(extra.args, this.args)) {
-        return normalizeShell(extra.shell);
+        return normalizeShell(extra.shell)
       }
     }
 
     for (const extra of extras) {
       if (areArgsEqual(extra.args, this.args)) {
-        return normalizeShell(extra.shell);
+        return normalizeShell(extra.shell)
       }
     }
 
     for (const extra of extras) {
       if (extra.name === this.name) {
-        return normalizeShell(extra.shell);
+        return normalizeShell(extra.shell)
       }
     }
 
-    return normalizeShell(directory.shell);
+    return normalizeShell(directory.shell)
   }
 
   /**
    * Stops the process and waits for it to exit, killing it when it outlives the stop timeout.
    */
-  private async stop(): Promise<void> {
+  private async stop (): Promise<void> {
     if (!this.proc || !this.exited) {
-      return;
+      return
     }
 
-    const signal = normalizeKillSignal(this.killSignal) ?? this.resolveKillSignalFromConfig() ?? "SIGTERM";
-    this.killSignal = signal;
+    const signal = normalizeKillSignal(this.killSignal) ?? this.resolveKillSignalFromConfig() ?? 'SIGTERM'
+    this.killSignal = signal
 
-    await this.addOutput("info", `Killing the process (${signal})...`);
-    this.stoppedDate = Date.now();
-    const exited = this.exited;
-    await this.killTree(this.proc.pid, signal);
+    await this.addOutput('info', `Killing the process (${signal})...`)
+    this.stoppedDate = Date.now()
+    const exited = this.exited
+    await this.killTree(this.proc.pid, signal)
 
-    let timer: ReturnType<typeof setTimeout> | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined
     const timedOut = await Promise.race([
       exited.then(() => false),
-      new Promise<boolean>((resolve) => {
-        timer = setTimeout(() => resolve(true), STOP_TIMEOUT_MS);
-      }),
-    ]);
-    clearTimeout(timer);
+      new Promise<boolean>(resolve => {
+        timer = setTimeout(() => resolve(true), STOP_TIMEOUT_MS)
+      })
+    ])
+    clearTimeout(timer)
 
     if (timedOut && this.proc) {
-      await this.addOutput("info", `Still running after ${STOP_TIMEOUT_MS / 1000}s, killing the process (SIGKILL)...`);
-      await this.killTree(this.proc.pid, "SIGKILL");
-      await exited;
+      await this.addOutput('info', `Still running after ${STOP_TIMEOUT_MS / 1000}s, killing the process (SIGKILL)...`)
+      await this.killTree(this.proc.pid, 'SIGKILL')
+      await exited
     }
   }
 
@@ -1027,45 +1027,45 @@ export class DevtoolCommandStream {
    * @param pid The process.
    * @param signal The signal.
    */
-  private async killTree(pid: number, signal: string): Promise<void> {
+  private async killTree (pid: number, signal: string): Promise<void> {
     await new Promise<void>((resolve, reject) => {
-      treeKill(pid, signal, (error) => {
+      treeKill(pid, signal, error => {
         if (error) {
-          reject(error);
-          return;
+          reject(error)
+          return
         }
-        resolve();
-      });
+        resolve()
+      })
     }).catch(async (error: unknown) => {
-      await this.addOutput("stderr", error instanceof Error ? error.message : "Unable to kill process");
-      this.proc?.kill(signal);
-    });
+      await this.addOutput('stderr', error instanceof Error ? error.message : 'Unable to kill process')
+      this.proc?.kill(signal)
+    })
   }
 
   /**
    * Stops the process, waits for it to exit, then starts it again with the same arguments.
    */
-  private async restart(): Promise<void> {
-    const args = this.runningArgs ?? this.args;
-    await this.stop();
-    await this.addOutput("info", "Restarting process...");
-    await this.start({ args });
+  private async restart (): Promise<void> {
+    const args = this.runningArgs ?? this.args
+    await this.stop()
+    await this.addOutput('info', 'Restarting process...')
+    await this.start({ args })
   }
 
   /**
    * Removes the stopped stream from the server and the interfaces, and tells its listeners.
    * @throws When the process still runs.
    */
-  private async close(): Promise<void> {
+  private async close (): Promise<void> {
     if (this.proc) {
-      throw new Error("Process not stopped");
+      throw new Error('Process not stopped')
     }
-    await this.server.removeCommandStream(this.slug);
-    await this.sendToWsConnections("streamRemove", { slug: this.slug });
-    this.events.emit("close");
-    this.events.removeAllListeners();
-    this._screen?.dispose();
-    this._screen = null;
+    await this.server.removeCommandStream(this.slug)
+    await this.sendToWsConnections('streamRemove', { slug: this.slug })
+    this.events.emit('close')
+    this.events.removeAllListeners()
+    this._screen?.dispose()
+    this._screen = null
   }
 
   /**
@@ -1074,29 +1074,29 @@ export class DevtoolCommandStream {
    * @param type The kind of output.
    * @param content The text, information wrapped in its colors.
    */
-  private async addOutput(type: StreamOutputLine["type"], content: string): Promise<void> {
-    if (type === "info") {
-      content = `${ANSI_INFO_PREFIX}${content}${ANSI_RESET}`;
+  private async addOutput (type: StreamOutputLine['type'], content: string): Promise<void> {
+    if (type === 'info') {
+      content = `${ANSI_INFO_PREFIX}${content}${ANSI_RESET}`
     }
 
     const output: StreamOutputLine = {
       date: Date.now(),
       type,
-      content,
-    };
+      content
+    }
 
-    this.output.push(output);
-    this._screen?.write(content);
-    this.events.emit("output", output);
-    await this.sendOutput(output);
+    this.output.push(output)
+    this._screen?.write(content)
+    this.events.emit('output', output)
+    await this.sendOutput(output)
 
     while (this.output.length > MAX_OUTPUT) {
-      this.output.shift();
-      this._outputStart += 1;
+      this.output.shift()
+      this._outputStart += 1
     }
   }
 
-  private async sendToWsConnections(type: string, data: unknown, wsInstance: WebSocket | null = null): Promise<void> {
-    await this.server.http.sendToWsConnections(type, data, wsInstance);
+  private async sendToWsConnections (type: string, data: unknown, wsInstance: WebSocket | null = null): Promise<void> {
+    await this.server.http.sendToWsConnections(type, data, wsInstance)
   }
 }

@@ -1,6 +1,6 @@
-import { randomUUID } from "node:crypto";
-import fs from "node:fs/promises";
-import path from "node:path";
+import { randomUUID } from 'node:crypto'
+import fs from 'node:fs/promises'
+import path from 'node:path'
 import type {
   CommandInputValue,
   McpAction,
@@ -16,41 +16,41 @@ import type {
   McpRule,
   McpSessionPayload,
   McpSettings,
-  McpStatePayload,
-} from "@appsys/devtool-shared";
-import { logger } from "@appsys/devtool-shared";
+  McpStatePayload
+} from '@appsys/devtool-shared'
+import { logger } from '@appsys/devtool-shared'
 
-const HISTORY_LIMIT = 1000;
-const GRANTS_FILE = "mcp-grants.json";
-const CLIENTS_FILE = "mcp-clients.json";
-const HISTORY_FILE = "mcp-history.jsonl";
+const HISTORY_LIMIT = 1000
+const GRANTS_FILE = 'mcp-grants.json'
+const CLIENTS_FILE = 'mcp-clients.json'
+const HISTORY_FILE = 'mcp-history.jsonl'
 
 /** A call an agent asks to make, as its tool describes it. */
 export interface McpPermission {
-  action: McpAction;
+  action: McpAction
   /** The rule of what the call acts on. */
-  rule: McpRule;
+  rule: McpRule
   /** Whether the call only touches the keys of a file, which the `keys` level allows. */
-  keysOnly?: boolean;
+  keysOnly?: boolean
   /** Whether a person answers even when the rule allows the call. */
-  confirm?: boolean;
-  title: string;
-  details?: McpDetail[];
-  keys?: string[];
-  command?: string | null;
-  inputs?: CommandInputValue[] | null;
-  diff?: McpRequestPayload["diff"];
+  confirm?: boolean
+  title: string
+  details?: McpDetail[]
+  keys?: string[]
+  command?: string | null
+  inputs?: CommandInputValue[] | null
+  diff?: McpRequestPayload['diff']
   /** Names what an answer for the session or always grants, absent when only this call can be granted. */
-  grantKey?: string | null;
-  grantLabel?: string;
+  grantKey?: string | null
+  grantLabel?: string
   /** Whether the grant may outlive the session. */
-  durable?: boolean;
+  durable?: boolean
 }
 
 /** How a call was allowed, with the inputs a person may have changed. */
 export interface McpAuthorization {
-  decision: McpDecision;
-  inputs: CommandInputValue[] | null;
+  decision: McpDecision
+  inputs: CommandInputValue[] | null
 }
 
 /** A call refused, by a person, the configuration, a timeout or the lack of an interface. */
@@ -60,43 +60,43 @@ export class McpRefusal extends Error {
    * @param message Why, as the agent reads it.
    * @param reason The setting refusing it, for a refusal by the configuration.
    */
-  constructor(
+  constructor (
     readonly decision: McpDecision,
     message: string,
-    readonly reason: string | null = null,
+    readonly reason: string | null = null
   ) {
-    super(message);
+    super(message)
   }
 }
 
 /** What the approvals need from the server: publishing to the interfaces, counting them, its port. */
 export interface McpApprovalsHost {
-  publish(type: "mcpState" | "mcpHistory", data: unknown): Promise<void>;
-  interfaces(): number;
-  port(): number;
+  publish(type: 'mcpState' | 'mcpHistory', data: unknown): Promise<void>
+  interfaces(): number
+  port(): number
 }
 
 interface McpSession {
-  id: string;
-  client: string;
-  version: string | null;
-  connectedAt: number;
-  calls: number;
-  status: McpClientStatus;
-  grants: Map<string, McpGrantPayload>;
+  id: string
+  client: string
+  version: string | null
+  connectedAt: number
+  calls: number
+  status: McpClientStatus
+  grants: Map<string, McpGrantPayload>
   /** The request accepting the agent, while one waits. */
-  acceptance: Promise<void> | null;
+  acceptance: Promise<void> | null
 }
 
 /** How a request ends: answered by a person, unanswered in time, or abandoned by the agent. */
-type McpOutcome = McpAnswer | "timeout" | "cancelled";
+type McpOutcome = McpAnswer | 'timeout' | 'cancelled'
 
 interface PendingRequest {
-  payload: McpRequestPayload;
-  settle: (outcome: McpOutcome, inputs: CommandInputValue[] | null) => void;
+  payload: McpRequestPayload
+  settle: (outcome: McpOutcome, inputs: CommandInputValue[] | null) => void
 }
 
-const CANCELLED_MESSAGE = "Cancelled by the client";
+const CANCELLED_MESSAGE = 'Cancelled by the client'
 
 /**
  * Tells whether a text matches a pattern, `*` standing for any text.
@@ -104,9 +104,9 @@ const CANCELLED_MESSAGE = "Cancelled by the client";
  * @param text The text.
  * @returns True when the whole text matches.
  */
-export function matchesPattern(pattern: string, text: string): boolean {
-  const source = pattern.split("*").map((part) => part.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join(".*");
-  return new RegExp(`^${source}$`, "s").test(text);
+export function matchesPattern (pattern: string, text: string): boolean {
+  const source = pattern.split('*').map(part => part.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*')
+  return new RegExp(`^${source}$`, 's').test(text)
 }
 
 /**
@@ -116,14 +116,14 @@ export function matchesPattern(pattern: string, text: string): boolean {
  * @param from Names the setting.
  * @returns The rule.
  */
-export function patternRule(patterns: McpPatterns, text: string, from: string): McpRule {
-  if (patterns.deny.some((pattern) => matchesPattern(pattern, text))) {
-    return { level: "deny", from: `${from}.deny` };
+export function patternRule (patterns: McpPatterns, text: string, from: string): McpRule {
+  if (patterns.deny.some(pattern => matchesPattern(pattern, text))) {
+    return { level: 'deny', from: `${from}.deny` }
   }
-  if (patterns.allow.some((pattern) => matchesPattern(pattern, text))) {
-    return { level: "allow", from: `${from}.allow` };
+  if (patterns.allow.some(pattern => matchesPattern(pattern, text))) {
+    return { level: 'allow', from: `${from}.allow` }
   }
-  return { level: patterns.level, from: `${from}.level` };
+  return { level: patterns.level, from: `${from}.level` }
 }
 
 /**
@@ -132,31 +132,31 @@ export function patternRule(patterns: McpPatterns, text: string, from: string): 
  * cache folder.
  */
 export class DevtoolApprovals {
-  private readonly _host: McpApprovalsHost;
+  private readonly _host: McpApprovalsHost
 
-  private _settings: McpSettings | null = null;
+  private _settings: McpSettings | null = null
 
-  private _folder: string | null = null;
+  private _folder: string | null = null
 
-  private readonly _sessions = new Map<string, McpSession>();
+  private readonly _sessions = new Map<string, McpSession>()
 
-  private _grants = new Map<string, McpGrantPayload>();
+  private _grants = new Map<string, McpGrantPayload>()
 
-  private _clients = new Map<string, number>();
+  private _clients = new Map<string, number>()
 
-  private readonly _titles = new Map<string, string>();
+  private readonly _titles = new Map<string, string>()
 
-  private readonly _pending = new Map<string, PendingRequest>();
+  private readonly _pending = new Map<string, PendingRequest>()
 
-  private _history: McpHistoryEntry[] = [];
+  private _history: McpHistoryEntry[] = []
 
-  private _writes: Promise<void> = Promise.resolve();
+  private _writes: Promise<void> = Promise.resolve()
 
   /**
    * @param host Publishes to the interfaces and counts them.
    */
-  constructor(host: McpApprovalsHost) {
-    this._host = host;
+  constructor (host: McpApprovalsHost) {
+    this._host = host
   }
 
   /**
@@ -165,18 +165,18 @@ export class DevtoolApprovals {
    * @param settings The MCP settings.
    * @param cacheDir The cache folder of the devtool.
    */
-  async configure(settings: McpSettings, cacheDir: string): Promise<void> {
-    this._settings = settings;
+  async configure (settings: McpSettings, cacheDir: string): Promise<void> {
+    this._settings = settings
     if (this._folder !== cacheDir) {
-      this._folder = cacheDir;
-      this._grants = new Map((await this.readJson<McpGrantPayload[]>(GRANTS_FILE, [])).map((grant) => [grant.key, grant]));
-      this._clients = new Map(Object.entries(await this.readJson<Record<string, number>>(CLIENTS_FILE, {})));
-      this._history = await this.readHistory();
+      this._folder = cacheDir
+      this._grants = new Map((await this.readJson<McpGrantPayload[]>(GRANTS_FILE, [])).map(grant => [grant.key, grant]))
+      this._clients = new Map(Object.entries(await this.readJson<Record<string, number>>(CLIENTS_FILE, {})))
+      this._history = await this.readHistory()
     }
     for (const session of this._sessions.values()) {
-      session.status = this.clientStatus(session.client, session.status);
+      session.status = this.clientStatus(session.client, session.status)
     }
-    await this.publishState();
+    await this.publishState()
   }
 
   /**
@@ -186,26 +186,26 @@ export class DevtoolApprovals {
    * @param version The version it gives.
    * @param title The display name it gives.
    */
-  async openSession(id: string, client: string, version: string | null, title: string | null): Promise<void> {
+  async openSession (id: string, client: string, version: string | null, title: string | null): Promise<void> {
     if (title) {
-      this._titles.set(client, title);
+      this._titles.set(client, title)
     }
-    this._sessions.set(id, { id, client, version, connectedAt: Date.now(), calls: 0, status: this.clientStatus(client, "pending"), grants: new Map(), acceptance: null });
-    await this.publishState();
+    this._sessions.set(id, { id, client, version, connectedAt: Date.now(), calls: 0, status: this.clientStatus(client, 'pending'), grants: new Map(), acceptance: null })
+    await this.publishState()
   }
 
   /**
    * Forgets a session, its grants and its waiting requests, which are cancelled.
    * @param id The session.
    */
-  async closeSession(id: string): Promise<void> {
+  async closeSession (id: string): Promise<void> {
     if (!this._sessions.delete(id)) {
-      return;
+      return
     }
-    for (const request of [...this._pending.values()].filter((item) => item.payload.session === id)) {
-      request.settle("cancelled", null);
+    for (const request of [...this._pending.values()].filter(item => item.payload.session === id)) {
+      request.settle('cancelled', null)
     }
-    await this.publishState();
+    await this.publishState()
   }
 
   /**
@@ -213,8 +213,8 @@ export class DevtoolApprovals {
    * @param id The session.
    * @returns Its name, `unknown` for a session not followed.
    */
-  clientOf(id: string): string {
-    return this._sessions.get(id)?.client ?? "unknown";
+  clientOf (id: string): string {
+    return this._sessions.get(id)?.client ?? 'unknown'
   }
 
   /**
@@ -222,8 +222,8 @@ export class DevtoolApprovals {
    * @param id The session.
    * @returns Its status, null for a session not followed.
    */
-  statusOf(id: string): McpClientStatus | null {
-    return this._sessions.get(id)?.status ?? null;
+  statusOf (id: string): McpClientStatus | null {
+    return this._sessions.get(id)?.status ?? null
   }
 
   /**
@@ -231,9 +231,9 @@ export class DevtoolApprovals {
    * @param id The session.
    * @returns True when its calls may be decided.
    */
-  isAccepted(id: string): boolean {
-    const status = this._sessions.get(id)?.status;
-    return status === "session" || status === "always" || status === "config";
+  isAccepted (id: string): boolean {
+    const status = this._sessions.get(id)?.status
+    return status === 'session' || status === 'always' || status === 'config'
   }
 
   /**
@@ -246,30 +246,30 @@ export class DevtoolApprovals {
    * @returns How it was allowed, with the inputs a person may have changed.
    * @throws {McpRefusal} When the call is refused or abandoned.
    */
-  async authorize(sessionId: string, tool: string, permission: McpPermission, signal?: AbortSignal): Promise<McpAuthorization> {
-    const session = await this.accept(sessionId, tool);
-    const level = permission.rule.level === "keys" ? (permission.keysOnly ? "allow" : "deny") : permission.rule.level;
-    if (level === "deny") {
-      const why = permission.rule.level === "keys" ? "allows the keys of the file only" : "refuses it";
-      throw new McpRefusal("config", `Refused: ${permission.rule.from} ${why}`, permission.rule.from);
+  async authorize (sessionId: string, tool: string, permission: McpPermission, signal?: AbortSignal): Promise<McpAuthorization> {
+    const session = await this.accept(sessionId, tool)
+    const level = permission.rule.level === 'keys' ? (permission.keysOnly ? 'allow' : 'deny') : permission.rule.level
+    if (level === 'deny') {
+      const why = permission.rule.level === 'keys' ? 'allows the keys of the file only' : 'refuses it'
+      throw new McpRefusal('config', `Refused: ${permission.rule.from} ${why}`, permission.rule.from)
     }
-    if (level === "allow" && !permission.confirm) {
-      return { decision: "auto", inputs: permission.inputs ?? null };
+    if (level === 'allow' && !permission.confirm) {
+      return { decision: 'auto', inputs: permission.inputs ?? null }
     }
     if (permission.grantKey && !permission.confirm) {
       if (session.grants.has(permission.grantKey)) {
-        return { decision: "session", inputs: permission.inputs ?? null };
+        return { decision: 'session', inputs: permission.inputs ?? null }
       }
       if (this._grants.has(permission.grantKey)) {
-        return { decision: "always", inputs: permission.inputs ?? null };
+        return { decision: 'always', inputs: permission.inputs ?? null }
       }
     }
 
-    const grantKey = permission.confirm ? null : (permission.grantKey ?? null);
+    const grantKey = permission.confirm ? null : (permission.grantKey ?? null)
     const { answer, inputs } = await this.ask(
       session,
       {
-        kind: "permission",
+        kind: 'permission',
         tool,
         action: permission.action,
         title: permission.title,
@@ -279,44 +279,44 @@ export class DevtoolApprovals {
         inputs: permission.inputs ?? null,
         diff: permission.diff ?? null,
         grantKey,
-        grantable: { session: grantKey !== null, always: grantKey !== null && permission.durable !== false },
+        grantable: { session: grantKey !== null, always: grantKey !== null && permission.durable !== false }
       },
-      signal,
-    );
-    if (answer === "timeout") {
-      throw new McpRefusal("timeout", "Refused: nobody answered in time");
+      signal
+    )
+    if (answer === 'timeout') {
+      throw new McpRefusal('timeout', 'Refused: nobody answered in time')
     }
-    if (answer === "cancelled") {
-      throw new McpRefusal("cancelled", CANCELLED_MESSAGE);
+    if (answer === 'cancelled') {
+      throw new McpRefusal('cancelled', CANCELLED_MESSAGE)
     }
-    if (answer === "deny") {
-      throw new McpRefusal("denied", "Refused by the user");
+    if (answer === 'deny') {
+      throw new McpRefusal('denied', 'Refused by the user')
     }
-    if (grantKey && answer !== "once") {
-      this.addGrant(answer, grantKey, permission.grantLabel ?? permission.title, session);
+    if (grantKey && answer !== 'once') {
+      this.addGrant(answer, grantKey, permission.grantLabel ?? permission.title, session)
     }
-    return { decision: answer, inputs: inputs ?? permission.inputs ?? null };
+    return { decision: answer, inputs: inputs ?? permission.inputs ?? null }
   }
 
   /**
    * Adds a call to the history, publishes it and keeps it in the cache folder.
    * @param entry The call.
    */
-  async record(entry: Omit<McpHistoryEntry, "id" | "date">): Promise<void> {
-    const full: McpHistoryEntry = { id: randomUUID(), date: Date.now(), ...entry };
-    const session = this._sessions.get(entry.session);
+  async record (entry: Omit<McpHistoryEntry, 'id' | 'date'>): Promise<void> {
+    const full: McpHistoryEntry = { id: randomUUID(), date: Date.now(), ...entry }
+    const session = this._sessions.get(entry.session)
     if (session) {
-      session.calls += 1;
+      session.calls += 1
     }
-    this._history.push(full);
-    const trimmed = this._history.length > HISTORY_LIMIT;
+    this._history.push(full)
+    const trimmed = this._history.length > HISTORY_LIMIT
     if (trimmed) {
-      this._history = this._history.slice(-HISTORY_LIMIT);
+      this._history = this._history.slice(-HISTORY_LIMIT)
     }
-    this.persist(HISTORY_FILE, () => (trimmed ? this.historyText() : null), `${JSON.stringify(full)}\n`);
-    await this._host.publish("mcpHistory", { entries: [full], initial: false });
+    this.persist(HISTORY_FILE, () => (trimmed ? this.historyText() : null), `${JSON.stringify(full)}\n`)
+    await this._host.publish('mcpHistory', { entries: [full], initial: false })
     if (session) {
-      await this.publishState();
+      await this.publishState()
     }
   }
 
@@ -326,8 +326,8 @@ export class DevtoolApprovals {
    * @param answer The answer.
    * @param inputs The values of the inputs of its command, changed by the person.
    */
-  answer(id: string, answer: McpAnswer, inputs: CommandInputValue[] | null): void {
-    this._pending.get(id)?.settle(answer, inputs);
+  answer (id: string, answer: McpAnswer, inputs: CommandInputValue[] | null): void {
+    this._pending.get(id)?.settle(answer, inputs)
   }
 
   /**
@@ -336,26 +336,26 @@ export class DevtoolApprovals {
    * @param scope Whether it lasts for a session or always.
    * @param sessionId The session of a session grant, null for every session.
    */
-  async revoke(key: string | null, scope: "session" | "always", sessionId: string | null): Promise<void> {
-    if (scope === "always") {
+  async revoke (key: string | null, scope: 'session' | 'always', sessionId: string | null): Promise<void> {
+    if (scope === 'always') {
       if (key === null) {
-        this._grants.clear();
+        this._grants.clear()
       } else {
-        this._grants.delete(key);
+        this._grants.delete(key)
       }
-      this.saveGrants();
+      this.saveGrants()
     } else {
       for (const session of this._sessions.values()) {
         if (sessionId === null || session.id === sessionId) {
           if (key === null) {
-            session.grants.clear();
+            session.grants.clear()
           } else {
-            session.grants.delete(key);
+            session.grants.delete(key)
           }
         }
       }
     }
-    await this.publishState();
+    await this.publishState()
   }
 
   /**
@@ -363,14 +363,14 @@ export class DevtoolApprovals {
    * @param historyId The call.
    * @param scope How long the grant lasts.
    */
-  async grantFromHistory(historyId: string, scope: "session" | "always"): Promise<void> {
-    const entry = this._history.find((item) => item.id === historyId);
-    const session = entry ? this._sessions.get(entry.session) : undefined;
-    if (!entry?.grantKey || (scope === "session" && !session)) {
-      return;
+  async grantFromHistory (historyId: string, scope: 'session' | 'always'): Promise<void> {
+    const entry = this._history.find(item => item.id === historyId)
+    const session = entry ? this._sessions.get(entry.session) : undefined
+    if (!entry?.grantKey || (scope === 'session' && !session)) {
+      return
     }
-    this.addGrant(scope, entry.grantKey, entry.grantLabel ?? entry.tool, session ?? null, entry.client);
-    await this.publishState();
+    this.addGrant(scope, entry.grantKey, entry.grantLabel ?? entry.tool, session ?? null, entry.client)
+    await this.publishState()
   }
 
   /**
@@ -378,66 +378,66 @@ export class DevtoolApprovals {
    * @param name The name of the agent.
    * @param decision Whether it is accepted always or forgotten.
    */
-  async setClient(name: string, decision: "always" | "forget"): Promise<void> {
-    if (decision === "always") {
-      this._clients.set(name, Date.now());
+  async setClient (name: string, decision: 'always' | 'forget'): Promise<void> {
+    if (decision === 'always') {
+      this._clients.set(name, Date.now())
     } else {
-      this._clients.delete(name);
+      this._clients.delete(name)
     }
-    this.persist(CLIENTS_FILE, () => JSON.stringify(Object.fromEntries(this._clients), null, 2));
+    this.persist(CLIENTS_FILE, () => JSON.stringify(Object.fromEntries(this._clients), null, 2))
     for (const session of this._sessions.values()) {
       if (session.client === name) {
-        session.status = this.clientStatus(name, session.status === "always" ? "session" : session.status);
+        session.status = this.clientStatus(name, session.status === 'always' ? 'session' : session.status)
       }
     }
-    await this.publishState();
+    await this.publishState()
   }
 
   /**
    * Empties the history, in the interfaces and the cache folder.
    */
-  async clearHistory(): Promise<void> {
-    this._history = [];
-    this.persist(HISTORY_FILE, () => "");
-    await this._host.publish("mcpHistory", { entries: [], initial: true });
+  async clearHistory (): Promise<void> {
+    this._history = []
+    this.persist(HISTORY_FILE, () => '')
+    await this._host.publish('mcpHistory', { entries: [], initial: true })
   }
 
   /**
    * Gives the history.
    * @returns The calls, the oldest first.
    */
-  history(): McpHistoryEntry[] {
-    return this._history;
+  history (): McpHistoryEntry[] {
+    return this._history
   }
 
   /**
    * Describes the sessions, agents, waiting requests and grants for the interfaces.
    * @returns The state.
    */
-  state(): McpStatePayload {
-    const settings = this._settings;
-    const sessions: McpSessionPayload[] = [...this._sessions.values()].map(({ id, client, version, connectedAt, calls, status }) => ({ id, client, version, connectedAt, calls, status }));
+  state (): McpStatePayload {
+    const settings = this._settings
+    const sessions: McpSessionPayload[] = [...this._sessions.values()].map(({ id, client, version, connectedAt, calls, status }) => ({ id, client, version, connectedAt, calls, status }))
     const clients: McpClientPayload[] = [
-      ...(settings?.clients.allow ?? []).map((name) => ({ name, source: "allow" as const, date: null })),
-      ...(settings?.clients.deny ?? []).map((name) => ({ name, source: "deny" as const, date: null })),
-      ...[...this._clients].map(([name, date]) => ({ name, source: "always" as const, date })),
-    ];
+      ...(settings?.clients.allow ?? []).map(name => ({ name, source: 'allow' as const, date: null })),
+      ...(settings?.clients.deny ?? []).map(name => ({ name, source: 'deny' as const, date: null })),
+      ...[...this._clients].map(([name, date]) => ({ name, source: 'always' as const, date }))
+    ]
     return {
       enabled: settings?.enabled ?? false,
       port: this._host.port(),
       sessions,
       clients,
-      pending: [...this._pending.values()].map((request) => request.payload),
-      grants: [...[...this._sessions.values()].flatMap((session) => [...session.grants.values()]), ...this._grants.values()],
-      titles: Object.fromEntries(this._titles),
-    };
+      pending: [...this._pending.values()].map(request => request.payload),
+      grants: [...[...this._sessions.values()].flatMap(session => [...session.grants.values()]), ...this._grants.values()],
+      titles: Object.fromEntries(this._titles)
+    }
   }
 
   /**
    * Publishes the state to every interface.
    */
-  async publishState(): Promise<void> {
-    await this._host.publish("mcpState", this.state());
+  async publishState (): Promise<void> {
+    await this._host.publish('mcpState', this.state())
   }
 
   /**
@@ -447,21 +447,21 @@ export class DevtoolApprovals {
    * @param current Its current status.
    * @returns Its status.
    */
-  private clientStatus(client: string, current: McpClientStatus): McpClientStatus {
-    const clients = this._settings?.clients;
-    if (!clients || clients.deny.some((pattern) => matchesPattern(pattern, client))) {
-      return "denied";
+  private clientStatus (client: string, current: McpClientStatus): McpClientStatus {
+    const clients = this._settings?.clients
+    if (!clients || clients.deny.some(pattern => matchesPattern(pattern, client))) {
+      return 'denied'
     }
     if (this._clients.has(client)) {
-      return "always";
+      return 'always'
     }
-    if (clients.allow.some((pattern) => matchesPattern(pattern, client)) || clients.level === "allow") {
-      return "config";
+    if (clients.allow.some(pattern => matchesPattern(pattern, client)) || clients.level === 'allow') {
+      return 'config'
     }
-    if (clients.level === "deny") {
-      return "denied";
+    if (clients.level === 'deny') {
+      return 'denied'
     }
-    return current === "always" || current === "config" ? "pending" : current;
+    return current === 'always' || current === 'config' ? 'pending' : current
   }
 
   /**
@@ -472,21 +472,21 @@ export class DevtoolApprovals {
    * @returns The session.
    * @throws {McpRefusal} When the agent is refused or nobody accepts it.
    */
-  async accept(sessionId: string, tool: string): Promise<McpSession> {
-    const session = this._sessions.get(sessionId);
+  async accept (sessionId: string, tool: string): Promise<McpSession> {
+    const session = this._sessions.get(sessionId)
     if (!session) {
-      throw new McpRefusal("denied", "Unknown session");
+      throw new McpRefusal('denied', 'Unknown session')
     }
-    if (session.status === "denied") {
-      throw new McpRefusal("denied", `Refused: the client ${session.client} is not accepted`);
+    if (session.status === 'denied') {
+      throw new McpRefusal('denied', `Refused: the client ${session.client} is not accepted`)
     }
-    if (session.status === "pending") {
+    if (session.status === 'pending') {
       session.acceptance ??= this.askAcceptance(session, tool).finally(() => {
-        session.acceptance = null;
-      });
-      await session.acceptance;
+        session.acceptance = null
+      })
+      await session.acceptance
     }
-    return session;
+    return session
   }
 
   /**
@@ -495,37 +495,37 @@ export class DevtoolApprovals {
    * @param tool The tool whose call needs the agent accepted.
    * @throws {McpRefusal} When the agent is refused or nobody answers.
    */
-  private async askAcceptance(session: McpSession, tool: string): Promise<void> {
+  private async askAcceptance (session: McpSession, tool: string): Promise<void> {
     const { answer } = await this.ask(session, {
-      kind: "client",
+      kind: 'client',
       tool,
       action: null,
-      title: `New client: ${this._titles.get(session.client) ?? session.client}${session.version ? ` ${session.version}` : ""}`,
-      details: [{ label: "Client", value: session.client }, ...(session.version ? [{ label: "Version", value: session.version }] : [])],
+      title: `New client: ${this._titles.get(session.client) ?? session.client}${session.version ? ` ${session.version}` : ''}`,
+      details: [{ label: 'Client', value: session.client }, ...(session.version ? [{ label: 'Version', value: session.version }] : [])],
       keys: [],
       command: null,
       inputs: null,
       diff: null,
       grantKey: null,
-      grantable: { session: true, always: true },
-    });
-    if (answer === "timeout") {
-      throw new McpRefusal("timeout", `Refused: nobody accepted the client ${session.client} in time`);
+      grantable: { session: true, always: true }
+    })
+    if (answer === 'timeout') {
+      throw new McpRefusal('timeout', `Refused: nobody accepted the client ${session.client} in time`)
     }
-    if (answer === "cancelled") {
-      throw new McpRefusal("cancelled", CANCELLED_MESSAGE);
+    if (answer === 'cancelled') {
+      throw new McpRefusal('cancelled', CANCELLED_MESSAGE)
     }
-    if (answer === "deny") {
-      session.status = "denied";
-      await this.publishState();
-      throw new McpRefusal("denied", `Refused: the user did not accept the client ${session.client}`);
+    if (answer === 'deny') {
+      session.status = 'denied'
+      await this.publishState()
+      throw new McpRefusal('denied', `Refused: the user did not accept the client ${session.client}`)
     }
-    if (answer === "always") {
-      await this.setClient(session.client, "always");
-      return;
+    if (answer === 'always') {
+      await this.setClient(session.client, 'always')
+      return
     }
-    session.status = "session";
-    await this.publishState();
+    session.status = 'session'
+    await this.publishState()
   }
 
   /**
@@ -537,18 +537,18 @@ export class DevtoolApprovals {
    * @returns The outcome and the inputs changed by the person.
    * @throws {McpRefusal} When no interface is open or the call is already abandoned.
    */
-  private async ask(
+  private async ask (
     session: McpSession,
-    request: Omit<McpRequestPayload, "id" | "session" | "client" | "notify" | "createdAt" | "expiresAt">,
-    signal?: AbortSignal,
-  ): Promise<{ answer: McpOutcome; inputs: CommandInputValue[] | null }> {
+    request: Omit<McpRequestPayload, 'id' | 'session' | 'client' | 'notify' | 'createdAt' | 'expiresAt'>,
+    signal?: AbortSignal
+  ): Promise<{ answer: McpOutcome, inputs: CommandInputValue[] | null }> {
     if (signal?.aborted) {
-      throw new McpRefusal("cancelled", CANCELLED_MESSAGE);
+      throw new McpRefusal('cancelled', CANCELLED_MESSAGE)
     }
     if (this._host.interfaces() === 0) {
-      throw new McpRefusal("noUi", "Refused: no devtool interface is open to answer");
+      throw new McpRefusal('noUi', 'Refused: no devtool interface is open to answer')
     }
-    const timeout = (this._settings?.timeout ?? 120) * 1000;
+    const timeout = (this._settings?.timeout ?? 120) * 1000
     const payload: McpRequestPayload = {
       ...request,
       id: randomUUID(),
@@ -556,23 +556,23 @@ export class DevtoolApprovals {
       client: session.client,
       notify: this._settings?.notifications ?? false,
       createdAt: Date.now(),
-      expiresAt: Date.now() + timeout,
-    };
-    const result = await new Promise<{ answer: McpOutcome; inputs: CommandInputValue[] | null }>((resolve) => {
-      const timer = setTimeout(() => settle("timeout", null), timeout);
-      const cancel = (): void => settle("cancelled", null);
+      expiresAt: Date.now() + timeout
+    }
+    const result = await new Promise<{ answer: McpOutcome, inputs: CommandInputValue[] | null }>(resolve => {
+      const timer = setTimeout(() => settle('timeout', null), timeout)
+      const cancel = (): void => settle('cancelled', null)
       const settle = (answer: McpOutcome, inputs: CommandInputValue[] | null): void => {
-        clearTimeout(timer);
-        signal?.removeEventListener("abort", cancel);
-        this._pending.delete(payload.id);
-        resolve({ answer, inputs });
-      };
-      signal?.addEventListener("abort", cancel, { once: true });
-      this._pending.set(payload.id, { payload, settle });
-      void this.publishState();
-    });
-    await this.publishState();
-    return result;
+        clearTimeout(timer)
+        signal?.removeEventListener('abort', cancel)
+        this._pending.delete(payload.id)
+        resolve({ answer, inputs })
+      }
+      signal?.addEventListener('abort', cancel, { once: true })
+      this._pending.set(payload.id, { payload, settle })
+      void this.publishState()
+    })
+    await this.publishState()
+    return result
   }
 
   /**
@@ -583,21 +583,21 @@ export class DevtoolApprovals {
    * @param session The session of the call, null when it is closed.
    * @param client The agent, when no session is given.
    */
-  private addGrant(scope: "session" | "always", key: string, label: string, session: McpSession | null, client: string | null = null): void {
-    const grant: McpGrantPayload = { key, label, scope, session: scope === "session" ? (session?.id ?? null) : null, client: session?.client ?? client, date: Date.now() };
-    if (scope === "session" && session) {
-      session.grants.set(key, grant);
-      return;
+  private addGrant (scope: 'session' | 'always', key: string, label: string, session: McpSession | null, client: string | null = null): void {
+    const grant: McpGrantPayload = { key, label, scope, session: scope === 'session' ? (session?.id ?? null) : null, client: session?.client ?? client, date: Date.now() }
+    if (scope === 'session' && session) {
+      session.grants.set(key, grant)
+      return
     }
-    this._grants.set(key, grant);
-    this.saveGrants();
+    this._grants.set(key, grant)
+    this.saveGrants()
   }
 
   /**
    * Keeps the grants meant to last in the cache folder.
    */
-  private saveGrants(): void {
-    this.persist(GRANTS_FILE, () => JSON.stringify([...this._grants.values()], null, 2));
+  private saveGrants (): void {
+    this.persist(GRANTS_FILE, () => JSON.stringify([...this._grants.values()], null, 2))
   }
 
   /**
@@ -607,29 +607,29 @@ export class DevtoolApprovals {
    * @param content Gives the new content, null to append instead.
    * @param append The text appended when there is no new content.
    */
-  private persist(name: string, content: () => string | null, append = ""): void {
-    const folder = this._folder;
+  private persist (name: string, content: () => string | null, append = ''): void {
+    const folder = this._folder
     if (!folder) {
-      return;
+      return
     }
-    const file = path.join(folder, name);
+    const file = path.join(folder, name)
     this._writes = this._writes
       .then(async () => {
-        await fs.mkdir(folder, { recursive: true });
-        const text = content();
-        await (text === null ? fs.appendFile(file, append) : fs.writeFile(file, text));
+        await fs.mkdir(folder, { recursive: true })
+        const text = content()
+        await (text === null ? fs.appendFile(file, append) : fs.writeFile(file, text))
       })
       .catch((error: unknown) => {
-        logger.warn("MCP", name, error instanceof Error ? error.message : String(error));
-      });
+        logger.warn('MCP', name, error instanceof Error ? error.message : String(error))
+      })
   }
 
   /**
    * Gives the history as the lines of its file.
    * @returns One JSON entry per line.
    */
-  private historyText(): string {
-    return this._history.map((entry) => `${JSON.stringify(entry)}\n`).join("");
+  private historyText (): string {
+    return this._history.map(entry => `${JSON.stringify(entry)}\n`).join('')
   }
 
   /**
@@ -640,12 +640,12 @@ export class DevtoolApprovals {
    */
   private async readJson<T>(name: string, fallback: T): Promise<T> {
     if (!this._folder) {
-      return fallback;
+      return fallback
     }
     try {
-      return JSON.parse(await fs.readFile(path.join(this._folder, name), "utf8")) as T;
+      return JSON.parse(await fs.readFile(path.join(this._folder, name), 'utf8')) as T
     } catch {
-      return fallback;
+      return fallback
     }
   }
 
@@ -653,21 +653,21 @@ export class DevtoolApprovals {
    * Reads the history kept in the cache folder, its unreadable lines left out.
    * @returns The calls, the oldest first.
    */
-  private async readHistory(): Promise<McpHistoryEntry[]> {
+  private async readHistory (): Promise<McpHistoryEntry[]> {
     if (!this._folder) {
-      return [];
+      return []
     }
-    const text = await fs.readFile(path.join(this._folder, HISTORY_FILE), "utf8").catch(() => "");
-    const entries: McpHistoryEntry[] = [];
-    for (const line of text.split("\n")) {
+    const text = await fs.readFile(path.join(this._folder, HISTORY_FILE), 'utf8').catch(() => '')
+    const entries: McpHistoryEntry[] = []
+    for (const line of text.split('\n')) {
       try {
         if (line.trim()) {
-          entries.push(JSON.parse(line) as McpHistoryEntry);
+          entries.push(JSON.parse(line) as McpHistoryEntry)
         }
       } catch {
-        continue;
+        continue
       }
     }
-    return entries.slice(-HISTORY_LIMIT);
+    return entries.slice(-HISTORY_LIMIT)
   }
 }

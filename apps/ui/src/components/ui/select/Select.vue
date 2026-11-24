@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, type HTMLAttributes } from "vue"
-import { Icon } from "@iconify/vue"
-import { Check, ChevronDown } from "@lucide/vue"
+import { computed, type HTMLAttributes } from 'vue'
+import { Icon } from '@iconify/vue'
+import { Check, ChevronDown } from '@lucide/vue'
 import {
   SelectContent,
   SelectIcon,
@@ -12,18 +12,18 @@ import {
   SelectRoot,
   SelectTrigger,
   SelectValue,
-  SelectViewport,
-} from "reka-ui"
-import { cn } from "@/lib/utils"
+  SelectViewport
+} from 'reka-ui'
+import { cn } from '@/lib/utils'
 
 const props = defineProps<{
-  options: { label: string; value: string; icon?: string }[]
+  options: { label: string, value: string, icon?: string }[]
   placeholder?: string
-  class?: HTMLAttributes["class"]
+  class?: HTMLAttributes['class']
 }>()
 
 const model = defineModel<string>()
-const selected = computed(() => props.options.find((option) => option.value === model.value))
+const selected = computed(() => props.options.find(option => option.value === model.value))
 </script>
 
 <template>

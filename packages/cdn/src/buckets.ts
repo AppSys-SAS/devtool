@@ -1,4 +1,4 @@
-import { Readable } from "node:stream";
+import { Readable } from 'node:stream'
 import {
   CreateBucketCommand,
   DeleteObjectsCommand,
@@ -6,16 +6,16 @@ import {
   HeadBucketCommand,
   ListObjectsV2Command,
   PutObjectCommand,
-  S3Client,
-} from "@aws-sdk/client-s3";
-import type { ArchiveRecord, ArchiveWriter } from "./archive.js";
+  S3Client
+} from '@aws-sdk/client-s3'
+import type { ArchiveRecord, ArchiveWriter } from './archive.js'
 
 /** Local S3 server holding the buckets of the environment. */
 export interface S3Options {
-  endpoint: string;
-  accessKeyId: string;
-  secretAccessKey: string;
-  region: string;
+  endpoint: string
+  accessKeyId: string
+  secretAccessKey: string
+  region: string
 }
 
 /**
@@ -24,13 +24,13 @@ export interface S3Options {
  * @param options - The server and its credentials.
  * @returns The client.
  */
-export function createS3Client(options: S3Options): S3Client {
+export function createS3Client (options: S3Options): S3Client {
   return new S3Client({
     endpoint: options.endpoint,
     region: options.region,
     forcePathStyle: true,
-    credentials: { accessKeyId: options.accessKeyId, secretAccessKey: options.secretAccessKey },
-  });
+    credentials: { accessKeyId: options.accessKeyId, secretAccessKey: options.secretAccessKey }
+  })
 }
 
 /**
@@ -40,17 +40,17 @@ export function createS3Client(options: S3Options): S3Client {
  * @param bucket - The bucket.
  * @returns The keys and sizes of the objects.
  */
-async function* listObjects(client: S3Client, bucket: string): AsyncGenerator<{ key: string; size: number }> {
-  let token: string | undefined;
+async function* listObjects (client: S3Client, bucket: string): AsyncGenerator<{ key: string, size: number }> {
+  let token: string | undefined
   do {
-    const page = await client.send(new ListObjectsV2Command({ Bucket: bucket, ContinuationToken: token }));
+    const page = await client.send(new ListObjectsV2Command({ Bucket: bucket, ContinuationToken: token }))
     for (const object of page.Contents ?? []) {
       if (object.Key !== undefined) {
-        yield { key: object.Key, size: object.Size ?? 0 };
+        yield { key: object.Key, size: object.Size ?? 0 }
       }
     }
-    token = page.IsTruncated ? page.NextContinuationToken : undefined;
-  } while (token !== undefined);
+    token = page.IsTruncated ? page.NextContinuationToken : undefined
+  } while (token !== undefined)
 }
 
 /**
@@ -61,18 +61,18 @@ async function* listObjects(client: S3Client, bucket: string): AsyncGenerator<{ 
  * @param archive - The archive being written.
  * @returns The number of objects.
  */
-export async function snapshotBucket(client: S3Client, bucket: string, archive: ArchiveWriter): Promise<number> {
-  let count = 0;
+export async function snapshotBucket (client: S3Client, bucket: string, archive: ArchiveWriter): Promise<number> {
+  let count = 0
   for await (const { key } of listObjects(client, bucket)) {
-    const object = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+    const object = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }))
     await archive.add(
-      { type: "object", key, contentType: object.ContentType ?? "application/octet-stream", size: object.ContentLength ?? 0 },
-      object.Body as Readable,
-    );
-    count += 1;
+      { type: 'object', key, contentType: object.ContentType ?? 'application/octet-stream', size: object.ContentLength ?? 0 },
+      object.Body as Readable
+    )
+    count += 1
   }
 
-  return count;
+  return count
 }
 
 /**
@@ -83,26 +83,26 @@ export async function snapshotBucket(client: S3Client, bucket: string, archive: 
  * @param records - The records of a bucket snapshot.
  * @returns The number of objects restored.
  */
-export async function restoreBucket(client: S3Client, bucket: string, records: AsyncIterable<ArchiveRecord>): Promise<number> {
+export async function restoreBucket (client: S3Client, bucket: string, records: AsyncIterable<ArchiveRecord>): Promise<number> {
   try {
-    await client.send(new HeadBucketCommand({ Bucket: bucket }));
+    await client.send(new HeadBucketCommand({ Bucket: bucket }))
   } catch {
-    await client.send(new CreateBucketCommand({ Bucket: bucket }));
+    await client.send(new CreateBucketCommand({ Bucket: bucket }))
   }
 
-  const keys: string[] = [];
+  const keys: string[] = []
   for await (const { key } of listObjects(client, bucket)) {
-    keys.push(key);
+    keys.push(key)
   }
   for (let start = 0; start < keys.length; start += 1000) {
-    const batch = keys.slice(start, start + 1000).map((Key) => ({ Key }));
-    await client.send(new DeleteObjectsCommand({ Bucket: bucket, Delete: { Objects: batch, Quiet: true } }));
+    const batch = keys.slice(start, start + 1000).map(Key => ({ Key }))
+    await client.send(new DeleteObjectsCommand({ Bucket: bucket, Delete: { Objects: batch, Quiet: true } }))
   }
 
-  let count = 0;
+  let count = 0
   for await (const { header, body } of records) {
-    if (header.type !== "object" || typeof header.key !== "string" || typeof header.size !== "number") {
-      throw new Error("not a bucket snapshot");
+    if (header.type !== 'object' || typeof header.key !== 'string' || typeof header.size !== 'number') {
+      throw new Error('not a bucket snapshot')
     }
 
     await client.send(
@@ -111,11 +111,11 @@ export async function restoreBucket(client: S3Client, bucket: string, records: A
         Key: header.key,
         Body: Readable.from(body, { objectMode: false }),
         ContentLength: header.size,
-        ContentType: typeof header.contentType === "string" ? header.contentType : undefined,
-      }),
-    );
-    count += 1;
+        ContentType: typeof header.contentType === 'string' ? header.contentType : undefined
+      })
+    )
+    count += 1
   }
 
-  return count;
+  return count
 }

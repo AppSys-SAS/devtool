@@ -1,23 +1,23 @@
-import { ref } from "vue";
-import type { ForgeItemsPayload, ForgeTimelinePayload } from "@appsys/devtool-shared";
+import { ref } from 'vue'
+import type { ForgeItemsPayload, ForgeTimelinePayload } from '@appsys/devtool-shared'
 
 /**
  * Open pull requests and issues of the integrations, as the server last read them, and the timelines
  * of the items opened.
  */
 class ForgeItemsStore {
-  states = ref<Record<string, ForgeItemsPayload>>({});
+  states = ref<Record<string, ForgeItemsPayload>>({})
 
-  timelines = ref<Record<string, ForgeTimelinePayload>>({});
+  timelines = ref<Record<string, ForgeTimelinePayload>>({})
 
   /**
    * Takes the state sent by the server.
    * @param payload The items of each integration, empty once disconnected from the server.
    */
-  load(payload: ForgeItemsPayload[]): void {
-    this.states.value = Object.fromEntries(payload.map((state) => [state.key, state]));
+  load (payload: ForgeItemsPayload[]): void {
+    this.states.value = Object.fromEntries(payload.map(state => [state.key, state]))
     if (!payload.length) {
-      this.timelines.value = {};
+      this.timelines.value = {}
     }
   }
 
@@ -26,11 +26,11 @@ class ForgeItemsStore {
    * those already received.
    * @param payload The part of the timeline.
    */
-  loadTimeline(payload: ForgeTimelinePayload): void {
-    const id = `${payload.key}#${payload.number}`;
-    const known = this.timelines.value[id];
-    const timeline = payload.previous && known ? { ...payload, events: [...payload.events, ...known.events] } : payload;
-    this.timelines.value = { ...this.timelines.value, [id]: timeline };
+  loadTimeline (payload: ForgeTimelinePayload): void {
+    const id = `${payload.key}#${payload.number}`
+    const known = this.timelines.value[id]
+    const timeline = payload.previous && known ? { ...payload, events: [...payload.events, ...known.events] } : payload
+    this.timelines.value = { ...this.timelines.value, [id]: timeline }
   }
 
   /**
@@ -38,8 +38,8 @@ class ForgeItemsStore {
    * @param key The integration, `<section>[/<project>]/<slug>`.
    * @returns Its state, null before the server sends it.
    */
-  get(key: string): ForgeItemsPayload | null {
-    return this.states.value[key] ?? null;
+  get (key: string): ForgeItemsPayload | null {
+    return this.states.value[key] ?? null
   }
 
   /**
@@ -48,9 +48,9 @@ class ForgeItemsStore {
    * @param number The number of the item.
    * @returns Its timeline, null until the server sends it.
    */
-  timelineOf(key: string, number: number): ForgeTimelinePayload | null {
-    return this.timelines.value[`${key}#${number}`] ?? null;
+  timelineOf (key: string, number: number): ForgeTimelinePayload | null {
+    return this.timelines.value[`${key}#${number}`] ?? null
   }
 }
 
-export default new ForgeItemsStore();
+export default new ForgeItemsStore()

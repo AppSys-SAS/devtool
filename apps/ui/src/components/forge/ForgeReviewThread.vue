@@ -1,24 +1,24 @@
 <script setup lang="ts">
-import { computed } from "vue";
-import type { ForgeReviewThread } from "@appsys/devtool-shared";
-import MarkdownPreview from "@/components/files/MarkdownPreview.vue";
-import { Badge } from "@/components/ui/badge";
-import { formatRelativeDate } from "@/lib/format";
+import { computed } from 'vue'
+import type { ForgeReviewThread } from '@appsys/devtool-shared'
+import MarkdownPreview from '@/components/files/MarkdownPreview.vue'
+import { Badge } from '@/components/ui/badge'
+import { formatRelativeDate } from '@/lib/format'
 
 const props = defineProps<{
-  thread: ForgeReviewThread;
-}>();
+  thread: ForgeReviewThread
+}>()
 
 /** How many lines of the change end the excerpt shown above a discussion. */
-const EXCERPT_LINES = 4;
+const EXCERPT_LINES = 4
 
 const excerpt = computed(() =>
-  (props.thread.diffHunk ?? "")
-    .split("\n")
-    .filter((line) => !line.startsWith("@@"))
+  (props.thread.diffHunk ?? '')
+    .split('\n')
+    .filter(line => !line.startsWith('@@'))
     .slice(-EXCERPT_LINES)
-    .map((line) => ({ text: line, class: line.startsWith("+") ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300" : line.startsWith("-") ? "bg-red-500/15 text-red-700 dark:text-red-300" : "" })),
-);
+    .map(line => ({ text: line, class: line.startsWith('+') ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300' : line.startsWith('-') ? 'bg-red-500/15 text-red-700 dark:text-red-300' : '' }))
+)
 </script>
 
 <template>

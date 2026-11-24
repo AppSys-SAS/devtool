@@ -1,76 +1,76 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
-import { Eye, EyeOff } from "@lucide/vue";
-import type { EnvironmentKeyPayload, EnvironmentKeyValuePayload } from "@appsys/devtool-shared";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import { computed, ref } from 'vue'
+import { Eye, EyeOff } from '@lucide/vue'
+import type { EnvironmentKeyPayload, EnvironmentKeyValuePayload } from '@appsys/devtool-shared'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 
-type Side = "local" | "remote";
+type Side = 'local' | 'remote'
 
 interface BranchRow {
-  kind: "branch";
-  id: string;
-  name: string;
-  depth: number;
-  leaves: string[];
+  kind: 'branch'
+  id: string
+  name: string
+  depth: number
+  leaves: string[]
 }
 
 interface LeafRow {
-  kind: "leaf";
-  id: string;
-  name: string;
-  depth: number;
-  entry: EnvironmentKeyPayload;
+  kind: 'leaf'
+  id: string
+  name: string
+  depth: number
+  entry: EnvironmentKeyPayload
 }
 
-const SENSITIVE_NAME = /secret|password|passwd|token|key|private|credential/i;
-const MAX_VALUE_LENGTH = 60;
+const SENSITIVE_NAME = /secret|password|passwd|token|key|private|credential/i
+const MAX_VALUE_LENGTH = 60
 
 const props = defineProps<{
-  entries: EnvironmentKeyPayload[];
-  defaultSide: Side;
-}>();
+  entries: EnvironmentKeyPayload[]
+  defaultSide: Side
+}>()
 
-const choices = defineModel<Record<string, Side>>({ required: true });
-const revealed = ref<Record<string, boolean>>({});
+const choices = defineModel<Record<string, Side>>({ required: true })
+const revealed = ref<Record<string, boolean>>({})
 
 /**
  * Identifies a key by its path.
  * @param path The path of the key.
  * @returns A stable identifier.
  */
-function idOf(path: string[]): string {
-  return JSON.stringify(path);
+function idOf (path: string[]): string {
+  return JSON.stringify(path)
 }
 
 const rows = computed(() => {
-  const result: (BranchRow | LeafRow)[] = [];
-  const branches = new Map<string, BranchRow>();
+  const result: (BranchRow | LeafRow)[] = []
+  const branches = new Map<string, BranchRow>()
   for (const entry of props.entries) {
     for (let depth = 0; depth < entry.path.length - 1; depth += 1) {
-      const id = idOf(entry.path.slice(0, depth + 1));
-      let branch = branches.get(id);
+      const id = idOf(entry.path.slice(0, depth + 1))
+      let branch = branches.get(id)
       if (!branch) {
-        branch = { kind: "branch", id, name: entry.path[depth], depth, leaves: [] };
-        branches.set(id, branch);
-        result.push(branch);
+        branch = { kind: 'branch', id, name: entry.path[depth], depth, leaves: [] }
+        branches.set(id, branch)
+        result.push(branch)
       }
-      branch.leaves.push(idOf(entry.path));
+      branch.leaves.push(idOf(entry.path))
     }
-    result.push({ kind: "leaf", id: idOf(entry.path), name: entry.path.at(-1) ?? "", depth: entry.path.length - 1, entry });
+    result.push({ kind: 'leaf', id: idOf(entry.path), name: entry.path.at(-1) ?? '', depth: entry.path.length - 1, entry })
   }
 
-  return result;
-});
+  return result
+})
 
 /**
  * Gives the side chosen for a key.
  * @param id The identifier of the key.
  * @returns The side.
  */
-function sideOf(id: string): Side {
-  return choices.value[id] ?? props.defaultSide;
+function sideOf (id: string): Side {
+  return choices.value[id] ?? props.defaultSide
 }
 
 /**
@@ -78,8 +78,8 @@ function sideOf(id: string): Side {
  * @param ids The identifiers of the keys.
  * @param side The side.
  */
-function choose(ids: string[], side: Side): void {
-  choices.value = { ...choices.value, ...Object.fromEntries(ids.map((id) => [id, side])) };
+function choose (ids: string[], side: Side): void {
+  choices.value = { ...choices.value, ...Object.fromEntries(ids.map(id => [id, side])) }
 }
 
 /**
@@ -87,9 +87,9 @@ function choose(ids: string[], side: Side): void {
  * @param branch The branch.
  * @returns The common side, or "mixed".
  */
-function branchSide(branch: BranchRow): Side | "mixed" {
-  const sides = new Set(branch.leaves.map(sideOf));
-  return sides.size === 1 ? [...sides][0] : "mixed";
+function branchSide (branch: BranchRow): Side | 'mixed' {
+  const sides = new Set(branch.leaves.map(sideOf))
+  return sides.size === 1 ? [...sides][0] : 'mixed'
 }
 
 /**
@@ -97,12 +97,12 @@ function branchSide(branch: BranchRow): Side | "mixed" {
  * @param value The value.
  * @returns True when one of its keys looks like a secret.
  */
-function holdsSecrets(value: unknown): boolean {
-  if (typeof value !== "object" || value === null) {
-    return false;
+function holdsSecrets (value: unknown): boolean {
+  if (typeof value !== 'object' || value === null) {
+    return false
   }
 
-  return Object.entries(value).some(([key, child]) => SENSITIVE_NAME.test(key) || holdsSecrets(child));
+  return Object.entries(value).some(([key, child]) => SENSITIVE_NAME.test(key) || holdsSecrets(child))
 }
 
 /**
@@ -110,8 +110,8 @@ function holdsSecrets(value: unknown): boolean {
  * @param row The key row.
  * @returns True for a key named like a secret, or holding such keys.
  */
-function isSensitive(row: LeafRow): boolean {
-  return SENSITIVE_NAME.test(row.name) || holdsSecrets(row.entry.local.value) || holdsSecrets(row.entry.remote.value);
+function isSensitive (row: LeafRow): boolean {
+  return SENSITIVE_NAME.test(row.name) || holdsSecrets(row.entry.local.value) || holdsSecrets(row.entry.remote.value)
 }
 
 /**
@@ -119,15 +119,15 @@ function isSensitive(row: LeafRow): boolean {
  * @param value The value of one copy.
  * @returns The full text and the shortened text.
  */
-function formatValue(value: EnvironmentKeyValuePayload): { full: string; short: string } {
+function formatValue (value: EnvironmentKeyValuePayload): { full: string, short: string } {
   if (!value.present) {
-    return { full: "absent", short: "— absent" };
+    return { full: 'absent', short: '— absent' }
   }
 
-  const full = typeof value.value === "string" ? value.value : JSON.stringify(value.value);
-  const firstLine = full.split("\n")[0];
-  const short = firstLine.length > MAX_VALUE_LENGTH || firstLine !== full ? `${firstLine.slice(0, MAX_VALUE_LENGTH)}…` : firstLine;
-  return { full, short };
+  const full = typeof value.value === 'string' ? value.value : JSON.stringify(value.value)
+  const firstLine = full.split('\n')[0]
+  const short = firstLine.length > MAX_VALUE_LENGTH || firstLine !== full ? `${firstLine.slice(0, MAX_VALUE_LENGTH)}…` : firstLine
+  return { full, short }
 }
 
 /**
@@ -135,26 +135,26 @@ function formatValue(value: EnvironmentKeyValuePayload): { full: string; short: 
  * @param entry The key.
  * @returns The label.
  */
-function differenceLabel(entry: EnvironmentKeyPayload): string {
+function differenceLabel (entry: EnvironmentKeyPayload): string {
   if (!entry.local.present) {
-    return "Only on CDN";
+    return 'Only on CDN'
   }
 
-  return entry.remote.present ? "Changed" : "Only local";
+  return entry.remote.present ? 'Changed' : 'Only local'
 }
 
 /**
  * Shows or hides the values of every masked key at once.
  */
-function toggleAllRevealed(): void {
-  const reveal = !allRevealed.value;
-  revealed.value = Object.fromEntries(sensitiveIds.value.map((id) => [id, reveal]));
+function toggleAllRevealed (): void {
+  const reveal = !allRevealed.value
+  revealed.value = Object.fromEntries(sensitiveIds.value.map(id => [id, reveal]))
 }
 
-const allIds = computed(() => props.entries.map((entry) => idOf(entry.path)));
-const remoteCount = computed(() => allIds.value.filter((id) => sideOf(id) === "remote").length);
-const sensitiveIds = computed(() => rows.value.flatMap((row) => (row.kind === "leaf" && isSensitive(row) ? [row.id] : [])));
-const allRevealed = computed(() => sensitiveIds.value.length > 0 && sensitiveIds.value.every((id) => revealed.value[id]));
+const allIds = computed(() => props.entries.map(entry => idOf(entry.path)))
+const remoteCount = computed(() => allIds.value.filter(id => sideOf(id) === 'remote').length)
+const sensitiveIds = computed(() => rows.value.flatMap(row => (row.kind === 'leaf' && isSensitive(row) ? [row.id] : [])))
+const allRevealed = computed(() => sensitiveIds.value.length > 0 && sensitiveIds.value.every(id => revealed.value[id]))
 </script>
 
 <template>

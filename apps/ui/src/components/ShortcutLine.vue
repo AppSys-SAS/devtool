@@ -1,20 +1,20 @@
 <script setup lang="ts">
-import { computed } from "vue";
-import { Icon } from "@iconify/vue";
-import { useRoute, useRouter } from "vue-router";
-import type { SidebarShortcut } from "@/lib/shortcuts";
+import { computed } from 'vue'
+import { Icon } from '@iconify/vue'
+import { useRoute, useRouter } from 'vue-router'
+import type { SidebarShortcut } from '@/lib/shortcuts'
 
 const props = defineProps<{
-  shortcut: SidebarShortcut;
+  shortcut: SidebarShortcut
   /** Shows only the icon, for a shortcut placed in another row. */
-  compact?: boolean;
-}>();
+  compact?: boolean
+}>()
 
-const COUNT_CLASS = "rounded-full bg-sky-500/20 px-1.5 text-[10px] leading-4 font-semibold tabular-nums text-sky-700 dark:text-sky-300";
+const COUNT_CLASS = 'rounded-full bg-sky-500/20 px-1.5 text-[10px] leading-4 font-semibold tabular-nums text-sky-700 dark:text-sky-300'
 
-const route = useRoute();
-const router = useRouter();
-const active = computed(() => props.shortcut.route !== null && router.resolve(props.shortcut.route).fullPath === route.fullPath);
+const route = useRoute()
+const router = useRouter()
+const active = computed(() => props.shortcut.route !== null && router.resolve(props.shortcut.route).fullPath === route.fullPath)
 </script>
 
 <template>
