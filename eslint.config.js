@@ -13,13 +13,14 @@ const unusedVariables = ['warn', {
 }]
 
 const typeScriptFiles = ['**/*.ts']
-const uiFiles = ['apps/ui/**/*.ts', 'apps/ui/**/*.vue']
+const uiFiles = ['apps/ui/**/*.ts', 'apps/ui/**/*.vue', 'docs/.vitepress/theme/**/*.ts', 'docs/.vitepress/theme/**/*.vue']
 
 export default [
   {
     ignores: [
       '**/node_modules',
       '**/dist',
+      'docs/.vitepress/cache',
       'apps/*/lib',
       'packages/*/lib',
       'coverage',
@@ -93,7 +94,7 @@ export default [
     files: typeScriptFiles,
     languageOptions: {
       parserOptions: {
-        project: ['./apps/*/tsconfig.json', './packages/*/tsconfig.json', './tsconfig.eslint.json'],
+        project: ['./apps/*/tsconfig.json', './packages/*/tsconfig.json', './docs/tsconfig.json', './tsconfig.eslint.json'],
         projectService: false,
         tsconfigRootDir: import.meta.dirname
       }

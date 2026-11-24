@@ -10,7 +10,7 @@ export default defineConfig({
         test: {
           name: 'node',
           environment: 'node',
-          include: ['{apps,packages}/*/tests/unit/**/*.spec.ts'],
+          include: ['{apps,packages}/*/tests/unit/**/*.spec.ts', 'docs/tests/**/*.spec.ts'],
           exclude: [...configDefaults.exclude, 'apps/ui/**']
         }
       },

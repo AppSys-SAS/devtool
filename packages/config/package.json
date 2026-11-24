@@ -5,13 +5,15 @@
   "main": "./lib/index.js",
   "types": "./lib/index.d.ts",
   "files": [
-    "lib"
+    "lib",
+    "schema"
   ],
   "exports": {
     ".": {
       "types": "./lib/index.d.ts",
       "import": "./lib/index.js"
-    }
+    },
+    "./schema/config.schema.json": "./schema/config.schema.json"
   },
   "scripts": {
     "build": "tsc -b tsconfig.json --force",
@@ -25,6 +27,7 @@
   },
   "devDependencies": {
     "@types/lodash.clonedeep": "^4.5.9",
-    "@types/lodash.mergewith": "^4.6.9"
+    "@types/lodash.mergewith": "^4.6.9",
+    "ajv": "^8.20.0"
   }
 }

@@ -1,0 +1,25 @@
+{
+  "name": "@appsys/devtool-docs",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "scripts": {
+    "docs:dev": "vitepress dev",
+    "docs:build": "vitepress build",
+    "docs:preview": "vitepress preview",
+    "typecheck": "vue-tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@appsys/devtool-config": "workspace:*",
+    "ajv": "^8.20.0",
+    "fflate": "^0.8.3",
+    "yaml": "^2.9.1"
+  },
+  "devDependencies": {
+    "glob": "^13.0.6",
+    "vitepress": "1.6.4",
+    "vitepress-plugin-group-icons": "^1.8.2",
+    "vue": "^3.5.46",
+    "vue-tsc": "^3.3.13"
+  }
+}
