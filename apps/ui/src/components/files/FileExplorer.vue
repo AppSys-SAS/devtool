@@ -1,56 +1,56 @@
 <script setup lang="ts">
-import { computed, shallowRef } from "vue";
-import { Icon } from "@iconify/vue";
-import { FilePlus, FolderPlus, RefreshCw, Sparkles, TriangleAlert } from "@lucide/vue";
-import type { DirectoryExtra, FileEntryPayload, FileTreePayload } from "@appsys/devtool-shared";
-import FileTree from "@/components/files/FileTree.vue";
-import SidebarToggle from "@/components/SidebarToggle.vue";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { computed, shallowRef } from 'vue'
+import { Icon } from '@iconify/vue'
+import { FilePlus, FolderPlus, RefreshCw, Sparkles, TriangleAlert } from '@lucide/vue'
+import type { DirectoryExtra, FileEntryPayload, FileTreePayload } from '@appsys/devtool-shared'
+import FileTree from '@/components/files/FileTree.vue'
+import SidebarToggle from '@/components/SidebarToggle.vue'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { ScrollArea } from '@/components/ui/scroll-area'
 
 const props = defineProps<{
-  name: string;
-  tree: FileTreePayload | null;
-  current: string | null;
-  dirty: boolean;
-  commands: DirectoryExtra[];
+  name: string
+  tree: FileTreePayload | null
+  current: string | null
+  dirty: boolean
+  commands: DirectoryExtra[]
   /** The command bringing the folder back when it is missing. */
-  restore: DirectoryExtra | null;
-}>();
+  restore: DirectoryExtra | null
+}>()
 
 const emit = defineEmits<{
-  refresh: [];
-  run: [command: DirectoryExtra];
-  create: [parent: string, kind: FileEntryPayload["kind"]];
-  rename: [path: string];
-  remove: [path: string, kind: FileEntryPayload["kind"]];
-}>();
+  refresh: []
+  run: [command: DirectoryExtra]
+  create: [parent: string, kind: FileEntryPayload['kind']]
+  rename: [path: string]
+  remove: [path: string, kind: FileEntryPayload['kind']]
+}>()
 
-const search = shallowRef("");
+const search = shallowRef('')
 
 const entries = computed(() => {
-  const query = search.value.trim().toLowerCase();
-  const skills = props.tree?.agentSkills;
+  const query = search.value.trim().toLowerCase()
+  const skills = props.tree?.agentSkills
   if (!skills || !query) {
-    return props.tree?.entries ?? [];
+    return props.tree?.entries ?? []
   }
 
-  const folders = new Set(skills.filter((skill) => [skill.folder, skill.name, skill.description].some((text) => text?.toLowerCase().includes(query))).map((skill) => skill.folder));
-  return props.tree?.entries.filter((entry) => folders.has(entry.path.split("/")[0] ?? "")) ?? [];
-});
+  const folders = new Set(skills.filter(skill => [skill.folder, skill.name, skill.description].some(text => text?.toLowerCase().includes(query))).map(skill => skill.folder))
+  return props.tree?.entries.filter(entry => folders.has(entry.path.split('/')[0] ?? '')) ?? []
+})
 
 /**
  * Gives the icon of a command from its metadata.
  * @param command The command.
  * @returns The Iconify name of its icon, a terminal by default.
  */
-function commandIcon(command: DirectoryExtra): string {
-  const icon = typeof command.meta === "object" && command.meta !== null ? (command.meta as { icon?: unknown }).icon : null;
-  if (typeof icon !== "string" || !icon.trim()) {
-    return "lucide:terminal";
+function commandIcon (command: DirectoryExtra): string {
+  const icon = typeof command.meta === 'object' && command.meta !== null ? (command.meta as { icon?: unknown }).icon : null
+  if (typeof icon !== 'string' || !icon.trim()) {
+    return 'lucide:terminal'
   }
-  return icon.includes(":") ? icon : `lucide:${icon}`;
+  return icon.includes(':') ? icon : `lucide:${icon}`
 }
 </script>
 

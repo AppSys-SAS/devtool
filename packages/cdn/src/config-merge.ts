@@ -1,36 +1,36 @@
-import { isDeepStrictEqual } from "node:util";
-import { parseDocument } from "yaml";
+import { isDeepStrictEqual } from 'node:util'
+import { parseDocument } from 'yaml'
 
 /** A key whose value differs between two copies of a configuration file; `undefined` stands for an absent key. */
 export interface KeyDifference {
-  path: string[];
-  local: unknown;
-  remote: unknown;
+  path: string[]
+  local: unknown
+  remote: unknown
 }
 
 /** The copy whose value a key takes. */
-export type CopySide = "local" | "remote";
+export type CopySide = 'local' | 'remote'
 
 /** The value chosen for a differing key. */
 export interface KeyChoice {
-  path: string[];
-  side: CopySide;
+  path: string[]
+  side: CopySide
 }
 
 /** The new value of a key, `undefined` to remove it. */
 interface KeyChange {
-  path: string[];
-  value: unknown;
+  path: string[]
+  value: unknown
 }
 
 /** How a configuration file format is read as a map and changed key by key, keeping its layout. */
 export interface ConfigFormat {
-  read(text: string, label: string): Record<string, unknown>;
-  write(baseText: string, changes: KeyChange[]): string;
+  read(text: string, label: string): Record<string, unknown>
+  write(baseText: string, changes: KeyChange[]): string
 }
 
-const DOTENV_LINE = /^(\s*(?:export\s+)?)([A-Za-z_][A-Za-z0-9_.-]*)\s*=\s*(.*)$/;
-const DOTENV_PLAIN_VALUE = /^[\w./:@,+=-]*$/;
+const DOTENV_LINE = /^(\s*(?:export\s+)?)([A-Za-z_][A-Za-z0-9_.-]*)\s*=\s*(.*)$/
+const DOTENV_PLAIN_VALUE = /^[\w./:@,+=-]*$/
 
 /**
  * Tells whether a value is a map.
@@ -38,8 +38,8 @@ const DOTENV_PLAIN_VALUE = /^[\w./:@,+=-]*$/;
  * @param value - The value.
  * @returns True for a map.
  */
-function isMap(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+function isMap (value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 /**
@@ -49,13 +49,13 @@ function isMap(value: unknown): value is Record<string, unknown> {
  * @param label - Names the file in errors.
  * @returns Its value.
  */
-export function readYaml(text: string, label: string): unknown {
-  const document = parseDocument(text);
+export function readYaml (text: string, label: string): unknown {
+  const document = parseDocument(text)
   if (document.errors.length > 0) {
-    throw new Error(`${label} is not valid YAML: ${document.errors[0].message}`);
+    throw new Error(`${label} is not valid YAML: ${document.errors[0].message}`)
   }
 
-  return document.toJS();
+  return document.toJS()
 }
 
 /**
@@ -65,17 +65,17 @@ export function readYaml(text: string, label: string): unknown {
  * @param label - Names the file in errors.
  * @returns The map, empty for an empty file.
  */
-export function readMap(text: string, label: string): Record<string, unknown> {
-  const value = readYaml(text, label);
+export function readMap (text: string, label: string): Record<string, unknown> {
+  const value = readYaml(text, label)
   if (value === null || value === undefined) {
-    return {};
+    return {}
   }
 
   if (!isMap(value)) {
-    throw new Error(`${label} is not a YAML map`);
+    throw new Error(`${label} is not a YAML map`)
   }
 
-  return value;
+  return value
 }
 
 /**
@@ -84,24 +84,24 @@ export function readMap(text: string, label: string): Record<string, unknown> {
  * @param root - The map.
  * @param change - The key and its new value.
  */
-function applyChange(root: Record<string, unknown>, change: KeyChange): void {
-  const parents = change.path.slice(0, -1);
-  const key = change.path[change.path.length - 1];
-  let current = root;
+function applyChange (root: Record<string, unknown>, change: KeyChange): void {
+  const parents = change.path.slice(0, -1)
+  const key = change.path[change.path.length - 1]
+  let current = root
   for (const part of parents) {
     if (!isMap(current[part])) {
       if (change.value === undefined) {
-        return;
+        return
       }
-      current[part] = {};
+      current[part] = {}
     }
-    current = current[part] as Record<string, unknown>;
+    current = current[part] as Record<string, unknown>
   }
 
   if (change.value === undefined) {
-    delete current[key];
+    delete current[key]
   } else {
-    current[key] = change.value;
+    current[key] = change.value
   }
 }
 
@@ -112,26 +112,26 @@ function applyChange(root: Record<string, unknown>, change: KeyChange): void {
  * @param raw - The text after the equal sign.
  * @returns The value.
  */
-function readDotenvValue(raw: string): string {
-  const text = raw.trim();
-  if (text.startsWith("'")) {
-    const end = text.indexOf("'", 1);
-    return text.slice(1, end === -1 ? undefined : end);
+function readDotenvValue (raw: string): string {
+  const text = raw.trim()
+  if (text.startsWith('\'')) {
+    const end = text.indexOf('\'', 1)
+    return text.slice(1, end === -1 ? undefined : end)
   }
   if (!text.startsWith('"')) {
-    return text.replace(/\s+#.*$/, "");
+    return text.replace(/\s+#.*$/, '')
   }
 
-  let value = "";
+  let value = ''
   for (let index = 1; index < text.length && text[index] !== '"'; index += 1) {
-    if (text[index] === "\\" && index + 1 < text.length) {
-      index += 1;
-      value += text[index] === "n" ? "\n" : text[index];
+    if (text[index] === '\\' && index + 1 < text.length) {
+      index += 1
+      value += text[index] === 'n' ? '\n' : text[index]
     } else {
-      value += text[index];
+      value += text[index]
     }
   }
-  return value;
+  return value
 }
 
 /**
@@ -140,89 +140,89 @@ function readDotenvValue(raw: string): string {
  * @param value - The value.
  * @returns Its text after the equal sign.
  */
-function formatDotenvValue(value: unknown): string {
-  const text = typeof value === "string" ? value : JSON.stringify(value);
-  return DOTENV_PLAIN_VALUE.test(text) ? text : `"${text.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n")}"`;
+function formatDotenvValue (value: unknown): string {
+  const text = typeof value === 'string' ? value : JSON.stringify(value)
+  return DOTENV_PLAIN_VALUE.test(text) ? text : `"${text.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n')}"`
 }
 
 const YAML_FORMAT: ConfigFormat = {
   read: readMap,
-  write(baseText, changes) {
-    const document = parseDocument(baseText);
+  write (baseText, changes) {
+    const document = parseDocument(baseText)
     for (const change of changes) {
       if (change.value === undefined) {
-        document.deleteIn(change.path);
+        document.deleteIn(change.path)
       } else {
-        document.setIn(change.path, change.value);
+        document.setIn(change.path, change.value)
       }
     }
-    return document.toString({ lineWidth: 0 });
-  },
-};
+    return document.toString({ lineWidth: 0 })
+  }
+}
 
 const JSON_FORMAT: ConfigFormat = {
-  read(text, label) {
-    let value: unknown;
+  read (text, label) {
+    let value: unknown
     try {
-      value = text.trim() ? JSON.parse(text) : {};
+      value = text.trim() ? JSON.parse(text) : {}
     } catch (error) {
-      throw new Error(`${label} is not valid JSON: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error(`${label} is not valid JSON: ${error instanceof Error ? error.message : String(error)}`)
     }
     if (!isMap(value)) {
-      throw new Error(`${label} is not a JSON object`);
+      throw new Error(`${label} is not a JSON object`)
     }
-    return value;
+    return value
   },
-  write(baseText, changes) {
-    const root = JSON_FORMAT.read(baseText, "the file");
+  write (baseText, changes) {
+    const root = JSON_FORMAT.read(baseText, 'the file')
     for (const change of changes) {
-      applyChange(root, change);
+      applyChange(root, change)
     }
-    const indent = /^[ \t]+(?=")/m.exec(baseText)?.[0] ?? "  ";
-    return `${JSON.stringify(root, null, indent)}${baseText.endsWith("\n") ? "\n" : ""}`;
-  },
-};
+    const indent = /^[ \t]+(?=")/m.exec(baseText)?.[0] ?? '  '
+    return `${JSON.stringify(root, null, indent)}${baseText.endsWith('\n') ? '\n' : ''}`
+  }
+}
 
 const DOTENV_FORMAT: ConfigFormat = {
-  read(text) {
-    const values: Record<string, unknown> = {};
+  read (text) {
+    const values: Record<string, unknown> = {}
     for (const line of text.split(/\r?\n/)) {
-      const match = DOTENV_LINE.exec(line);
+      const match = DOTENV_LINE.exec(line)
       if (match) {
-        values[match[2]] = readDotenvValue(match[3]);
+        values[match[2]] = readDotenvValue(match[3])
       }
     }
-    return values;
+    return values
   },
-  write(baseText, changes) {
-    const pending = new Map(changes.map((change) => [change.path[0], change.value]));
-    const lines: string[] = [];
+  write (baseText, changes) {
+    const pending = new Map(changes.map(change => [change.path[0], change.value]))
+    const lines: string[] = []
     for (const line of baseText.split(/\r?\n/)) {
-      const match = DOTENV_LINE.exec(line);
+      const match = DOTENV_LINE.exec(line)
       if (!match || !pending.has(match[2])) {
-        lines.push(line);
-        continue;
+        lines.push(line)
+        continue
       }
 
-      const value = pending.get(match[2]);
-      pending.delete(match[2]);
+      const value = pending.get(match[2])
+      pending.delete(match[2])
       if (value !== undefined) {
-        lines.push(`${match[1]}${match[2]}=${formatDotenvValue(value)}`);
+        lines.push(`${match[1]}${match[2]}=${formatDotenvValue(value)}`)
       }
     }
 
-    const added = [...pending].filter(([, value]) => value !== undefined).map(([key, value]) => `${key}=${formatDotenvValue(value)}`);
-    const end = lines.length > 0 && lines[lines.length - 1] === "" ? lines.length - 1 : lines.length;
-    lines.splice(end, 0, ...added);
-    return lines.join("\n");
-  },
-};
+    const added = [...pending].filter(([, value]) => value !== undefined).map(([key, value]) => `${key}=${formatDotenvValue(value)}`)
+    const end = lines.length > 0 && lines[lines.length - 1] === '' ? lines.length - 1 : lines.length
+    lines.splice(end, 0, ...added)
+    return lines.join('\n')
+  }
+}
 
 const FORMATS: [RegExp, ConfigFormat][] = [
   [/\.ya?ml$/, YAML_FORMAT],
   [/\.json$/, JSON_FORMAT],
-  [/\.env$/, DOTENV_FORMAT],
-];
+  [/\.env$/, DOTENV_FORMAT]
+]
 
 /**
  * Gives the format of a configuration file whose keys can be compared and merged.
@@ -230,8 +230,8 @@ const FORMATS: [RegExp, ConfigFormat][] = [
  * @param filePath - The path of the file.
  * @returns Its format, null when its keys cannot be merged.
  */
-export function configFormatOf(filePath: string): ConfigFormat | null {
-  return FORMATS.find(([pattern]) => pattern.test(filePath))?.[1] ?? null;
+export function configFormatOf (filePath: string): ConfigFormat | null {
+  return FORMATS.find(([pattern]) => pattern.test(filePath))?.[1] ?? null
 }
 
 /**
@@ -243,22 +243,22 @@ export function configFormatOf(filePath: string): ConfigFormat | null {
  * @param remoteText - The CDN copy.
  * @returns The differences, in the order of the keys.
  */
-export function diffConfig(format: ConfigFormat, localText: string, remoteText: string): KeyDifference[] {
-  const differences: KeyDifference[] = [];
+export function diffConfig (format: ConfigFormat, localText: string, remoteText: string): KeyDifference[] {
+  const differences: KeyDifference[] = []
   const walk = (local: Record<string, unknown>, remote: Record<string, unknown>, path: string[]): void => {
     for (const key of new Set([...Object.keys(local), ...Object.keys(remote)])) {
-      const localValue = Object.hasOwn(local, key) ? local[key] : undefined;
-      const remoteValue = Object.hasOwn(remote, key) ? remote[key] : undefined;
+      const localValue = Object.hasOwn(local, key) ? local[key] : undefined
+      const remoteValue = Object.hasOwn(remote, key) ? remote[key] : undefined
       if (isMap(localValue) && isMap(remoteValue)) {
-        walk(localValue, remoteValue, [...path, key]);
+        walk(localValue, remoteValue, [...path, key])
       } else if (!isDeepStrictEqual(localValue, remoteValue)) {
-        differences.push({ path: [...path, key], local: localValue, remote: remoteValue });
+        differences.push({ path: [...path, key], local: localValue, remote: remoteValue })
       }
     }
-  };
+  }
 
-  walk(format.read(localText, "the local copy"), format.read(remoteText, "the CDN copy"), []);
-  return differences;
+  walk(format.read(localText, 'the local copy'), format.read(remoteText, 'the CDN copy'), [])
+  return differences
 }
 
 /**
@@ -272,12 +272,12 @@ export function diffConfig(format: ConfigFormat, localText: string, remoteText: 
  * @param choices - The value chosen for each key.
  * @returns The merged text.
  */
-export function mergeConfig(format: ConfigFormat, baseText: string, baseSide: CopySide, differences: KeyDifference[], choices: KeyChoice[]): string {
-  const chosen = new Map(choices.map((choice) => [JSON.stringify(choice.path), choice.side]));
+export function mergeConfig (format: ConfigFormat, baseText: string, baseSide: CopySide, differences: KeyDifference[], choices: KeyChoice[]): string {
+  const chosen = new Map(choices.map(choice => [JSON.stringify(choice.path), choice.side]))
   const changes = differences
-    .filter((difference) => (chosen.get(JSON.stringify(difference.path)) ?? baseSide) !== baseSide)
-    .map((difference) => ({ path: difference.path, value: baseSide === "local" ? difference.remote : difference.local }));
-  return format.write(baseText, changes);
+    .filter(difference => (chosen.get(JSON.stringify(difference.path)) ?? baseSide) !== baseSide)
+    .map(difference => ({ path: difference.path, value: baseSide === 'local' ? difference.remote : difference.local }))
+  return format.write(baseText, changes)
 }
 
 /**
@@ -288,12 +288,12 @@ export function mergeConfig(format: ConfigFormat, baseText: string, baseSide: Co
  * @param baseSide - The copy the keys without a choice keep.
  * @returns The number of keys taking the local and the CDN values.
  */
-export function countChoices(differences: KeyDifference[], choices: KeyChoice[], baseSide: CopySide): Record<CopySide, number> {
-  const chosen = new Map(choices.map((choice) => [JSON.stringify(choice.path), choice.side]));
-  const counts: Record<CopySide, number> = { local: 0, remote: 0 };
+export function countChoices (differences: KeyDifference[], choices: KeyChoice[], baseSide: CopySide): Record<CopySide, number> {
+  const chosen = new Map(choices.map(choice => [JSON.stringify(choice.path), choice.side]))
+  const counts: Record<CopySide, number> = { local: 0, remote: 0 }
   for (const difference of differences) {
-    counts[chosen.get(JSON.stringify(difference.path)) ?? baseSide] += 1;
+    counts[chosen.get(JSON.stringify(difference.path)) ?? baseSide] += 1
   }
 
-  return counts;
+  return counts
 }

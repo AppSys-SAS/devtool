@@ -1,48 +1,48 @@
 <script setup lang="ts">
-import { computed } from "vue";
-import { isMcpFilesSetting, MCP_ACTIONS, mcpLevelsFor, type McpAction, type McpLevel, type McpRules, type McpTarget } from "@appsys/devtool-shared";
-import McpLevelSelect from "@/components/mcp/McpLevelSelect.vue";
-import { Badge } from "@/components/ui/badge";
-import { changeKey, LEVELS, shortPath, type McpEditMode, type McpLevelChange } from "@/lib/mcp";
+import { computed } from 'vue'
+import { isMcpFilesSetting, MCP_ACTIONS, mcpLevelsFor, type McpAction, type McpLevel, type McpRules, type McpTarget } from '@appsys/devtool-shared'
+import McpLevelSelect from '@/components/mcp/McpLevelSelect.vue'
+import { Badge } from '@/components/ui/badge'
+import { changeKey, LEVELS, shortPath, type McpEditMode, type McpLevelChange } from '@/lib/mcp'
 
 const props = defineProps<{
-  label: string;
+  label: string
   /** What the row is, such as a section, a command or a script. */
-  kind: string;
-  rules: McpRules;
+  kind: string
+  rules: McpRules
   /** The actions shown. */
-  actions: readonly McpAction[];
-  depth: number;
+  actions: readonly McpAction[]
+  depth: number
   /** Names the row in the grants, `<action>:<grantId>` being granted always. */
-  grantId?: string;
+  grantId?: string
   /** The keys of the grants kept always. */
-  granted: ReadonlySet<string>;
+  granted: ReadonlySet<string>
   /** Where the setting of the row is written, absent when it cannot be changed. */
-  target?: McpTarget;
+  target?: McpTarget
   /** The levels of a setting being a level itself, every action of the row changing it; absent for an `mcp` setting. */
-  levels?: readonly McpLevel[];
+  levels?: readonly McpLevel[]
   /** Shown in place of the name of the action, for a setting being a level itself. */
-  caption?: string;
+  caption?: string
   /** Where changes are written while the page is in edit mode, null outside of it. */
-  edit: McpEditMode | null;
-}>();
+  edit: McpEditMode | null
+}>()
 
-const file = computed(() => (props.edit?.file === "local" ? props.edit.localFile : props.target?.declaredIn) ?? null);
-const files = computed(() => isMcpFilesSetting(props.target?.path ?? []));
+const file = computed(() => (props.edit?.file === 'local' ? props.edit.localFile : props.target?.declaredIn) ?? null)
+const files = computed(() => isMcpFilesSetting(props.target?.path ?? []))
 const blocked = computed(() => {
   if (!props.target) {
-    return "Declared by the devtool itself";
+    return 'Declared by the devtool itself'
   }
-  return file.value ? null : props.edit?.file === "local" ? "No personal override is loaded" : "Declared in the personal override only";
-});
+  return file.value ? null : props.edit?.file === 'local' ? 'No personal override is loaded' : 'Declared in the personal override only'
+})
 
 /**
  * Gives the change waiting for an action of the row.
  * @param action The action.
  * @returns The change, undefined when the action is not changed.
  */
-function staged(action: McpAction): McpLevelChange | undefined {
-  return props.target ? props.edit?.staged.get(changeKey(props.target.path, props.levels ? null : action)) : undefined;
+function staged (action: McpAction): McpLevelChange | undefined {
+  return props.target ? props.edit?.staged.get(changeKey(props.target.path, props.levels ? null : action)) : undefined
 }
 
 /**
@@ -50,9 +50,9 @@ function staged(action: McpAction): McpLevelChange | undefined {
  * @param action The action.
  * @param level The level, null to inherit it.
  */
-function change(action: McpAction, level: McpLevel | null): void {
+function change (action: McpAction, level: McpLevel | null): void {
   if (props.target && props.edit) {
-    props.edit.stage({ path: props.target.path, action: props.levels ? null : action, level, file: props.edit.file });
+    props.edit.stage({ path: props.target.path, action: props.levels ? null : action, level, file: props.edit.file })
   }
 }
 </script>

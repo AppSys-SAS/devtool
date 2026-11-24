@@ -1,15 +1,15 @@
 <script setup lang="ts">
-import { TriangleAlert } from "@lucide/vue";
-import type { PortConflict, PortConflictAction } from "@appsys/devtool-shared";
-import { Button } from "@/components/ui/button";
+import { TriangleAlert } from '@lucide/vue'
+import type { PortConflict, PortConflictAction } from '@appsys/devtool-shared'
+import { Button } from '@/components/ui/button'
 
 defineProps<{
-  conflict: PortConflict;
-}>();
+  conflict: PortConflict
+}>()
 
 const emit = defineEmits<{
-  resolve: [action: PortConflictAction];
-}>();
+  resolve: [action: PortConflictAction]
+}>()
 </script>
 
 <template>

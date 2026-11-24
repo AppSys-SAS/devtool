@@ -1,105 +1,105 @@
 <script setup lang="ts">
-import { computed, shallowRef, watch } from "vue";
-import { onBeforeRouteLeave, onBeforeRouteUpdate, type RouteLocationNormalized, useRoute, useRouter } from "vue-router";
-import { useEventListener } from "@vueuse/core";
-import { AGENT_SKILL_FILE, agentSkillFolderOf, type DirectoryExtra, type FileEntryPayload } from "@appsys/devtool-shared";
-import CodeEditor from "@/components/CodeEditor.vue";
-import ConfirmDialog from "@/components/ConfirmDialog.vue";
-import AgentSkillEditor from "@/components/files/AgentSkillEditor.vue";
-import MarkdownPreview from "@/components/files/MarkdownPreview.vue";
-import FileExplorer from "@/components/files/FileExplorer.vue";
-import FileHeader from "@/components/files/FileHeader.vue";
-import PromptDialog from "@/components/PromptDialog.vue";
-import SidebarToggle from "@/components/SidebarToggle.vue";
-import { useEditedFile } from "@/composables/useEditedFile";
-import { runDirectoryCommand } from "@/lib/directory-commands";
-import configStore from "@/stores/config";
-import filesStore from "@/stores/files";
-import wsStore from "@/stores/ws";
+import { computed, shallowRef, watch } from 'vue'
+import { onBeforeRouteLeave, onBeforeRouteUpdate, type RouteLocationNormalized, useRoute, useRouter } from 'vue-router'
+import { useEventListener } from '@vueuse/core'
+import { AGENT_SKILL_FILE, agentSkillFolderOf, type DirectoryExtra, type FileEntryPayload } from '@appsys/devtool-shared'
+import CodeEditor from '@/components/CodeEditor.vue'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
+import AgentSkillEditor from '@/components/files/AgentSkillEditor.vue'
+import MarkdownPreview from '@/components/files/MarkdownPreview.vue'
+import FileExplorer from '@/components/files/FileExplorer.vue'
+import FileHeader from '@/components/files/FileHeader.vue'
+import PromptDialog from '@/components/PromptDialog.vue'
+import SidebarToggle from '@/components/SidebarToggle.vue'
+import { useEditedFile } from '@/composables/useEditedFile'
+import { runDirectoryCommand } from '@/lib/directory-commands'
+import configStore from '@/stores/config'
+import filesStore from '@/stores/files'
+import wsStore from '@/stores/ws'
 
 const props = withDefaults(
   defineProps<{
-    space: string;
-    name: string;
-    commands?: DirectoryExtra[];
-    restore?: DirectoryExtra | null;
-    projectSlug?: string | null;
-    directorySlug?: string | null;
+    space: string
+    name: string
+    commands?: DirectoryExtra[]
+    restore?: DirectoryExtra | null
+    projectSlug?: string | null
+    directorySlug?: string | null
   }>(),
-  { commands: () => [], restore: null, projectSlug: null, directorySlug: null },
-);
+  { commands: () => [], restore: null, projectSlug: null, directorySlug: null }
+)
 
-const MARKDOWN_EXTENSION = /\.(md|markdown)$/i;
+const MARKDOWN_EXTENSION = /\.(md|markdown)$/i
 
-const route = useRoute();
-const router = useRouter();
+const route = useRoute()
+const router = useRouter()
 
-const tree = computed(() => filesStore.trees.value[props.space] ?? null);
-const filePaths = computed(() => tree.value?.entries.filter((entry) => entry.kind === "file").map((entry) => entry.path) ?? []);
+const tree = computed(() => filesStore.trees.value[props.space] ?? null)
+const filePaths = computed(() => tree.value?.entries.filter(entry => entry.kind === 'file').map(entry => entry.path) ?? [])
 const path = computed(() => {
-  const asked = route.query.path;
-  if (typeof asked === "string" && filePaths.value.includes(asked)) {
-    return asked;
+  const asked = route.query.path
+  if (typeof asked === 'string' && filePaths.value.includes(asked)) {
+    return asked
   }
-  return tree.value && !tree.value.editable ? (filePaths.value[0] ?? null) : null;
-});
-const { file, draft, dirty, saving, save, revert } = useEditedFile(() => props.space, path);
-const skillFolder = computed(() => (tree.value?.agentSkills && path.value ? agentSkillFolderOf(path.value) : null));
-const markdown = computed(() => MARKDOWN_EXTENSION.test(path.value ?? ""));
-const preview = shallowRef(false);
+  return tree.value && !tree.value.editable ? (filePaths.value[0] ?? null) : null
+})
+const { file, draft, dirty, saving, save, revert } = useEditedFile(() => props.space, path)
+const skillFolder = computed(() => (tree.value?.agentSkills && path.value ? agentSkillFolderOf(path.value) : null))
+const markdown = computed(() => MARKDOWN_EXTENSION.test(path.value ?? ''))
+const preview = shallowRef(false)
 
-const leaveOpen = shallowRef(false);
-let pendingLeave: string | null = null;
-const pendingSelect = shallowRef<string | null>(null);
+const leaveOpen = shallowRef(false)
+let pendingLeave: string | null = null
+const pendingSelect = shallowRef<string | null>(null)
 
-const promptOpen = shallowRef(false);
-const promptTitle = shallowRef("");
-const promptLabel = shallowRef("");
-const promptValue = shallowRef("");
-let promptAction: (value: string) => void = () => undefined;
+const promptOpen = shallowRef(false)
+const promptTitle = shallowRef('')
+const promptLabel = shallowRef('')
+const promptValue = shallowRef('')
+let promptAction: (value: string) => void = () => undefined
 
-const removeOpen = shallowRef(false);
-const removeTarget = shallowRef<{ path: string; kind: FileEntryPayload["kind"] } | null>(null);
+const removeOpen = shallowRef(false)
+const removeTarget = shallowRef<{ path: string, kind: FileEntryPayload['kind'] } | null>(null)
 
 watch(
   [() => props.space, wsStore.connected, configStore.projects],
   ([space, connected]) => {
     if (connected) {
-      wsStore.filesList(space);
+      wsStore.filesList(space)
     }
   },
-  { immediate: true },
-);
+  { immediate: true }
+)
 
-watch(filePaths, (paths) => {
+watch(filePaths, paths => {
   if (pendingSelect.value && paths.includes(pendingSelect.value)) {
-    void router.push({ query: { path: pendingSelect.value } });
-    pendingSelect.value = null;
+    void router.push({ query: { path: pendingSelect.value } })
+    pendingSelect.value = null
   }
-});
+})
 
 /**
  * Holds a navigation away from a changed draft until the developer agrees to discard it.
  * @param to Where the navigation goes.
  * @returns Whether the navigation goes on.
  */
-function guardLeave(to: RouteLocationNormalized): boolean {
+function guardLeave (to: RouteLocationNormalized): boolean {
   if (!dirty.value) {
-    return true;
+    return true
   }
 
-  pendingLeave = to.fullPath;
-  leaveOpen.value = true;
-  return false;
+  pendingLeave = to.fullPath
+  leaveOpen.value = true
+  return false
 }
 
 /**
  * Discards the draft and goes on with the held navigation.
  */
-function discardAndLeave(): void {
-  revert();
+function discardAndLeave (): void {
+  revert()
   if (pendingLeave) {
-    void router.push(pendingLeave);
+    void router.push(pendingLeave)
   }
 }
 
@@ -110,12 +110,12 @@ function discardAndLeave(): void {
  * @param value The path proposed.
  * @param action Runs with the path confirmed.
  */
-function askPath(title: string, label: string, value: string, action: (value: string) => void): void {
-  promptTitle.value = title;
-  promptLabel.value = label;
-  promptValue.value = value;
-  promptAction = action;
-  promptOpen.value = true;
+function askPath (title: string, label: string, value: string, action: (value: string) => void): void {
+  promptTitle.value = title
+  promptLabel.value = label
+  promptValue.value = value
+  promptAction = action
+  promptOpen.value = true
 }
 
 /**
@@ -124,28 +124,28 @@ function askPath(title: string, label: string, value: string, action: (value: st
  * @param parent The folder it goes in, empty for the root.
  * @param kind Whether a file or a folder is created.
  */
-function create(parent: string, kind: FileEntryPayload["kind"]): void {
-  const skill = Boolean(tree.value?.agentSkills) && !parent && kind === "directory";
-  askPath(skill ? "New skill" : kind === "file" ? "New file" : "New folder", "Create", parent ? `${parent}/` : "", (value) => {
-    wsStore.fileCreate(props.space, value, kind);
-    if (kind === "file" || skill) {
-      pendingSelect.value = skill ? `${value}/${AGENT_SKILL_FILE}` : value;
+function create (parent: string, kind: FileEntryPayload['kind']): void {
+  const skill = Boolean(tree.value?.agentSkills) && !parent && kind === 'directory'
+  askPath(skill ? 'New skill' : kind === 'file' ? 'New file' : 'New folder', 'Create', parent ? `${parent}/` : '', value => {
+    wsStore.fileCreate(props.space, value, kind)
+    if (kind === 'file' || skill) {
+      pendingSelect.value = skill ? `${value}/${AGENT_SKILL_FILE}` : value
     }
-  });
+  })
 }
 
 /**
  * Asks for the new path of a file or folder, then renames it, following the open file.
  * @param from The current path.
  */
-function rename(from: string): void {
-  askPath("Rename or move", "Rename", from, (to) => {
-    wsStore.fileRename(props.space, from, to);
-    const current = path.value;
+function rename (from: string): void {
+  askPath('Rename or move', 'Rename', from, to => {
+    wsStore.fileRename(props.space, from, to)
+    const current = path.value
     if (current === from || current?.startsWith(`${from}/`)) {
-      pendingSelect.value = `${to}${current.slice(from.length)}`;
+      pendingSelect.value = `${to}${current.slice(from.length)}`
     }
-  });
+  })
 }
 
 /**
@@ -153,17 +153,17 @@ function rename(from: string): void {
  * @param target The path of the file or folder.
  * @param kind Whether it is a file or a folder.
  */
-function askRemove(target: string, kind: FileEntryPayload["kind"]): void {
-  removeTarget.value = { path: target, kind };
-  removeOpen.value = true;
+function askRemove (target: string, kind: FileEntryPayload['kind']): void {
+  removeTarget.value = { path: target, kind }
+  removeOpen.value = true
 }
 
 /**
  * Removes the file or folder confirmed.
  */
-function remove(): void {
+function remove (): void {
   if (removeTarget.value) {
-    wsStore.fileRemove(props.space, removeTarget.value.path);
+    wsStore.fileRemove(props.space, removeTarget.value.path)
   }
 }
 
@@ -172,20 +172,20 @@ function remove(): void {
  * in a dialog.
  * @param command The command.
  */
-function run(command: DirectoryExtra): void {
-  const space = props.space;
+function run (command: DirectoryExtra): void {
+  const space = props.space
   if (props.projectSlug && props.directorySlug) {
-    runDirectoryCommand(props.projectSlug, props.directorySlug, command, { onFinished: () => wsStore.filesList(space) });
+    runDirectoryCommand(props.projectSlug, props.directorySlug, command, { onFinished: () => wsStore.filesList(space) })
   }
 }
 
-onBeforeRouteLeave(guardLeave);
-onBeforeRouteUpdate(guardLeave);
-useEventListener(window, "beforeunload", (event: BeforeUnloadEvent) => {
+onBeforeRouteLeave(guardLeave)
+onBeforeRouteUpdate(guardLeave)
+useEventListener(window, 'beforeunload', (event: BeforeUnloadEvent) => {
   if (dirty.value) {
-    event.preventDefault();
+    event.preventDefault()
   }
-});
+})
 </script>
 
 <template>
@@ -208,12 +208,12 @@ useEventListener(window, "beforeunload", (event: BeforeUnloadEvent) => {
       class="flex min-w-0 flex-1 flex-col"
     >
       <FileHeader
+        v-model:preview="preview"
         :root="tree?.root ?? ''"
         :file="file"
         :dirty="dirty"
         :saving="saving"
         :previewable="markdown && !file.binary"
-        v-model:preview="preview"
         @save="save"
         @revert="revert"
       />
@@ -270,7 +270,9 @@ useEventListener(window, "beforeunload", (event: BeforeUnloadEvent) => {
     >
       <p>
         <span class="font-mono">{{ removeTarget?.path }}</span>
-        <template v-if="removeTarget?.kind === 'directory'"> and everything it holds</template>
+        <template v-if="removeTarget?.kind === 'directory'">
+          and everything it holds
+        </template>
         will be deleted from the disk.
       </p>
     </ConfirmDialog>

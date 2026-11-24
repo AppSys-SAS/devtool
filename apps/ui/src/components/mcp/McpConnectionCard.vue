@@ -1,25 +1,25 @@
 <script setup lang="ts">
-import { computed } from "vue";
-import { Icon } from "@iconify/vue";
-import { Unplug } from "@lucide/vue";
-import type { McpClientStatus } from "@appsys/devtool-shared";
-import McpSetupGuide from "@/components/mcp/McpSetupGuide.vue";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import mcpStore from "@/stores/mcp";
+import { computed } from 'vue'
+import { Icon } from '@iconify/vue'
+import { Unplug } from '@lucide/vue'
+import type { McpClientStatus } from '@appsys/devtool-shared'
+import McpSetupGuide from '@/components/mcp/McpSetupGuide.vue'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import mcpStore from '@/stores/mcp'
 
 const STATUSES: Record<McpClientStatus, string> = {
-  pending: "not accepted yet",
-  session: "accepted for the session",
-  always: "accepted always",
-  config: "accepted by the configuration",
-  denied: "refused",
-};
+  pending: 'not accepted yet',
+  session: 'accepted for the session',
+  always: 'accepted always',
+  config: 'accepted by the configuration',
+  denied: 'refused'
+}
 
-const state = mcpStore.state;
-const remembered = computed(() => state.value?.clients.filter((client) => client.source === "always") ?? []);
-const configured = computed(() => state.value?.clients.filter((client) => client.source !== "always") ?? []);
+const state = mcpStore.state
+const remembered = computed(() => state.value?.clients.filter(client => client.source === 'always') ?? [])
+const configured = computed(() => state.value?.clients.filter(client => client.source !== 'always') ?? [])
 </script>
 
 <template>

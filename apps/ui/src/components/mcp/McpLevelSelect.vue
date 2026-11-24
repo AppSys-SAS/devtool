@@ -1,26 +1,26 @@
 <script setup lang="ts">
-import { ChevronDown } from "@lucide/vue";
-import { DropdownMenuContent, DropdownMenuItem, DropdownMenuPortal, DropdownMenuRoot, DropdownMenuSeparator, DropdownMenuTrigger } from "reka-ui";
-import type { McpLevel } from "@appsys/devtool-shared";
-import { Badge } from "@/components/ui/badge";
-import { LEVELS } from "@/lib/mcp";
+import { ChevronDown } from '@lucide/vue'
+import { DropdownMenuContent, DropdownMenuItem, DropdownMenuPortal, DropdownMenuRoot, DropdownMenuSeparator, DropdownMenuTrigger } from 'reka-ui'
+import type { McpLevel } from '@appsys/devtool-shared'
+import { Badge } from '@/components/ui/badge'
+import { LEVELS } from '@/lib/mcp'
 
 defineProps<{
   /** The level shown, null for a level about to be inherited. */
-  level: McpLevel | null;
+  level: McpLevel | null
   /** Where the level comes from, or that it is changed. */
-  title: string;
+  title: string
   /** Whether the level is a change not written yet. */
-  staged: boolean;
+  staged: boolean
   /** The levels offered. */
-  levels: readonly McpLevel[];
+  levels: readonly McpLevel[]
   /** Why the level cannot be changed, null when it can. */
-  blocked: string | null;
-}>();
+  blocked: string | null
+}>()
 
 const emit = defineEmits<{
-  select: [level: McpLevel | null];
-}>();
+  select: [level: McpLevel | null]
+}>()
 </script>
 
 <template>

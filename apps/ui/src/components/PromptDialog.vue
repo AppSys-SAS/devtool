@@ -7,30 +7,30 @@ import {
   AlertDialogOverlay,
   AlertDialogPortal,
   AlertDialogRoot,
-  AlertDialogTitle,
-} from "reka-ui";
-import { buttonVariants } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+  AlertDialogTitle
+} from 'reka-ui'
+import { buttonVariants } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 
 defineProps<{
-  title: string;
-  confirmLabel: string;
-}>();
+  title: string
+  confirmLabel: string
+}>()
 
-const open = defineModel<boolean>("open", { required: true });
+const open = defineModel<boolean>('open', { required: true })
 
-const value = defineModel<string>({ required: true });
+const value = defineModel<string>({ required: true })
 
 const emit = defineEmits<{
-  confirm: [];
-}>();
+  confirm: []
+}>()
 
 /**
  * Confirms the value typed and closes the dialog.
  */
-function submit(): void {
-  emit("confirm");
-  open.value = false;
+function submit (): void {
+  emit('confirm')
+  open.value = false
 }
 </script>
 

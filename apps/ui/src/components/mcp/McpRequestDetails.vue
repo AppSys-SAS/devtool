@@ -1,30 +1,30 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent } from "vue";
-import { useIntervalFn, useNow } from "@vueuse/core";
-import { Icon } from "@iconify/vue";
-import { Clock } from "@lucide/vue";
-import type { CommandInputValue, McpAnswer, McpRequestPayload } from "@appsys/devtool-shared";
-import CommandInputsForm from "@/components/CommandInputsForm.vue";
-import McpAnswerButtons from "@/components/mcp/McpAnswerButtons.vue";
-import McpDetailList from "@/components/mcp/McpDetailList.vue";
-import { Badge } from "@/components/ui/badge";
-import { findMcpCommand } from "@/lib/mcp";
-import configStore from "@/stores/config";
-import mcpStore from "@/stores/mcp";
+import { computed, defineAsyncComponent } from 'vue'
+import { useIntervalFn, useNow } from '@vueuse/core'
+import { Icon } from '@iconify/vue'
+import { Clock } from '@lucide/vue'
+import type { CommandInputValue, McpAnswer, McpRequestPayload } from '@appsys/devtool-shared'
+import CommandInputsForm from '@/components/CommandInputsForm.vue'
+import McpAnswerButtons from '@/components/mcp/McpAnswerButtons.vue'
+import McpDetailList from '@/components/mcp/McpDetailList.vue'
+import { Badge } from '@/components/ui/badge'
+import { findMcpCommand } from '@/lib/mcp'
+import configStore from '@/stores/config'
+import mcpStore from '@/stores/mcp'
 
-const McpDiff = defineAsyncComponent(() => import("@/components/mcp/McpDiff.vue"));
+const McpDiff = defineAsyncComponent(() => import('@/components/mcp/McpDiff.vue'))
 
 const props = defineProps<{
-  request: McpRequestPayload;
-}>();
+  request: McpRequestPayload
+}>()
 
 const emit = defineEmits<{
-  answer: [answer: McpAnswer, inputs: CommandInputValue[] | null];
-}>();
+  answer: [answer: McpAnswer, inputs: CommandInputValue[] | null]
+}>()
 
-const now = useNow({ scheduler: (tick) => useIntervalFn(tick, 1000) });
-const remaining = computed(() => Math.max(0, Math.ceil((props.request.expiresAt - now.value.getTime()) / 1000)));
-const command = computed(() => (props.request.command && props.request.inputs ? findMcpCommand(configStore.projects.value, props.request.command) : null));
+const now = useNow({ scheduler: tick => useIntervalFn(tick, 1000) })
+const remaining = computed(() => Math.max(0, Math.ceil((props.request.expiresAt - now.value.getTime()) / 1000)))
+const command = computed(() => (props.request.command && props.request.inputs ? findMcpCommand(configStore.projects.value, props.request.command) : null))
 </script>
 
 <template>

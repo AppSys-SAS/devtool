@@ -1,48 +1,48 @@
 <script setup lang="ts">
-import { type Component, computed, ref } from "vue";
-import { Icon } from "@iconify/vue";
-import { useLocalStorage } from "@vueuse/core";
-import { ChevronDown, Sparkles } from "@lucide/vue";
-import { DropdownMenuContent, DropdownMenuItem, DropdownMenuPortal, DropdownMenuRoot, DropdownMenuTrigger } from "reka-ui";
-import type { AgentDefinition } from "@appsys/devtool-shared";
-import AgentChooserDialog from "@/components/agents/AgentChooserDialog.vue";
-import AgentOption from "@/components/agents/AgentOption.vue";
-import { Button } from "@/components/ui/button";
-import configStore from "@/stores/config";
+import { type Component, computed, ref } from 'vue'
+import { Icon } from '@iconify/vue'
+import { useLocalStorage } from '@vueuse/core'
+import { ChevronDown, Sparkles } from '@lucide/vue'
+import { DropdownMenuContent, DropdownMenuItem, DropdownMenuPortal, DropdownMenuRoot, DropdownMenuTrigger } from 'reka-ui'
+import type { AgentDefinition } from '@appsys/devtool-shared'
+import AgentChooserDialog from '@/components/agents/AgentChooserDialog.vue'
+import AgentOption from '@/components/agents/AgentOption.vue'
+import { Button } from '@/components/ui/button'
+import configStore from '@/stores/config'
 
 defineProps<{
   /** What the button does, its text or, with an icon, its title. */
-  label: string;
+  label: string
   /** The icon shown alone in place of the text and of the icon of the agent. */
-  icon?: Component;
-}>();
+  icon?: Component
+}>()
 
 const emit = defineEmits<{
-  start: [agent: AgentDefinition];
-}>();
+  start: [agent: AgentDefinition]
+}>()
 
-const lastSlug = useLocalStorage<string | null>("devtool-last-agent", null);
-const agents = computed(() => configStore.agents.value);
-const last = computed(() => agents.value.find((agent) => agent.slug === lastSlug.value) ?? null);
-const choosing = ref(false);
+const lastSlug = useLocalStorage<string | null>('devtool-last-agent', null)
+const agents = computed(() => configStore.agents.value)
+const last = computed(() => agents.value.find(agent => agent.slug === lastSlug.value) ?? null)
+const choosing = ref(false)
 
 /**
  * Starts an agent, which becomes the one of the button.
  * @param agent The agent.
  */
-function start(agent: AgentDefinition): void {
-  lastSlug.value = agent.slug;
-  emit("start", agent);
+function start (agent: AgentDefinition): void {
+  lastSlug.value = agent.slug
+  emit('start', agent)
 }
 
 /**
  * Starts the agent used last, or asks which one when none is known.
  */
-function startLast(): void {
+function startLast (): void {
   if (last.value) {
-    start(last.value);
+    start(last.value)
   } else {
-    choosing.value = true;
+    choosing.value = true
   }
 }
 </script>

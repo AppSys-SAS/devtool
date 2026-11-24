@@ -1,30 +1,30 @@
 <script setup lang="ts">
-import { computed, shallowRef } from "vue";
-import { Trash2 } from "@lucide/vue";
-import type { McpDecision, McpGrantPayload } from "@appsys/devtool-shared";
-import ConfirmDialog from "@/components/ConfirmDialog.vue";
-import McpHistoryRow from "@/components/mcp/McpHistoryRow.vue";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Select } from "@/components/ui/select";
-import { DECISIONS } from "@/lib/mcp";
-import configStore from "@/stores/config";
-import mcpStore from "@/stores/mcp";
+import { computed, shallowRef } from 'vue'
+import { Trash2 } from '@lucide/vue'
+import type { McpDecision, McpGrantPayload } from '@appsys/devtool-shared'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
+import McpHistoryRow from '@/components/mcp/McpHistoryRow.vue'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Select } from '@/components/ui/select'
+import { DECISIONS } from '@/lib/mcp'
+import configStore from '@/stores/config'
+import mcpStore from '@/stores/mcp'
 
-const ALL = "*";
-const SHOWN = 300;
+const ALL = '*'
+const SHOWN = 300
 
-const search = shallowRef("");
-const client = shallowRef(ALL);
-const tool = shallowRef(ALL);
-const decision = shallowRef(ALL);
-const clearOpen = shallowRef(false);
+const search = shallowRef('')
+const client = shallowRef(ALL)
+const tool = shallowRef(ALL)
+const decision = shallowRef(ALL)
+const clearOpen = shallowRef(false)
 
-const history = mcpStore.history;
-const grants = computed(() => mcpStore.state.value?.grants ?? []);
-const sessions = computed(() => new Set(mcpStore.state.value?.sessions.map((session) => session.id)));
-const terminals = computed(() => new Set(configStore.commandStreams.value.map((stream) => stream.slug)));
+const history = mcpStore.history
+const grants = computed(() => mcpStore.state.value?.grants ?? [])
+const sessions = computed(() => new Set(mcpStore.state.value?.sessions.map(session => session.id)))
+const terminals = computed(() => new Set(configStore.commandStreams.value.map(stream => stream.slug)))
 
 /**
  * Lists the distinct values of a field of the history as options of a filter.
@@ -33,8 +33,8 @@ const terminals = computed(() => new Set(configStore.commandStreams.value.map((s
  * @param name Gives the label of a value.
  * @returns The options.
  */
-function options(values: string[], label: string, name: (value: string) => string = (value) => value): { label: string; value: string }[] {
-  return [{ label, value: ALL }, ...[...new Set(values)].sort().map((value) => ({ label: name(value), value }))];
+function options (values: string[], label: string, name: (value: string) => string = value => value): { label: string, value: string }[] {
+  return [{ label, value: ALL }, ...[...new Set(values)].sort().map(value => ({ label: name(value), value }))]
 }
 
 /**
@@ -42,35 +42,35 @@ function options(values: string[], label: string, name: (value: string) => strin
  * @param historyId The call.
  * @param scope How long the grant lasts.
  */
-function grant(historyId: string, scope: "session" | "always"): void {
-  mcpStore.grant(historyId, scope);
+function grant (historyId: string, scope: 'session' | 'always'): void {
+  mcpStore.grant(historyId, scope)
 }
 
 /**
  * Removes a grant.
  * @param grant The grant.
  */
-function revoke(grant: McpGrantPayload): void {
-  mcpStore.revoke(grant.key, grant.scope, grant.session);
+function revoke (grant: McpGrantPayload): void {
+  mcpStore.revoke(grant.key, grant.scope, grant.session)
 }
 
-const clients = computed(() => options(history.value.map((entry) => entry.client), "Every client", (name) => mcpStore.clientName(name)));
-const tools = computed(() => options(history.value.map((entry) => entry.tool), "Every tool"));
-const decisions = [{ label: "Every decision", value: ALL }, ...Object.entries(DECISIONS).map(([value, { label }]) => ({ label, value }))];
+const clients = computed(() => options(history.value.map(entry => entry.client), 'Every client', name => mcpStore.clientName(name)))
+const tools = computed(() => options(history.value.map(entry => entry.tool), 'Every tool'))
+const decisions = [{ label: 'Every decision', value: ALL }, ...Object.entries(DECISIONS).map(([value, { label }]) => ({ label, value }))]
 
 const entries = computed(() => {
-  const text = search.value.trim().toLowerCase();
+  const text = search.value.trim().toLowerCase()
   return history.value
     .filter(
-      (entry) =>
-        (client.value === ALL || entry.client === client.value) &&
-        (tool.value === ALL || entry.tool === tool.value) &&
-        (decision.value === ALL || entry.decision === (decision.value as McpDecision)) &&
-        (!text || [entry.target, entry.message, ...entry.details.map((detail) => detail.value)].some((value) => value?.toLowerCase().includes(text))),
+      entry =>
+        (client.value === ALL || entry.client === client.value)
+        && (tool.value === ALL || entry.tool === tool.value)
+        && (decision.value === ALL || entry.decision === (decision.value as McpDecision))
+        && (!text || [entry.target, entry.message, ...entry.details.map(detail => detail.value)].some(value => value?.toLowerCase().includes(text)))
     )
     .slice(-SHOWN)
-    .reverse();
-});
+    .reverse()
+})
 </script>
 
 <template>

@@ -1,25 +1,25 @@
-import http from "node:http";
-import type { Http2ServerRequest } from "node:http2";
-import https from "node:https";
-import { logger } from "@appsys/devtool-shared";
-import type { IncomingMessage, OutgoingHttpHeaders } from "node:http";
-import type { Socket } from "node:net";
-import type { HostAccess, RuntimeConfig } from "@appsys/devtool-shared";
-import { allows, clientAddressOf } from "./access.js";
+import http from 'node:http'
+import type { Http2ServerRequest } from 'node:http2'
+import https from 'node:https'
+import { logger } from '@appsys/devtool-shared'
+import type { IncomingMessage, OutgoingHttpHeaders } from 'node:http'
+import type { Socket } from 'node:net'
+import type { HostAccess, RuntimeConfig } from '@appsys/devtool-shared'
+import { allows, clientAddressOf } from './access.js'
 
-const httpAgent = new http.Agent({ keepAlive: true });
-const httpsAgent = new https.Agent({ keepAlive: true });
+const httpAgent = new http.Agent({ keepAlive: true })
+const httpsAgent = new https.Agent({ keepAlive: true })
 
 /** Headers describing a single connection, never forwarded from one connection to another. */
-const CONNECTION_HEADERS = new Set(["connection", "keep-alive", "proxy-connection", "transfer-encoding", "upgrade", "te", "http2-settings", "host"]);
+const CONNECTION_HEADERS = new Set(['connection', 'keep-alive', 'proxy-connection', 'transfer-encoding', 'upgrade', 'te', 'http2-settings', 'host'])
 
 /** A request the load balancer receives, over HTTP/1.1 or HTTP/2. */
-export type ProxyRequest = IncomingMessage | Http2ServerRequest;
+export type ProxyRequest = IncomingMessage | Http2ServerRequest
 
 /** The response to a request the load balancer receives, over HTTP/1.1 or HTTP/2. */
 export interface ProxyResponse extends NodeJS.WritableStream {
-  readonly headersSent: boolean;
-  writeHead(statusCode: number, headers?: OutgoingHttpHeaders): unknown;
+  readonly headersSent: boolean
+  writeHead(statusCode: number, headers?: OutgoingHttpHeaders): unknown
 }
 
 /**
@@ -27,9 +27,9 @@ export interface ProxyResponse extends NodeJS.WritableStream {
  * @param request The request.
  * @returns The host name, lower case, without port.
  */
-export function requestHost(request: ProxyRequest): string {
-  const authority = request.headers[":authority"] ?? request.headers.host ?? "";
-  return String(authority).split(":")[0].toLowerCase();
+export function requestHost (request: ProxyRequest): string {
+  const authority = request.headers[':authority'] ?? request.headers.host ?? ''
+  return String(authority).split(':')[0].toLowerCase()
 }
 
 /**
@@ -40,27 +40,27 @@ export function requestHost(request: ProxyRequest): string {
  * of the response.
  * @returns The headers to send on.
  */
-function responseHeaders(response: IncomingMessage, frameAncestor: string | null): OutgoingHttpHeaders {
-  const headers: OutgoingHttpHeaders = {};
+function responseHeaders (response: IncomingMessage, frameAncestor: string | null): OutgoingHttpHeaders {
+  const headers: OutgoingHttpHeaders = {}
   for (const [name, value] of Object.entries(response.headers)) {
     if (value !== undefined && !CONNECTION_HEADERS.has(name)) {
-      headers[name] = value;
+      headers[name] = value
     }
   }
   if (!frameAncestor) {
-    return headers;
+    return headers
   }
 
-  delete headers["x-frame-options"];
-  const policies = [headers["content-security-policy"] ?? []].flat().flatMap((value) => String(value).split(",")).map((policy) =>
+  delete headers['x-frame-options']
+  const policies = [headers['content-security-policy'] ?? []].flat().flatMap(value => String(value).split(',')).map(policy =>
     policy
-      .split(";")
-      .map((directive) => directive.trim())
-      .filter((directive) => directive && !/^frame-ancestors\b/i.test(directive))
-      .join("; "),
-  );
-  headers["content-security-policy"] = [...policies.filter(Boolean), `frame-ancestors ${frameAncestor}:*`].join(", ");
-  return headers;
+      .split(';')
+      .map(directive => directive.trim())
+      .filter(directive => directive && !/^frame-ancestors\b/i.test(directive))
+      .join('; ')
+  )
+  headers['content-security-policy'] = [...policies.filter(Boolean), `frame-ancestors ${frameAncestor}:*`].join(', ')
+  return headers
 }
 
 /**
@@ -68,65 +68,65 @@ function responseHeaders(response: IncomingMessage, frameAncestor: string | null
  * @param socket The connection.
  * @param response The response.
  */
-function writeHead(socket: Socket, response: IncomingMessage): void {
-  const lines = [`HTTP/1.1 ${response.statusCode ?? 502} ${response.statusMessage ?? ""}`];
+function writeHead (socket: Socket, response: IncomingMessage): void {
+  const lines = [`HTTP/1.1 ${response.statusCode ?? 502} ${response.statusMessage ?? ''}`]
   for (let index = 0; index < response.rawHeaders.length; index += 2) {
-    lines.push(`${response.rawHeaders[index]}: ${response.rawHeaders[index + 1]}`);
+    lines.push(`${response.rawHeaders[index]}: ${response.rawHeaders[index + 1]}`)
   }
-  socket.write(`${lines.join("\r\n")}\r\n\r\n`);
+  socket.write(`${lines.join('\r\n')}\r\n\r\n`)
 }
 
 interface ServerCandidate {
-  slug: string;
-  hosts: string[];
-  targets: Array<{
-    url: string;
-    tls: boolean;
-  }>;
-  path: string | null;
-  prefix: string | null;
-  pathNot: string | null;
-  preserveHost: boolean;
-  access: HostAccess;
-  roundRobinTargetIndex: number;
+  slug: string
+  hosts: string[]
+  targets: {
+    url: string
+    tls: boolean
+  }[]
+  path: string | null
+  prefix: string | null
+  pathNot: string | null
+  preserveHost: boolean
+  access: HostAccess
+  roundRobinTargetIndex: number
 }
 
-function readUiProxyTarget(uiPath: string | undefined): { url: string; tls: boolean } | null {
-  if (typeof uiPath !== "string") {
-    return null;
+function readUiProxyTarget (uiPath: string | undefined): { url: string, tls: boolean } | null {
+  if (typeof uiPath !== 'string') {
+    return null
   }
 
-  const value = uiPath.trim();
+  const value = uiPath.trim()
   if (!value.length) {
-    return null;
+    return null
   }
 
   try {
-    const parsed = new URL(value);
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-      return null;
+    const parsed = new URL(value)
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return null
     }
 
     return {
       url: parsed.toString(),
-      tls: parsed.protocol === "https:",
-    };
+      tls: parsed.protocol === 'https:'
+    }
   } catch {
-    return null;
+    return null
   }
 }
 
 export class DevtoolProxy {
-  private serversAvailable: ServerCandidate[];
+  private serversAvailable: ServerCandidate[]
 
   /** Hosts of the integrations shown in the devtool, which the devtool host may frame. */
-  private framedHosts = new Set<string>();
+  private framedHosts = new Set<string>()
 
   /** The host allowed to frame the integrations, null without a devtool host. */
-  private frameAncestor: string | null = null;
+  private frameAncestor: string | null = null
 
-  constructor() {
-    this.serversAvailable = [];
+  constructor () {
+    this.serversAvailable = []
   }
 
   /**
@@ -134,41 +134,41 @@ export class DevtoolProxy {
    * devtool, each with who may reach it, and the hosts the devtool frames.
    * @param config The configuration.
    */
-  reload(config: RuntimeConfig): void {
-    const nextServers: ServerCandidate[] = [];
-    const integrations = [...config.integrations, ...Object.values(config.projects).flatMap((project) => Object.values(project.directories).flatMap((directory) => directory.integrations))];
-    this.framedHosts = new Set(integrations.filter((integration) => integration.embed).map((integration) => new URL(integration.url).hostname.toLowerCase()));
-    this.frameAncestor = config.adt.host?.toLowerCase() ?? null;
+  reload (config: RuntimeConfig): void {
+    const nextServers: ServerCandidate[] = []
+    const integrations = [...config.integrations, ...Object.values(config.projects).flatMap(project => Object.values(project.directories).flatMap(directory => directory.integrations))]
+    this.framedHosts = new Set(integrations.filter(integration => integration.embed).map(integration => new URL(integration.url).hostname.toLowerCase()))
+    this.frameAncestor = config.adt.host?.toLowerCase() ?? null
 
     for (const [projectSlug, project] of Object.entries(config.projects)) {
       for (const [directorySlug, directory] of Object.entries(project.directories)) {
         for (const [serverSlug, server] of Object.entries(directory.loadBalancer)) {
-          const targets = server.targets.map((url) => ({ url, tls: server.tls || url.startsWith("https://") }));
+          const targets = server.targets.map(url => ({ url, tls: server.tls || url.startsWith('https://') }))
 
           if (!targets.length) {
-            continue;
+            continue
           }
 
           nextServers.push({
             slug: `${projectSlug}:${directorySlug}:${serverSlug}`,
-            hosts: server.hosts.map((host) => host.toLowerCase()),
+            hosts: server.hosts.map(host => host.toLowerCase()),
             targets,
             path: server.path,
             prefix: server.prefix,
             pathNot: server.pathNot,
             preserveHost: server.preserveHost,
             access: server.access,
-            roundRobinTargetIndex: targets.length - 1,
-          });
+            roundRobinTargetIndex: targets.length - 1
+          })
         }
       }
     }
 
     if (config.adt.host) {
-      const uiProxyTarget = readUiProxyTarget(config.adt.uiPath);
-      const targets = [uiProxyTarget ?? { url: `http://127.0.0.1:${config.adt.ports.server}`, tls: true }];
+      const uiProxyTarget = readUiProxyTarget(config.adt.uiPath)
+      const targets = [uiProxyTarget ?? { url: `http://127.0.0.1:${config.adt.ports.server}`, tls: true }]
       nextServers.push({
-        slug: "DEVTOOL:HTTP",
+        slug: 'DEVTOOL:HTTP',
         hosts: [config.adt.host.toLowerCase()],
         targets,
         path: null,
@@ -176,11 +176,11 @@ export class DevtoolProxy {
         pathNot: null,
         preserveHost: false,
         access: config.adt.access,
-        roundRobinTargetIndex: targets.length - 1,
-      });
+        roundRobinTargetIndex: targets.length - 1
+      })
     }
 
-    this.serversAvailable = nextServers;
+    this.serversAvailable = nextServers
   }
 
   /**
@@ -189,12 +189,12 @@ export class DevtoolProxy {
    * @returns `network` when some server of the host is reachable from the network, `local` when none
    * is, null when no server serves the host.
    */
-  accessOf(host: string): HostAccess | null {
-    const servers = this.serversAvailable.filter((candidate) => candidate.hosts.includes(host));
+  accessOf (host: string): HostAccess | null {
+    const servers = this.serversAvailable.filter(candidate => candidate.hosts.includes(host))
     if (!servers.length) {
-      return null;
+      return null
     }
-    return servers.some((server) => server.access === "network") ? "network" : "local";
+    return servers.some(server => server.access === 'network') ? 'network' : 'local'
   }
 
   /**
@@ -204,45 +204,45 @@ export class DevtoolProxy {
    * @param res Response to write to.
    * @returns True when a server matched, the request being proxied or refused.
    */
-  proxyRequest(req: ProxyRequest, res: ProxyResponse): boolean {
-    const host = requestHost(req);
-    const server = this.getMatchServer(host, req.url ?? "/");
+  proxyRequest (req: ProxyRequest, res: ProxyResponse): boolean {
+    const host = requestHost(req)
+    const server = this.getMatchServer(host, req.url ?? '/')
     if (!server) {
-      return false;
+      return false
     }
 
-    const client = clientAddressOf(req.socket);
+    const client = clientAddressOf(req.socket)
     if (!allows(server.access, client)) {
-      logger.warn("Proxy", server.slug, `Refused for ${client}`);
-      res.writeHead(403);
-      res.end("403 Forbidden");
-      return true;
+      logger.warn('Proxy', server.slug, `Refused for ${client}`)
+      res.writeHead(403)
+      res.end('403 Forbidden')
+      return true
     }
 
-    let completed = false;
-    const frameAncestor = this.framedHosts.has(host) ? this.frameAncestor : null;
-    const outgoing = this.openRequest(req, server, this.nextTarget(server), client, false);
-    outgoing.on("response", (response) => {
-      res.writeHead(response.statusCode ?? 502, responseHeaders(response, frameAncestor));
-      response.on("end", () => (completed = true));
-      response.pipe(res);
-    });
-    outgoing.on("error", (error) => {
-      logger.warn("Proxy", server.slug, error.message);
+    let completed = false
+    const frameAncestor = this.framedHosts.has(host) ? this.frameAncestor : null
+    const outgoing = this.openRequest(req, server, this.nextTarget(server), client, false)
+    outgoing.on('response', response => {
+      res.writeHead(response.statusCode ?? 502, responseHeaders(response, frameAncestor))
+      response.on('end', () => (completed = true))
+      response.pipe(res)
+    })
+    outgoing.on('error', error => {
+      logger.warn('Proxy', server.slug, error.message)
       if (res.headersSent) {
-        res.end();
-        return;
+        res.end()
+        return
       }
-      res.writeHead(503);
-      res.end("503 Service Unavailable");
-    });
-    res.on("close", () => {
+      res.writeHead(503)
+      res.end('503 Service Unavailable')
+    })
+    res.on('close', () => {
       if (!completed) {
-        outgoing.destroy();
+        outgoing.destroy()
       }
-    });
-    req.pipe(outgoing);
-    return true;
+    })
+    req.pipe(outgoing)
+    return true
   }
 
   /**
@@ -253,38 +253,38 @@ export class DevtoolProxy {
    * @param head First bytes of the upgraded stream.
    * @returns True when a server matched, the upgrade being proxied or refused.
    */
-  proxyUpgrade(req: IncomingMessage, socket: Socket, head: Buffer): boolean {
-    const server = this.getMatchServer(requestHost(req), req.url ?? "/");
+  proxyUpgrade (req: IncomingMessage, socket: Socket, head: Buffer): boolean {
+    const server = this.getMatchServer(requestHost(req), req.url ?? '/')
     if (!server) {
-      return false;
+      return false
     }
 
-    const client = clientAddressOf(socket);
+    const client = clientAddressOf(socket)
     if (!allows(server.access, client)) {
-      logger.warn("Proxy", server.slug, `Refused for ${client}`);
-      socket.destroy();
-      return true;
+      logger.warn('Proxy', server.slug, `Refused for ${client}`)
+      socket.destroy()
+      return true
     }
 
-    const outgoing = this.openRequest(req, server, this.nextTarget(server), client, true);
-    outgoing.on("upgrade", (response, upstream, upstreamHead) => {
-      writeHead(socket, response);
-      socket.write(upstreamHead);
-      upstream.write(head);
-      upstream.on("error", () => socket.destroy());
-      socket.on("error", () => upstream.destroy());
-      upstream.pipe(socket).pipe(upstream);
-    });
-    outgoing.on("response", (response) => {
-      writeHead(socket, response);
-      response.pipe(socket);
-    });
-    outgoing.on("error", (error) => {
-      logger.warn("Proxy", server.slug, error.message);
-      socket.destroy();
-    });
-    outgoing.end();
-    return true;
+    const outgoing = this.openRequest(req, server, this.nextTarget(server), client, true)
+    outgoing.on('upgrade', (response, upstream, upstreamHead) => {
+      writeHead(socket, response)
+      socket.write(upstreamHead)
+      upstream.write(head)
+      upstream.on('error', () => socket.destroy())
+      socket.on('error', () => upstream.destroy())
+      upstream.pipe(socket).pipe(upstream)
+    })
+    outgoing.on('response', response => {
+      writeHead(socket, response)
+      response.pipe(socket)
+    })
+    outgoing.on('error', error => {
+      logger.warn('Proxy', server.slug, error.message)
+      socket.destroy()
+    })
+    outgoing.end()
+    return true
   }
 
   /**
@@ -297,33 +297,33 @@ export class DevtoolProxy {
    * @param upgrade Whether the request asks for a WebSocket upgrade.
    * @returns The request, its body still to send.
    */
-  private openRequest(req: ProxyRequest, server: ServerCandidate, target: { url: string; tls: boolean }, client: string | undefined, upgrade: boolean): http.ClientRequest {
-    const url = new URL(target.url);
-    const headers: OutgoingHttpHeaders = {};
+  private openRequest (req: ProxyRequest, server: ServerCandidate, target: { url: string, tls: boolean }, client: string | undefined, upgrade: boolean): http.ClientRequest {
+    const url = new URL(target.url)
+    const headers: OutgoingHttpHeaders = {}
     for (const [name, value] of Object.entries(req.headers)) {
-      if (value !== undefined && !name.startsWith(":") && !CONNECTION_HEADERS.has(name)) {
-        headers[name] = value;
+      if (value !== undefined && !name.startsWith(':') && !CONNECTION_HEADERS.has(name)) {
+        headers[name] = value
       }
     }
 
-    const authorityPort = /:(\d+)$/.exec(String(req.headers[":authority"] ?? req.headers.host ?? ""))?.[1];
-    headers.host = server.preserveHost ? requestHost(req) : url.host;
-    headers["x-forwarded-proto"] = target.tls ? "https" : "http";
-    headers["x-forwarded-port"] = authorityPort ?? (target.tls ? "443" : "80");
-    headers["x-forwarded-ssl"] = target.tls ? "on" : "off";
+    const authorityPort = /:(\d+)$/.exec(String(req.headers[':authority'] ?? req.headers.host ?? ''))?.[1]
+    headers.host = server.preserveHost ? requestHost(req) : url.host
+    headers['x-forwarded-proto'] = target.tls ? 'https' : 'http'
+    headers['x-forwarded-port'] = authorityPort ?? (target.tls ? '443' : '80')
+    headers['x-forwarded-ssl'] = target.tls ? 'on' : 'off'
     if (client) {
-      headers["x-forwarded-for"] = client;
+      headers['x-forwarded-for'] = client
     } else {
-      delete headers["x-forwarded-for"];
+      delete headers['x-forwarded-for']
     }
     if (upgrade) {
-      headers.connection = "Upgrade";
-      headers.upgrade = req.headers.upgrade;
+      headers.connection = 'Upgrade'
+      headers.upgrade = req.headers.upgrade
     }
 
-    const path = this.targetPath(url, req.url ?? "/", server);
-    logger.debug("Proxy", `${server.slug}:${target.url}`, path);
-    const secure = url.protocol === "https:";
+    const path = this.targetPath(url, req.url ?? '/', server)
+    logger.debug('Proxy', `${server.slug}:${target.url}`, path)
+    const secure = url.protocol === 'https:'
     return (secure ? https : http).request({
       protocol: url.protocol,
       hostname: url.hostname,
@@ -331,26 +331,26 @@ export class DevtoolProxy {
       method: req.method,
       path,
       headers,
-      agent: upgrade ? false : secure ? httpsAgent : httpAgent,
-    });
+      agent: upgrade ? false : secure ? httpsAgent : httpAgent
+    })
   }
 
-  private getMatchServer(host: string, requestUrl: string): ServerCandidate | null {
-    const servers = this.serversAvailable.filter((candidate) => {
-      const hostMatch = !candidate.hosts.length || candidate.hosts.includes(host);
-      const pathMatch = !candidate.path || requestUrl.startsWith(candidate.path);
-      const pathNotMatch = !candidate.pathNot || !requestUrl.startsWith(candidate.pathNot);
-      return hostMatch && pathMatch && pathNotMatch;
-    });
+  private getMatchServer (host: string, requestUrl: string): ServerCandidate | null {
+    const servers = this.serversAvailable.filter(candidate => {
+      const hostMatch = !candidate.hosts.length || candidate.hosts.includes(host)
+      const pathMatch = !candidate.path || requestUrl.startsWith(candidate.path)
+      const pathNotMatch = !candidate.pathNot || !requestUrl.startsWith(candidate.pathNot)
+      return hostMatch && pathMatch && pathNotMatch
+    })
 
-    servers.sort((a, b) => (b.path?.length ?? 0) - (a.path?.length ?? 0));
+    servers.sort((a, b) => (b.path?.length ?? 0) - (a.path?.length ?? 0))
 
-    return servers[0] ?? null;
+    return servers[0] ?? null
   }
 
-  private nextTarget(server: ServerCandidate): { url: string; tls: boolean } {
-    server.roundRobinTargetIndex = (server.roundRobinTargetIndex + 1) % server.targets.length;
-    return server.targets[server.roundRobinTargetIndex];
+  private nextTarget (server: ServerCandidate): { url: string, tls: boolean } {
+    server.roundRobinTargetIndex = (server.roundRobinTargetIndex + 1) % server.targets.length
+    return server.targets[server.roundRobinTargetIndex]
   }
 
   /**
@@ -361,11 +361,11 @@ export class DevtoolProxy {
    * @param server The server.
    * @returns The path on the target.
    */
-  private targetPath(target: URL, requestUrl: string, server: ServerCandidate): string {
-    let path = server.prefix && requestUrl.startsWith(server.prefix) ? requestUrl.slice(server.prefix.length) : requestUrl;
-    if (!path.startsWith("/")) {
-      path = `/${path}`;
+  private targetPath (target: URL, requestUrl: string, server: ServerCandidate): string {
+    let path = server.prefix && requestUrl.startsWith(server.prefix) ? requestUrl.slice(server.prefix.length) : requestUrl
+    if (!path.startsWith('/')) {
+      path = `/${path}`
     }
-    return `${target.pathname.replace(/\/$/, "")}${path}`;
+    return `${target.pathname.replace(/\/$/, '')}${path}`
   }
 }

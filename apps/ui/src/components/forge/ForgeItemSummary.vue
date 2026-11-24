@@ -1,32 +1,32 @@
 <script setup lang="ts">
-import { computed } from "vue";
-import { CircleCheck, CircleX, LoaderCircle, MessageSquare } from "@lucide/vue";
-import type { ForgeEntry } from "@appsys/devtool-shared";
-import { Badge } from "@/components/ui/badge";
-import { formatRelativeDate } from "@/lib/format";
+import { computed } from 'vue'
+import { CircleCheck, CircleX, LoaderCircle, MessageSquare } from '@lucide/vue'
+import type { ForgeEntry } from '@appsys/devtool-shared'
+import { Badge } from '@/components/ui/badge'
+import { formatRelativeDate } from '@/lib/format'
 
 const props = defineProps<{
-  entry: ForgeEntry;
-}>();
+  entry: ForgeEntry
+}>()
 
 const CHECKS = {
-  success: { icon: CircleCheck, class: "text-emerald-600", title: "Checks passed" },
-  pending: { icon: LoaderCircle, class: "text-amber-500", title: "Checks running" },
-  failure: { icon: CircleX, class: "text-destructive", title: "Checks failed" },
-} as const;
+  success: { icon: CircleCheck, class: 'text-emerald-600', title: 'Checks passed' },
+  pending: { icon: LoaderCircle, class: 'text-amber-500', title: 'Checks running' },
+  failure: { icon: CircleX, class: 'text-destructive', title: 'Checks failed' }
+} as const
 
 const REVIEWS = {
-  approved: { label: "Approved", class: "border-transparent bg-emerald-500/15 text-emerald-700 dark:text-emerald-400" },
-  changesRequested: { label: "Changes requested", class: "border-transparent bg-amber-500/15 text-amber-700 dark:text-amber-400" },
-  required: { label: "Review required", class: "" },
-} as const;
+  approved: { label: 'Approved', class: 'border-transparent bg-emerald-500/15 text-emerald-700 dark:text-emerald-400' },
+  changesRequested: { label: 'Changes requested', class: 'border-transparent bg-amber-500/15 text-amber-700 dark:text-amber-400' },
+  required: { label: 'Review required', class: '' }
+} as const
 
-const WAITING_CLASS = "border-transparent bg-sky-500/15 text-sky-700 dark:text-sky-400";
+const WAITING_CLASS = 'border-transparent bg-sky-500/15 text-sky-700 dark:text-sky-400'
 
-const pullRequest = computed(() => (props.entry.kind === "pullRequests" ? props.entry.item : null));
-const issue = computed(() => (props.entry.kind === "issues" ? props.entry.item : null));
-const checks = computed(() => (pullRequest.value?.checks ? CHECKS[pullRequest.value.checks] : null));
-const review = computed(() => (pullRequest.value?.review ? REVIEWS[pullRequest.value.review] : null));
+const pullRequest = computed(() => (props.entry.kind === 'pullRequests' ? props.entry.item : null))
+const issue = computed(() => (props.entry.kind === 'issues' ? props.entry.item : null))
+const checks = computed(() => (pullRequest.value?.checks ? CHECKS[pullRequest.value.checks] : null))
+const review = computed(() => (pullRequest.value?.review ? REVIEWS[pullRequest.value.review] : null))
 </script>
 
 <template>

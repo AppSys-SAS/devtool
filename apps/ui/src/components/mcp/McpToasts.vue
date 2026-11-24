@@ -1,25 +1,25 @@
 <script setup lang="ts">
-import { Icon } from "@iconify/vue";
-import { X } from "@lucide/vue";
-import { ToastClose, ToastDescription, ToastProvider, ToastRoot, ToastTitle, ToastViewport } from "reka-ui";
-import mcpStore from "@/stores/mcp";
+import { Icon } from '@iconify/vue'
+import { X } from '@lucide/vue'
+import { ToastClose, ToastDescription, ToastProvider, ToastRoot, ToastTitle, ToastViewport } from 'reka-ui'
+import mcpStore from '@/stores/mcp'
 
 const LEVEL_CLASSES = {
-  info: "border-border",
-  warning: "border-amber-500/60",
-  error: "border-destructive/60",
-} as const;
+  info: 'border-border',
+  warning: 'border-amber-500/60',
+  error: 'border-destructive/60'
+} as const
 
-const messages = mcpStore.messages;
+const messages = mcpStore.messages
 
 /**
  * Hides a message once its toast closes.
  * @param id The message.
  * @param open Whether the toast is still open.
  */
-function closed(id: string, open: boolean): void {
+function closed (id: string, open: boolean): void {
   if (!open) {
-    mcpStore.dismissMessage(id);
+    mcpStore.dismissMessage(id)
   }
 }
 </script>

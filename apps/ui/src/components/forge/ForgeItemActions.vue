@@ -1,22 +1,22 @@
 <script setup lang="ts">
-import { ExternalLink } from "@lucide/vue";
-import type { AgentAction, AgentDefinition } from "@appsys/devtool-shared";
-import AgentButton from "@/components/agents/AgentButton.vue";
-import { Button } from "@/components/ui/button";
-import { AGENT_ACTION_VIEWS } from "@/lib/forge";
+import { ExternalLink } from '@lucide/vue'
+import type { AgentAction, AgentDefinition } from '@appsys/devtool-shared'
+import AgentButton from '@/components/agents/AgentButton.vue'
+import { Button } from '@/components/ui/button'
+import { AGENT_ACTION_VIEWS } from '@/lib/forge'
 
 defineProps<{
   /** The web address of the item on its forge. */
-  url: string;
+  url: string
   /** The name of the forge, in the title of its link. */
-  forge: string;
+  forge: string
   /** What agents may do with the item, in order. */
-  actions: AgentAction[];
-}>();
+  actions: AgentAction[]
+}>()
 
 const emit = defineEmits<{
-  start: [action: AgentAction, agent: AgentDefinition];
-}>();
+  start: [action: AgentAction, agent: AgentDefinition]
+}>()
 </script>
 
 <template>

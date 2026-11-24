@@ -1,30 +1,30 @@
 <script setup lang="ts">
-import { computed, shallowRef } from "vue";
-import { Icon } from "@iconify/vue";
-import type { DirectoryExtra } from "@appsys/devtool-shared";
-import CommandInputsForm from "@/components/CommandInputsForm.vue";
-import { commandLine, commandName, iconFromMeta, runDirectoryCommand } from "@/lib/directory-commands";
-import { cn } from "@/lib/utils";
+import { computed, shallowRef } from 'vue'
+import { Icon } from '@iconify/vue'
+import type { DirectoryExtra } from '@appsys/devtool-shared'
+import CommandInputsForm from '@/components/CommandInputsForm.vue'
+import { commandLine, commandName, iconFromMeta, runDirectoryCommand } from '@/lib/directory-commands'
+import { cn } from '@/lib/utils'
 
 const props = defineProps<{
-  projectSlug: string;
-  directorySlug: string;
-  command: DirectoryExtra;
-}>();
+  projectSlug: string
+  directorySlug: string
+  command: DirectoryExtra
+}>()
 
-const opened = shallowRef(false);
+const opened = shallowRef(false)
 
-const description = computed(() => (props.command.script ? props.command.script.summary : commandLine(props.command.args)));
+const description = computed(() => (props.command.script ? props.command.script.summary : commandLine(props.command.args)))
 
 /**
  * Shows or hides the form of a command asking for its inputs in its row, else runs it.
  */
-function activate(): void {
-  if (props.command.form === "inline") {
-    opened.value = !opened.value;
-    return;
+function activate (): void {
+  if (props.command.form === 'inline') {
+    opened.value = !opened.value
+    return
   }
-  runDirectoryCommand(props.projectSlug, props.directorySlug, props.command);
+  runDirectoryCommand(props.projectSlug, props.directorySlug, props.command)
 }
 </script>
 

@@ -1,43 +1,43 @@
 <script setup lang="ts">
-import { computed, shallowRef } from "vue";
-import { RouterLink } from "vue-router";
-import { Icon } from "@iconify/vue";
-import { ChevronRight, CircleAlert, CircleCheck, Hourglass, SquareTerminal } from "@lucide/vue";
-import type { McpGrantPayload, McpHistoryEntry } from "@appsys/devtool-shared";
-import McpDetailList from "@/components/mcp/McpDetailList.vue";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { DECISIONS } from "@/lib/mcp";
-import mcpStore from "@/stores/mcp";
+import { computed, shallowRef } from 'vue'
+import { RouterLink } from 'vue-router'
+import { Icon } from '@iconify/vue'
+import { ChevronRight, CircleAlert, CircleCheck, Hourglass, SquareTerminal } from '@lucide/vue'
+import type { McpGrantPayload, McpHistoryEntry } from '@appsys/devtool-shared'
+import McpDetailList from '@/components/mcp/McpDetailList.vue'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { DECISIONS } from '@/lib/mcp'
+import mcpStore from '@/stores/mcp'
 
 /** Below this, the time spent in the approvals is not worth showing. */
-const NOTABLE_WAIT_MS = 300;
+const NOTABLE_WAIT_MS = 300
 
 const props = defineProps<{
-  entry: McpHistoryEntry;
+  entry: McpHistoryEntry
   /** The grants of the key of the call. */
-  grants: McpGrantPayload[];
+  grants: McpGrantPayload[]
   /** Whether the session of the call is still open. */
-  sessionOpen: boolean;
+  sessionOpen: boolean
   /** Whether its terminal still exists. */
-  terminalOpen: boolean;
-}>();
+  terminalOpen: boolean
+}>()
 
 const emit = defineEmits<{
-  grant: [scope: "session" | "always"];
-  revoke: [grant: McpGrantPayload];
-}>();
+  grant: [scope: 'session' | 'always']
+  revoke: [grant: McpGrantPayload]
+}>()
 
-const expanded = shallowRef(false);
-const waited = computed(() => ((props.entry.waited ?? 0) >= NOTABLE_WAIT_MS ? props.entry.waited : 0));
+const expanded = shallowRef(false)
+const waited = computed(() => ((props.entry.waited ?? 0) >= NOTABLE_WAIT_MS ? props.entry.waited : 0))
 
 /**
  * Writes a duration in milliseconds or seconds.
  * @param milliseconds The duration.
  * @returns The duration with its unit.
  */
-function formatDuration(milliseconds: number): string {
-  return milliseconds < 1000 ? `${milliseconds} ms` : `${(milliseconds / 1000).toFixed(1)} s`;
+function formatDuration (milliseconds: number): string {
+  return milliseconds < 1000 ? `${milliseconds} ms` : `${(milliseconds / 1000).toFixed(1)} s`
 }
 </script>
 

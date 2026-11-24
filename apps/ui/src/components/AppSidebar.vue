@@ -1,124 +1,124 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
-import { RouterLink, useRoute, useRouter } from "vue-router";
-import { useColorMode } from "@vueuse/core";
-import { Icon } from "@iconify/vue";
+import { computed, ref, watch } from 'vue'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
+import { useColorMode } from '@vueuse/core'
+import { Icon } from '@iconify/vue'
 import { ArrowDownUp, Bookmark, Bot, Circle, Download, FileCog, FolderTree, FolderX, Monitor, Moon, Play, RefreshCw, RotateCcw, Square, Sun } from '@lucide/vue'
-import CdnSession from "@/components/CdnSession.vue";
-import SidebarStreamItem from "@/components/SidebarStreamItem.vue";
-import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Separator } from "@/components/ui/separator";
-import type { CommandArg, DirectoryDefaultAction, DirectoryDefinition, ProjectRestore } from "@appsys/devtool-shared";
-import ShortcutLine from "@/components/ShortcutLine.vue";
-import { defaultShortcut, directoryShortcuts, integrationShortcut, projectShortcuts, type SidebarShortcut } from "@/lib/shortcuts";
-import { iconFromMeta, startSection, stopSection } from "@/lib/directory-commands";
-import bookmarkStore from "@/stores/bookmark";
-import commandRunsStore from "@/stores/command-runs";
-import configStore from "@/stores/config";
-import mcpStore from "@/stores/mcp";
-import wsStore from "@/stores/ws";
-import type { CommandStream } from "@/types";
+import CdnSession from '@/components/CdnSession.vue'
+import SidebarStreamItem from '@/components/SidebarStreamItem.vue'
+import { Button } from '@/components/ui/button'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import { Separator } from '@/components/ui/separator'
+import type { CommandArg, DirectoryDefaultAction, DirectoryDefinition, ProjectRestore } from '@appsys/devtool-shared'
+import ShortcutLine from '@/components/ShortcutLine.vue'
+import { defaultShortcut, directoryShortcuts, integrationShortcut, projectShortcuts, type SidebarShortcut } from '@/lib/shortcuts'
+import { iconFromMeta, startSection, stopSection } from '@/lib/directory-commands'
+import bookmarkStore from '@/stores/bookmark'
+import commandRunsStore from '@/stores/command-runs'
+import configStore from '@/stores/config'
+import mcpStore from '@/stores/mcp'
+import wsStore from '@/stores/ws'
+import type { CommandStream } from '@/types'
 
 interface SidebarDirectory {
-  slug: string;
-  projectSlug: string;
-  name: string;
-  args: CommandArg[] | null;
+  slug: string
+  projectSlug: string
+  name: string
+  args: CommandArg[] | null
   /** What the directory does by default, `command` telling whether it is its main command. */
-  defaultAction: { shortcut: SidebarShortcut; trigger: DirectoryDefaultAction["trigger"]; command: boolean } | null;
+  defaultAction: { shortcut: SidebarShortcut, trigger: DirectoryDefaultAction['trigger'], command: boolean } | null
   /** Shortcuts shown as icons in the row of the directory. */
-  icons: SidebarShortcut[];
+  icons: SidebarShortcut[]
   /** Shortcuts shown as rows under the row of the directory. */
-  lines: SidebarShortcut[];
-  env: Record<string, string>;
-  extras: Record<string, { name: string; args: CommandArg[]; killSignal: string | null; meta?: unknown }>;
-  killSignal: string | null;
-  notifications: boolean;
-  stream: CommandStream | null;
-  streams: CommandStream[];
+  lines: SidebarShortcut[]
+  env: Record<string, string>
+  extras: Record<string, { name: string, args: CommandArg[], killSignal: string | null, meta?: unknown }>
+  killSignal: string | null
+  notifications: boolean
+  stream: CommandStream | null
+  streams: CommandStream[]
   /** Whether the folder of the directory is missing on this machine. */
-  missing: boolean;
-  restore: ProjectRestore | null;
-  meta?: unknown;
+  missing: boolean
+  restore: ProjectRestore | null
+  meta?: unknown
 }
 
 /** A row under the header of a project: one of its own shortcuts, or one of its directories. */
-type SidebarContent = { key: string; line: SidebarShortcut; directory?: undefined } | { key: string; line?: undefined; directory: SidebarDirectory };
+type SidebarContent = { key: string, line: SidebarShortcut, directory?: undefined } | { key: string, line?: undefined, directory: SidebarDirectory }
 
 interface SidebarProject {
-  slug: string;
-  name: string;
-  missing: boolean;
-  restore: ProjectRestore | null;
-  directories: SidebarDirectory[];
+  slug: string
+  name: string
+  missing: boolean
+  restore: ProjectRestore | null
+  directories: SidebarDirectory[]
   /** Shortcuts shown as icons in the header of the project. */
-  icons: SidebarShortcut[];
+  icons: SidebarShortcut[]
   /** Its shortcuts shown as rows and its directories, in the order shown. */
-  content: SidebarContent[];
-  streams: CommandStream[];
+  content: SidebarContent[]
+  streams: CommandStream[]
   /** Whether a command of the section starts with it. */
-  startable: boolean;
+  startable: boolean
   /** Whether a command of the section runs. */
-  running: boolean;
-  meta?: unknown;
+  running: boolean
+  meta?: unknown
 }
 
-const router = useRouter();
-const route = useRoute();
-const mcpWaiting = computed(() => mcpStore.state.value?.pending.length ?? 0);
-const bookmarkedOnly = ref(false);
-const appVersion = window.devtool?.version ?? "0.0.0";
+const router = useRouter()
+const route = useRoute()
+const mcpWaiting = computed(() => mcpStore.state.value?.pending.length ?? 0)
+const bookmarkedOnly = ref(false)
+const appVersion = window.devtool?.version ?? '0.0.0'
 const colorMode = useColorMode({
   emitAuto: true,
-  storageKey: "devtool-color-mode",
-});
+  storageKey: 'devtool-color-mode'
+})
 
 const colorModeLabel = computed(() => {
-  if (colorMode.value === "dark") {
-    return "Dark";
+  if (colorMode.value === 'dark') {
+    return 'Dark'
   }
-  if (colorMode.value === "light") {
-    return "Light";
+  if (colorMode.value === 'light') {
+    return 'Light'
   }
-  return "Auto";
-});
+  return 'Auto'
+})
 
-function toggleColorMode(): void {
-  if (colorMode.value === "auto") {
-    colorMode.value = "light";
-    return;
+function toggleColorMode (): void {
+  if (colorMode.value === 'auto') {
+    colorMode.value = 'light'
+    return
   }
-  if (colorMode.value === "light") {
-    colorMode.value = "dark";
-    return;
+  if (colorMode.value === 'light') {
+    colorMode.value = 'dark'
+    return
   }
-  colorMode.value = "auto";
+  colorMode.value = 'auto'
 }
 
 watch(
   () => bookmarkStore.slugs.value.length,
-  (length) => {
+  length => {
     if (length > 0) {
-      bookmarkedOnly.value = true;
+      bookmarkedOnly.value = true
     }
   },
-  { immediate: true },
-);
+  { immediate: true }
+)
 
-const allStreams = computed(() => configStore.commandStreams.value);
-const sidebarSettings = computed(() => configStore.sidebar.value);
+const allStreams = computed(() => configStore.commandStreams.value)
+const sidebarSettings = computed(() => configStore.sidebar.value)
 
 const sidebarData = computed(() => {
-  const projects: SidebarProject[] = [];
-  const global: CommandStream[] = [];
-  const usedStreamSlugs = new Set<string>();
-  const configProjects = configStore.projects.value;
+  const projects: SidebarProject[] = []
+  const global: CommandStream[] = []
+  const usedStreamSlugs = new Set<string>()
+  const configProjects = configStore.projects.value
 
   if (configProjects) {
-    for (const project of configStore.sidebar.value.sections.flatMap((slug) => configProjects[slug] ?? [])) {
-      const projectSlug = project.slug;
-      const directories: SidebarDirectory[] = [];
+    for (const project of configStore.sidebar.value.sections.flatMap(slug => configProjects[slug] ?? [])) {
+      const projectSlug = project.slug
+      const directories: SidebarDirectory[] = []
 
       for (const [directorySlug, directory] of Object.entries(project.directories)) {
         const directoryItem: SidebarDirectory = {
@@ -137,21 +137,21 @@ const sidebarData = computed(() => {
           streams: [],
           missing: directory.missing,
           restore: directory.restore,
-          meta: directory.meta,
-        };
+          meta: directory.meta
+        }
 
         for (const stream of allStreams.value) {
           if (stream.projectSlug === projectSlug && stream.directorySlug === directorySlug) {
-            usedStreamSlugs.add(stream.slug);
+            usedStreamSlugs.add(stream.slug)
             if (stream.primary) {
-              directoryItem.stream = stream;
+              directoryItem.stream = stream
             } else {
-              directoryItem.streams.push(stream);
+              directoryItem.streams.push(stream)
             }
           }
         }
 
-        directories.push(directoryItem);
+        directories.push(directoryItem)
       }
 
       const projectItem: SidebarProject = {
@@ -163,63 +163,63 @@ const sidebarData = computed(() => {
         icons: projectShortcuts(project, project.icons),
         content: projectContent(project.content, projectShortcuts(project, project.lines), directories),
         streams: [],
-        startable: Object.values(project.directories).some((directory) => Object.values(directory.extras).some((command) => command.startWithSection)),
-        running: allStreams.value.some((stream) => stream.projectSlug === projectSlug && stream.status === "RUNNING"),
-        meta: project.meta,
-      };
+        startable: Object.values(project.directories).some(directory => Object.values(directory.extras).some(command => command.startWithSection)),
+        running: allStreams.value.some(stream => stream.projectSlug === projectSlug && stream.status === 'RUNNING'),
+        meta: project.meta
+      }
 
       for (const stream of allStreams.value) {
         if (stream.projectSlug === projectSlug && stream.directorySlug === null) {
-          usedStreamSlugs.add(stream.slug);
-          projectItem.streams.push(stream);
+          usedStreamSlugs.add(stream.slug)
+          projectItem.streams.push(stream)
         }
       }
 
-      projects.push(projectItem);
+      projects.push(projectItem)
     }
   }
 
   for (const stream of allStreams.value) {
     if (!usedStreamSlugs.has(stream.slug)) {
-      global.push(stream);
+      global.push(stream)
     }
   }
 
   return {
     globalStreams: global,
-    allProjects: projects,
-  };
-});
+    allProjects: projects
+  }
+})
 
-const globalStreams = computed(() => sidebarData.value.globalStreams);
-const allProjects = computed(() => sidebarData.value.allProjects);
+const globalStreams = computed(() => sidebarData.value.globalStreams)
+const allProjects = computed(() => sidebarData.value.allProjects)
 
 const projects = computed(() => {
   if (!bookmarkedOnly.value) {
-    return allProjects.value;
+    return allProjects.value
   }
 
-  const bookmarks = new Set(bookmarkStore.slugs.value);
-  const filtered: SidebarProject[] = [];
+  const bookmarks = new Set(bookmarkStore.slugs.value)
+  const filtered: SidebarProject[] = []
 
   for (const project of allProjects.value) {
-    const directories = project.directories.filter((directory) => {
-      const slug = `${project.slug}/${directory.slug}`;
-      return Boolean(directory.stream) || directory.streams.length > 0 || bookmarks.has(slug);
-    });
-    const content = project.content.filter((item) => item.line !== undefined || directories.includes(item.directory));
+    const directories = project.directories.filter(directory => {
+      const slug = `${project.slug}/${directory.slug}`
+      return Boolean(directory.stream) || directory.streams.length > 0 || bookmarks.has(slug)
+    })
+    const content = project.content.filter(item => item.line !== undefined || directories.includes(item.directory))
 
     if (content.length > 0 || project.streams.length > 0) {
       filtered.push({
         ...project,
         directories,
-        content,
-      });
+        content
+      })
     }
   }
 
-  return filtered;
-});
+  return filtered
+})
 
 /**
  * Lists the rows under the header of a project in the order the server gives.
@@ -228,29 +228,29 @@ const projects = computed(() => {
  * @param directories Its directories.
  * @returns The rows, without the keys naming nothing.
  */
-function projectContent(order: string[], lines: SidebarShortcut[], directories: SidebarDirectory[]): SidebarContent[] {
+function projectContent (order: string[], lines: SidebarShortcut[], directories: SidebarDirectory[]): SidebarContent[] {
   return order.flatMap((key): SidebarContent[] => {
-    const line = lines.find((shortcut) => shortcut.key === key);
+    const line = lines.find(shortcut => shortcut.key === key)
     if (line) {
-      return [{ key: `line/${key}`, line }];
+      return [{ key: `line/${key}`, line }]
     }
-    const directory = directories.find((item) => item.slug === key);
-    return directory ? [{ key: `directory/${key}`, directory }] : [];
-  });
+    const directory = directories.find(item => item.slug === key)
+    return directory ? [{ key: `directory/${key}`, directory }] : []
+  })
 }
 
-function streamUpdate(streamSlug: string, action: "start" | "stop" | "restart" | "close"): void {
-  wsStore.updateCommandStream(streamSlug, action);
+function streamUpdate (streamSlug: string, action: 'start' | 'stop' | 'restart' | 'close'): void {
+  wsStore.updateCommandStream(streamSlug, action)
 }
 
 /**
  * Starts the commands of a section that start with it.
  * @param projectSlug The slug of the section.
  */
-function startProject(projectSlug: string): void {
-  const project = configStore.projects.value?.[projectSlug];
+function startProject (projectSlug: string): void {
+  const project = configStore.projects.value?.[projectSlug]
   if (project) {
-    startSection(project);
+    startSection(project)
   }
 }
 
@@ -262,7 +262,7 @@ function startProject(projectSlug: string): void {
  * @param name The name of what is missing.
  * @param restore The command bringing the folder back.
  */
-function restoreFolder(projectSlug: string, directorySlug: string | null, name: string, restore: ProjectRestore): void {
+function restoreFolder (projectSlug: string, directorySlug: string | null, name: string, restore: ProjectRestore): void {
   commandRunsStore.start({
     projectSlug,
     directorySlug,
@@ -272,8 +272,8 @@ function restoreFolder(projectSlug: string, directorySlug: string | null, name: 
     notifications: true,
     name: `${restore.name} ${name}`,
     restore: true,
-    onFinished: () => wsStore.reconfigure(),
-  });
+    onFinished: () => wsStore.reconfigure()
+  })
 }
 
 /**
@@ -282,12 +282,12 @@ function restoreFolder(projectSlug: string, directorySlug: string | null, name: 
  * @param directory The directory.
  * @returns Its default action, null when it declares none.
  */
-function readDefaultAction(projectSlug: string, directory: DirectoryDefinition): SidebarDirectory["defaultAction"] {
-  const shortcut = defaultShortcut(projectSlug, directory);
+function readDefaultAction (projectSlug: string, directory: DirectoryDefinition): SidebarDirectory['defaultAction'] {
+  const shortcut = defaultShortcut(projectSlug, directory)
   if (!shortcut || !directory.defaultAction) {
-    return null;
+    return null
   }
-  return { shortcut, trigger: directory.defaultAction.trigger, command: directory.defaultAction.shortcut.type === "command" };
+  return { shortcut, trigger: directory.defaultAction.trigger, command: directory.defaultAction.shortcut.type === 'command' }
 }
 
 /**
@@ -296,13 +296,13 @@ function readDefaultAction(projectSlug: string, directory: DirectoryDefinition):
  * @param event The click, its buttons keeping their own action.
  * @param directory The directory.
  */
-function runDefaultActionFromRow(event: MouseEvent, directory: SidebarDirectory): void {
-  const action = directory.defaultAction;
-  if (!action || action.trigger === "icon" || (event.target as Element).closest("button") || (action.command && directory.stream?.status === "RUNNING")) {
-    return;
+function runDefaultActionFromRow (event: MouseEvent, directory: SidebarDirectory): void {
+  const action = directory.defaultAction
+  if (!action || action.trigger === 'icon' || (event.target as Element).closest('button') || (action.command && directory.stream?.status === 'RUNNING')) {
+    return
   }
-  event.preventDefault();
-  action.shortcut.open();
+  event.preventDefault()
+  action.shortcut.open()
 }
 
 /**
@@ -311,41 +311,41 @@ function runDefaultActionFromRow(event: MouseEvent, directory: SidebarDirectory)
  * @param right The arguments of the stream.
  * @returns True when both hold the same arguments.
  */
-function areArgsEqual(left: CommandArg[], right: string[]): boolean {
+function areArgsEqual (left: CommandArg[], right: string[]): boolean {
   if (left.length !== right.length) {
-    return false;
+    return false
   }
 
   for (let index = 0; index < left.length; index += 1) {
     if (left[index] !== right[index]) {
-      return false;
+      return false
     }
   }
 
-  return true;
+  return true
 }
 
-function resolveStreamIcon(directory: SidebarDirectory, stream: CommandStream): string {
-  const extras = Object.values(directory.extras);
+function resolveStreamIcon (directory: SidebarDirectory, stream: CommandStream): string {
+  const extras = Object.values(directory.extras)
   for (const extra of extras) {
     if (extra.name === stream.name && areArgsEqual(extra.args, stream.args)) {
-      return iconFromMeta(extra.meta);
+      return iconFromMeta(extra.meta)
     }
   }
 
   for (const extra of extras) {
     if (areArgsEqual(extra.args, stream.args)) {
-      return iconFromMeta(extra.meta);
+      return iconFromMeta(extra.meta)
     }
   }
 
   for (const extra of extras) {
     if (extra.name === stream.name) {
-      return iconFromMeta(extra.meta);
+      return iconFromMeta(extra.meta)
     }
   }
 
-  return iconFromMeta(directory.meta);
+  return iconFromMeta(directory.meta)
 }
 </script>
 
@@ -505,127 +505,127 @@ function resolveStreamIcon(directory: SidebarDirectory, stream: CommandStream): 
               v-for="{ key, line, directory } in project.content"
               :key="`project/${project.slug}/${key}`"
             >
-            <ShortcutLine
-              v-if="line"
-              :shortcut="line"
-            />
-            <div
-              v-else-if="directory"
-              class="space-y-1"
-            >
+              <ShortcutLine
+                v-if="line"
+                :shortcut="line"
+              />
               <div
-                v-if="directory.missing"
-                class="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground/60"
-                title="Missing on this machine"
+                v-else-if="directory"
+                class="space-y-1"
               >
-                <FolderX class="size-3.5 shrink-0" />
-                <span class="min-w-0 flex-1 truncate">{{ directory.name }}</span>
-                <Button
-                  v-if="directory.restore"
-                  size="sm"
-                  variant="outline"
-                  class="h-6 gap-1 px-2 text-[11px]"
-                  @click="restoreFolder(project.slug, directory.slug, directory.name, directory.restore)"
+                <div
+                  v-if="directory.missing"
+                  class="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground/60"
+                  title="Missing on this machine"
                 >
-                  <Download class="size-3" />
-                  {{ directory.restore.name }}
-                </Button>
-              </div>
-              <RouterLink
-                v-else
-                :to="{ name: 'directory', params: { projectSlug: project.slug, directorySlug: directory.slug } }"
-                class="group relative flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent/60"
-                @click.capture="runDefaultActionFromRow($event, directory)"
-                :class="{
-                  'bg-accent/60': directory.stream?.status === 'RUNNING',
-                  'border border-destructive/40': directory.stream?.status === 'ERROR',
-                  'border border-valid/40': directory.stream?.status === 'STOPPED'
-                }"
-              >
-                <span
-                  v-if="directory.stream?.unread"
-                  class="pointer-events-none absolute -right-0.5 -top-0.5 z-10"
-                >
-                  <span class="relative flex size-3">
-                    <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-sky-400 opacity-75"></span>
-                    <span class="relative inline-flex size-3 rounded-full bg-sky-500"></span>
-                  </span>
-                </span>
-                <Icon
-                  :icon="iconFromMeta(directory.meta, 'lucide:folder-tree')"
-                  class="size-3.5 shrink-0 text-muted-foreground"
-                />
-                <span class="min-w-0 flex-1 truncate">{{ directory.name }}</span>
-                <div class="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+                  <FolderX class="size-3.5 shrink-0" />
+                  <span class="min-w-0 flex-1 truncate">{{ directory.name }}</span>
                   <Button
-                    v-if="directory.defaultAction && directory.defaultAction.trigger !== 'row' && !(directory.defaultAction.command && directory.stream?.status === 'RUNNING')"
-                    size="icon"
-                    variant="ghost"
-                    class="size-6"
-                    :title="directory.defaultAction.shortcut.name"
-                    @click.prevent.stop="directory.defaultAction.shortcut.open()"
+                    v-if="directory.restore"
+                    size="sm"
+                    variant="outline"
+                    class="h-6 gap-1 px-2 text-[11px]"
+                    @click="restoreFolder(project.slug, directory.slug, directory.name, directory.restore)"
                   >
-                    <Icon
-                      :icon="directory.defaultAction.shortcut.icon"
-                      class="size-3.5"
-                    />
-                  </Button>
-                  <Button
-                    v-if="directory.stream && directory.stream.status === 'RUNNING'"
-                    size="icon"
-                    variant="ghost"
-                    class="size-6"
-                    @click.prevent.stop="streamUpdate(directory.stream.slug, 'stop')"
-                  >
-                    <Square class="size-3.5" />
-                  </Button>
-                  <Button
-                    v-if="directory.stream && directory.stream.status === 'RUNNING'"
-                    size="icon"
-                    variant="ghost"
-                    class="size-6"
-                    @click.prevent.stop="streamUpdate(directory.stream.slug, 'restart')"
-                  >
-                    <RotateCcw class="size-3.5" />
+                    <Download class="size-3" />
+                    {{ directory.restore.name }}
                   </Button>
                 </div>
-                <ShortcutLine
-                  v-for="shortcut in directory.icons"
-                  :key="shortcut.key"
-                  :shortcut="shortcut"
-                  compact
-                />
-              </RouterLink>
-
-              <div
-                v-if="directory.lines.length"
-                class="space-y-1 pl-2"
-              >
-                <ShortcutLine
-                  v-for="shortcut in directory.lines"
-                  :key="shortcut.key"
-                  :shortcut="shortcut"
-                />
-              </div>
-
-              <div class="space-y-1 pl-2">
-                <SidebarStreamItem
-                  v-for="stream in directory.streams"
-                  :key="`project/${project.slug}/directory/${directory.slug}/stream/${stream.slug}`"
-                  :stream="stream"
-                  :label="stream.name"
-                  :icon="resolveStreamIcon(directory, stream)"
-                  :route="{
-                    name: 'directory-stream',
-                    params: { projectSlug: project.slug, directorySlug: directory.slug, streamSlug: stream.slug }
+                <RouterLink
+                  v-else
+                  :to="{ name: 'directory', params: { projectSlug: project.slug, directorySlug: directory.slug } }"
+                  class="group relative flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent/60"
+                  :class="{
+                    'bg-accent/60': directory.stream?.status === 'RUNNING',
+                    'border border-destructive/40': directory.stream?.status === 'ERROR',
+                    'border border-valid/40': directory.stream?.status === 'STOPPED'
                   }"
-                  @start="streamUpdate($event, 'start')"
-                  @stop="streamUpdate($event, 'stop')"
-                  @restart="streamUpdate($event, 'restart')"
-                  @close="streamUpdate($event, 'close')"
-                />
+                  @click.capture="runDefaultActionFromRow($event, directory)"
+                >
+                  <span
+                    v-if="directory.stream?.unread"
+                    class="pointer-events-none absolute -right-0.5 -top-0.5 z-10"
+                  >
+                    <span class="relative flex size-3">
+                      <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-sky-400 opacity-75" />
+                      <span class="relative inline-flex size-3 rounded-full bg-sky-500" />
+                    </span>
+                  </span>
+                  <Icon
+                    :icon="iconFromMeta(directory.meta, 'lucide:folder-tree')"
+                    class="size-3.5 shrink-0 text-muted-foreground"
+                  />
+                  <span class="min-w-0 flex-1 truncate">{{ directory.name }}</span>
+                  <div class="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+                    <Button
+                      v-if="directory.defaultAction && directory.defaultAction.trigger !== 'row' && !(directory.defaultAction.command && directory.stream?.status === 'RUNNING')"
+                      size="icon"
+                      variant="ghost"
+                      class="size-6"
+                      :title="directory.defaultAction.shortcut.name"
+                      @click.prevent.stop="directory.defaultAction.shortcut.open()"
+                    >
+                      <Icon
+                        :icon="directory.defaultAction.shortcut.icon"
+                        class="size-3.5"
+                      />
+                    </Button>
+                    <Button
+                      v-if="directory.stream && directory.stream.status === 'RUNNING'"
+                      size="icon"
+                      variant="ghost"
+                      class="size-6"
+                      @click.prevent.stop="streamUpdate(directory.stream.slug, 'stop')"
+                    >
+                      <Square class="size-3.5" />
+                    </Button>
+                    <Button
+                      v-if="directory.stream && directory.stream.status === 'RUNNING'"
+                      size="icon"
+                      variant="ghost"
+                      class="size-6"
+                      @click.prevent.stop="streamUpdate(directory.stream.slug, 'restart')"
+                    >
+                      <RotateCcw class="size-3.5" />
+                    </Button>
+                  </div>
+                  <ShortcutLine
+                    v-for="shortcut in directory.icons"
+                    :key="shortcut.key"
+                    :shortcut="shortcut"
+                    compact
+                  />
+                </RouterLink>
+
+                <div
+                  v-if="directory.lines.length"
+                  class="space-y-1 pl-2"
+                >
+                  <ShortcutLine
+                    v-for="shortcut in directory.lines"
+                    :key="shortcut.key"
+                    :shortcut="shortcut"
+                  />
+                </div>
+
+                <div class="space-y-1 pl-2">
+                  <SidebarStreamItem
+                    v-for="stream in directory.streams"
+                    :key="`project/${project.slug}/directory/${directory.slug}/stream/${stream.slug}`"
+                    :stream="stream"
+                    :label="stream.name"
+                    :icon="resolveStreamIcon(directory, stream)"
+                    :route="{
+                      name: 'directory-stream',
+                      params: { projectSlug: project.slug, directorySlug: directory.slug, streamSlug: stream.slug }
+                    }"
+                    @start="streamUpdate($event, 'start')"
+                    @stop="streamUpdate($event, 'stop')"
+                    @restart="streamUpdate($event, 'restart')"
+                    @close="streamUpdate($event, 'close')"
+                  />
+                </div>
               </div>
-            </div>
             </template>
           </div>
         </div>

@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { Icon } from "@iconify/vue";
-import type { AgentDefinition } from "@appsys/devtool-shared";
+import { Icon } from '@iconify/vue'
+import type { AgentDefinition } from '@appsys/devtool-shared'
 
 defineProps<{
-  agent: AgentDefinition;
-}>();
+  agent: AgentDefinition
+}>()
 </script>
 
 <template>

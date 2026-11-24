@@ -1,47 +1,47 @@
 <script setup lang="ts">
-import { computed, shallowRef, watch } from "vue";
-import { RouterLink, useRouter } from "vue-router";
-import { ChevronRight, FileCog, FileKey, FilePlus, FileText, Folder, FolderOpen, FolderPlus, Pencil, Sparkles, Trash2, TriangleAlert } from "@lucide/vue";
-import { agentSkillFolderOf, type AgentSkillSummary, type FileEntryPayload } from "@appsys/devtool-shared";
-import { cn } from "@/lib/utils";
+import { computed, shallowRef, watch } from 'vue'
+import { RouterLink, useRouter } from 'vue-router'
+import { ChevronRight, FileCog, FileKey, FilePlus, FileText, Folder, FolderOpen, FolderPlus, Pencil, Sparkles, Trash2, TriangleAlert } from '@lucide/vue'
+import { agentSkillFolderOf, type AgentSkillSummary, type FileEntryPayload } from '@appsys/devtool-shared'
+import { cn } from '@/lib/utils'
 
 interface TreeNode {
-  name: string;
-  path: string;
-  kind: FileEntryPayload["kind"];
-  children: TreeNode[];
+  name: string
+  path: string
+  kind: FileEntryPayload['kind']
+  children: TreeNode[]
 }
 
 const props = withDefaults(
   defineProps<{
-    entries: FileEntryPayload[];
-    current: string | null;
-    dirty: boolean;
-    editable: boolean;
+    entries: FileEntryPayload[]
+    current: string | null
+    dirty: boolean
+    editable: boolean
     /** The agent skills of the folders at the root, null when the folder does not hold agent skills. */
-    agentSkills?: AgentSkillSummary[] | null;
+    agentSkills?: AgentSkillSummary[] | null
   }>(),
-  { agentSkills: null },
-);
+  { agentSkills: null }
+)
 
-const router = useRouter();
+const router = useRouter()
 
 const emit = defineEmits<{
-  create: [parent: string, kind: FileEntryPayload["kind"]];
-  rename: [path: string];
-  remove: [path: string, kind: FileEntryPayload["kind"]];
-}>();
+  create: [parent: string, kind: FileEntryPayload['kind']]
+  rename: [path: string]
+  remove: [path: string, kind: FileEntryPayload['kind']]
+}>()
 
-const expanded = shallowRef(new Set<string>());
+const expanded = shallowRef(new Set<string>())
 
 /**
  * Lists the folders holding a path.
  * @param path The path.
  * @returns The paths of its parent folders, outermost first.
  */
-function ancestorsOf(path: string): string[] {
-  const segments = path.split("/");
-  return segments.slice(1).map((_, index) => segments.slice(0, index + 1).join("/"));
+function ancestorsOf (path: string): string[] {
+  const segments = path.split('/')
+  return segments.slice(1).map((_, index) => segments.slice(0, index + 1).join('/'))
 }
 
 /**
@@ -49,86 +49,86 @@ function ancestorsOf(path: string): string[] {
  * @param name The name of the file.
  * @returns The icon component.
  */
-function fileIcon(name: string) {
+function fileIcon (name: string) {
   if (/\.(key|pem|crt|pub)$/.test(name)) {
-    return FileKey;
+    return FileKey
   }
-  return /\.(ya?ml|json|toml|ini|conf)$/.test(name) ? FileCog : FileText;
+  return /\.(ya?ml|json|toml|ini|conf)$/.test(name) ? FileCog : FileText
 }
 
 const root = computed(() => {
-  const nodes = new Map<string, TreeNode>([["", { name: "", path: "", kind: "directory", children: [] }]]);
-  const add = (path: string, kind: FileEntryPayload["kind"]): TreeNode => {
-    const existing = nodes.get(path);
+  const nodes = new Map<string, TreeNode>([['', { name: '', path: '', kind: 'directory', children: [] }]])
+  const add = (path: string, kind: FileEntryPayload['kind']): TreeNode => {
+    const existing = nodes.get(path)
     if (existing) {
-      return existing;
+      return existing
     }
 
-    const separator = path.lastIndexOf("/");
-    const node: TreeNode = { name: path.slice(separator + 1), path, kind, children: [] };
-    nodes.set(path, node);
-    add(separator === -1 ? "" : path.slice(0, separator), "directory").children.push(node);
-    return node;
-  };
+    const separator = path.lastIndexOf('/')
+    const node: TreeNode = { name: path.slice(separator + 1), path, kind, children: [] }
+    nodes.set(path, node)
+    add(separator === -1 ? '' : path.slice(0, separator), 'directory').children.push(node)
+    return node
+  }
   for (const entry of props.entries) {
-    add(entry.path, entry.kind);
+    add(entry.path, entry.kind)
   }
 
   for (const node of nodes.values()) {
-    node.children.sort((a, b) => Number(b.kind === "directory") - Number(a.kind === "directory"));
+    node.children.sort((a, b) => Number(b.kind === 'directory') - Number(a.kind === 'directory'))
   }
-  return nodes.get("")!;
-});
+  return nodes.get('')!
+})
 
-const skillsByFolder = computed(() => new Map(props.agentSkills?.map((skill) => [skill.folder, skill])));
+const skillsByFolder = computed(() => new Map(props.agentSkills?.map(skill => [skill.folder, skill])))
 
 const rows = computed(() => {
-  const visible: { node: TreeNode; depth: number; skill: AgentSkillSummary | null }[] = [];
+  const visible: { node: TreeNode, depth: number, skill: AgentSkillSummary | null }[] = []
   const walk = (node: TreeNode, depth: number): void => {
     for (const child of node.children) {
-      visible.push({ node: child, depth, skill: depth === 0 ? (skillsByFolder.value.get(child.path) ?? null) : null });
-      if (child.kind === "directory" && (!props.editable || expanded.value.has(child.path))) {
-        walk(child, depth + 1);
+      visible.push({ node: child, depth, skill: depth === 0 ? (skillsByFolder.value.get(child.path) ?? null) : null })
+      if (child.kind === 'directory' && (!props.editable || expanded.value.has(child.path))) {
+        walk(child, depth + 1)
       }
     }
-  };
-  walk(root.value, 0);
-  return visible;
-});
+  }
+  walk(root.value, 0)
+  return visible
+})
 
 watch(
   () => props.current,
-  (current) => {
+  current => {
     if (current) {
-      expanded.value = new Set([...expanded.value, ...ancestorsOf(current)]);
+      expanded.value = new Set([...expanded.value, ...ancestorsOf(current)])
     }
   },
-  { immediate: true },
-);
+  { immediate: true }
+)
 
 /**
  * Opens or closes a folder.
  * @param path The path of the folder.
  */
-function toggle(path: string): void {
-  const next = new Set(expanded.value);
+function toggle (path: string): void {
+  const next = new Set(expanded.value)
   if (!next.delete(path)) {
-    next.add(path);
+    next.add(path)
   }
-  expanded.value = next;
+  expanded.value = next
 }
 
 /**
  * Opens the `SKILL.md` of a skill not shown yet, or opens or closes its folder.
  * @param path The path of the folder of the skill.
  */
-function selectSkill(path: string): void {
-  const skillFile = props.entries.find((entry) => entry.kind === "file" && agentSkillFolderOf(entry.path) === path)?.path;
+function selectSkill (path: string): void {
+  const skillFile = props.entries.find(entry => entry.kind === 'file' && agentSkillFolderOf(entry.path) === path)?.path
   if (!skillFile || props.current === skillFile) {
-    toggle(path);
-    return;
+    toggle(path)
+    return
   }
-  void router.push({ query: { path: skillFile } });
+  void router.push({ query: { path: skillFile } })
 }
 </script>
 

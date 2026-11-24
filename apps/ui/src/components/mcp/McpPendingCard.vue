@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import type { CommandInputValue, McpAnswer } from "@appsys/devtool-shared";
-import McpRequestDetails from "@/components/mcp/McpRequestDetails.vue";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import mcpStore from "@/stores/mcp";
+import type { CommandInputValue, McpAnswer } from '@appsys/devtool-shared'
+import McpRequestDetails from '@/components/mcp/McpRequestDetails.vue'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import mcpStore from '@/stores/mcp'
 
-const state = mcpStore.state;
+const state = mcpStore.state
 
 /**
  * Answers a waiting request.
@@ -12,8 +12,8 @@ const state = mcpStore.state;
  * @param answer The answer.
  * @param inputs The values of the inputs of its command.
  */
-function answer(id: string, answer: McpAnswer, inputs: CommandInputValue[] | null): void {
-  mcpStore.answer(id, answer, inputs);
+function answer (id: string, answer: McpAnswer, inputs: CommandInputValue[] | null): void {
+  mcpStore.answer(id, answer, inputs)
 }
 </script>
 

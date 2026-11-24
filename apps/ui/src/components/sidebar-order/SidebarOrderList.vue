@@ -1,36 +1,36 @@
 <script setup lang="ts">
-import { ref } from "vue";
-import { Icon } from "@iconify/vue";
-import { GripVertical } from "@lucide/vue";
-import type { SidebarOrderItem } from "@/composables/useSidebarOrderEdit";
+import { ref } from 'vue'
+import { Icon } from '@iconify/vue'
+import { GripVertical } from '@lucide/vue'
+import type { SidebarOrderItem } from '@/composables/useSidebarOrderEdit'
 
 const props = defineProps<{
   /** The items, in the order shown. */
-  items: SidebarOrderItem[];
+  items: SidebarOrderItem[]
   /** Whether the items can be dragged into a new order. */
-  draggable: boolean;
-}>();
+  draggable: boolean
+}>()
 
 const emit = defineEmits<{
-  move: [keys: string[]];
-}>();
+  move: [keys: string[]]
+}>()
 
 defineSlots<{
-  default?: (props: { item: SidebarOrderItem }) => unknown;
-}>();
+  default?: (props: { item: SidebarOrderItem }) => unknown
+}>()
 
-const dragged = ref<string | null>(null);
+const dragged = ref<string | null>(null)
 
 /**
  * Starts dragging an item.
  * @param event The drag event.
  * @param key The item.
  */
-function dragStart(event: DragEvent, key: string): void {
-  dragged.value = key;
-  event.dataTransfer?.setData("text/plain", key);
+function dragStart (event: DragEvent, key: string): void {
+  dragged.value = key
+  event.dataTransfer?.setData('text/plain', key)
   if (event.dataTransfer) {
-    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.effectAllowed = 'move'
   }
 }
 
@@ -38,15 +38,15 @@ function dragStart(event: DragEvent, key: string): void {
  * Drops the dragged item at the place of another one.
  * @param key The item dropped on.
  */
-function drop(key: string): void {
-  const moved = dragged.value;
-  dragged.value = null;
+function drop (key: string): void {
+  const moved = dragged.value
+  dragged.value = null
   if (!moved || moved === key) {
-    return;
+    return
   }
-  const keys = props.items.map((item) => item.key).filter((item) => item !== moved);
-  keys.splice(keys.indexOf(key) + (props.items.findIndex((item) => item.key === moved) < props.items.findIndex((item) => item.key === key) ? 1 : 0), 0, moved);
-  emit("move", keys);
+  const keys = props.items.map(item => item.key).filter(item => item !== moved)
+  keys.splice(keys.indexOf(key) + (props.items.findIndex(item => item.key === moved) < props.items.findIndex(item => item.key === key) ? 1 : 0), 0, moved)
+  emit('move', keys)
 }
 </script>
 

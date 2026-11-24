@@ -1,72 +1,72 @@
 <script setup lang="ts">
-import { computed, shallowRef } from "vue";
-import { Check, Pencil, X } from "@lucide/vue";
-import { MCP_ACTIONS, type McpAction, type McpLevel, type McpPatterns, type McpRules, type McpTarget } from "@appsys/devtool-shared";
-import ConfigFileChoice from "@/components/ConfigFileChoice.vue";
-import McpRulesRow from "@/components/mcp/McpRulesRow.vue";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { changeKey, type McpEditMode, type McpLevelChange } from "@/lib/mcp";
-import configStore from "@/stores/config";
-import mcpStore from "@/stores/mcp";
+import { computed, shallowRef } from 'vue'
+import { Check, Pencil, X } from '@lucide/vue'
+import { MCP_ACTIONS, type McpAction, type McpLevel, type McpPatterns, type McpRules, type McpTarget } from '@appsys/devtool-shared'
+import ConfigFileChoice from '@/components/ConfigFileChoice.vue'
+import McpRulesRow from '@/components/mcp/McpRulesRow.vue'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { changeKey, type McpEditMode, type McpLevelChange } from '@/lib/mcp'
+import configStore from '@/stores/config'
+import mcpStore from '@/stores/mcp'
 
-const COMMAND_ACTIONS: readonly McpAction[] = ["read", "run", "input", "control"];
-const FILE_ACTIONS: readonly McpAction[] = ["read", "write"];
-const CERTIFICATE_ACTIONS: readonly McpAction[] = ["read", "run"];
-const ENVIRONMENT_ACTIONS: readonly McpAction[] = ["read", "run", "write"];
-const DATA_ACTIONS: readonly McpAction[] = ["read", "run"];
-const OWN_TERMINAL_LEVELS: readonly McpLevel[] = ["allow", "ask"];
-const PATTERN_LEVELS: readonly McpLevel[] = ["allow", "ask", "deny"];
+const COMMAND_ACTIONS: readonly McpAction[] = ['read', 'run', 'input', 'control']
+const FILE_ACTIONS: readonly McpAction[] = ['read', 'write']
+const CERTIFICATE_ACTIONS: readonly McpAction[] = ['read', 'run']
+const ENVIRONMENT_ACTIONS: readonly McpAction[] = ['read', 'run', 'write']
+const DATA_ACTIONS: readonly McpAction[] = ['read', 'run']
+const OWN_TERMINAL_LEVELS: readonly McpLevel[] = ['allow', 'ask']
+const PATTERN_LEVELS: readonly McpLevel[] = ['allow', 'ask', 'deny']
 
 /** A global setting of `adt.mcp`, as a row of the card. */
 interface SettingRow {
-  label: string;
-  kind: string;
-  rules: McpRules;
-  actions: readonly McpAction[];
-  target: McpTarget;
+  label: string
+  kind: string
+  rules: McpRules
+  actions: readonly McpAction[]
+  target: McpTarget
   /** The levels of a setting being a level itself. */
-  levels?: readonly McpLevel[];
+  levels?: readonly McpLevel[]
   /** Shown in place of the action of a setting being a level itself. */
-  caption?: string;
+  caption?: string
 }
 
-const settings = configStore.mcp;
-const projects = computed(() => Object.values(configStore.projects.value ?? {}));
-const granted = computed(() => new Set(mcpStore.state.value?.grants.filter((grant) => grant.scope === "always").map((grant) => grant.key)));
+const settings = configStore.mcp
+const projects = computed(() => Object.values(configStore.projects.value ?? {}))
+const granted = computed(() => new Set(mcpStore.state.value?.grants.filter(grant => grant.scope === 'always').map(grant => grant.key)))
 
-const editFile = shallowRef<McpEditMode["file"] | null>(null);
-const staged = shallowRef<ReadonlyMap<string, McpLevelChange>>(new Map());
+const editFile = shallowRef<McpEditMode['file'] | null>(null)
+const staged = shallowRef<ReadonlyMap<string, McpLevelChange>>(new Map())
 const edit = computed<McpEditMode | null>(() =>
   editFile.value
     ? {
         file: editFile.value,
         localFile: settings.value?.localFile ?? null,
         staged: staged.value,
-        stage: (change) => {
-          staged.value = new Map(staged.value).set(changeKey(change.path, change.action), change);
-        },
+        stage: change => {
+          staged.value = new Map(staged.value).set(changeKey(change.path, change.action), change)
+        }
       }
-    : null,
-);
+    : null
+)
 
 /**
  * Enters the edit mode, writing to the personal override when there is one.
  */
-function startEdit(): void {
-  editFile.value = settings.value?.localFile ? "local" : "declared";
+function startEdit (): void {
+  editFile.value = settings.value?.localFile ? 'local' : 'declared'
 }
 
 /**
  * Leaves the edit mode, writing the changes waiting when they are kept.
  * @param keep Whether the changes are written, or dropped.
  */
-function endEdit(keep: boolean): void {
+function endEdit (keep: boolean): void {
   if (keep && staged.value.size) {
-    mcpStore.setLevels([...staged.value.values()]);
+    mcpStore.setLevels([...staged.value.values()])
   }
-  staged.value = new Map();
-  editFile.value = null;
+  staged.value = new Map()
+  editFile.value = null
 }
 
 /**
@@ -75,8 +75,8 @@ function endEdit(keep: boolean): void {
  * @param from The setting.
  * @returns The rules, the row showing only the actions the setting rules.
  */
-function uniformRules(level: McpLevel, from: string): McpRules {
-  return Object.fromEntries(MCP_ACTIONS.map((action) => [action, { level, from }])) as McpRules;
+function uniformRules (level: McpLevel, from: string): McpRules {
+  return Object.fromEntries(MCP_ACTIONS.map(action => [action, { level, from }])) as McpRules
 }
 
 /**
@@ -84,8 +84,8 @@ function uniformRules(level: McpLevel, from: string): McpRules {
  * @param folder The absolute path of the folder.
  * @returns Its name.
  */
-function folderName(folder: string): string {
-  return folder.split("/").slice(-1)[0] ?? folder;
+function folderName (folder: string): string {
+  return folder.split('/').slice(-1)[0] ?? folder
 }
 
 /**
@@ -94,51 +94,51 @@ function folderName(folder: string): string {
  * @param patterns The level and its patterns.
  * @returns The description, the patterns after it.
  */
-function patternsKind(kind: string, patterns: McpPatterns): string {
-  return [kind, patterns.allow.length ? `allow ${patterns.allow.join(", ")}` : null, patterns.deny.length ? `deny ${patterns.deny.join(", ")}` : null].filter(Boolean).join(" · ");
+function patternsKind (kind: string, patterns: McpPatterns): string {
+  return [kind, patterns.allow.length ? `allow ${patterns.allow.join(', ')}` : null, patterns.deny.length ? `deny ${patterns.deny.join(', ')}` : null].filter(Boolean).join(' · ')
 }
 
 const settingRows = computed<SettingRow[]>(() => {
-  const value = settings.value;
+  const value = settings.value
   if (!value) {
-    return [];
+    return []
   }
-  const { targets } = value;
+  const { targets } = value
   return [
     {
-      label: "adt.mcp.clients",
-      kind: patternsKind("agents accepted before any rule", value.clients),
-      rules: uniformRules(value.clients.level, "adt.mcp.clients.level"),
-      actions: ["read"],
+      label: 'adt.mcp.clients',
+      kind: patternsKind('agents accepted before any rule', value.clients),
+      rules: uniformRules(value.clients.level, 'adt.mcp.clients.level'),
+      actions: ['read'],
       target: targets.clients,
       levels: PATTERN_LEVELS,
-      caption: "accept",
+      caption: 'accept'
     },
-    { label: "adt.mcp.default", kind: "everything, refined below", rules: value.default, actions: MCP_ACTIONS, target: targets.default },
-    { label: "adt.mcp.commands", kind: "commands of the configuration and restores", rules: value.commands, actions: COMMAND_ACTIONS, target: targets.commands },
-    { label: "adt.mcp.scripts", kind: "executables of the folders of scripts", rules: value.scripts, actions: COMMAND_ACTIONS, target: targets.scripts },
-    { label: "adt.mcp.files", kind: "folders of files of the projects", rules: value.files, actions: FILE_ACTIONS, target: targets.files },
-    { label: "adt.mcp.terminals", kind: "terminals a person opened without a command", rules: value.terminals, actions: COMMAND_ACTIONS, target: targets.terminals },
+    { label: 'adt.mcp.default', kind: 'everything, refined below', rules: value.default, actions: MCP_ACTIONS, target: targets.default },
+    { label: 'adt.mcp.commands', kind: 'commands of the configuration and restores', rules: value.commands, actions: COMMAND_ACTIONS, target: targets.commands },
+    { label: 'adt.mcp.scripts', kind: 'executables of the folders of scripts', rules: value.scripts, actions: COMMAND_ACTIONS, target: targets.scripts },
+    { label: 'adt.mcp.files', kind: 'folders of files of the projects', rules: value.files, actions: FILE_ACTIONS, target: targets.files },
+    { label: 'adt.mcp.terminals', kind: 'terminals a person opened without a command', rules: value.terminals, actions: COMMAND_ACTIONS, target: targets.terminals },
     {
-      label: "adt.mcp.ownTerminals",
-      kind: "the terminals an agent started itself",
-      rules: uniformRules(value.ownTerminals, "adt.mcp.ownTerminals"),
-      actions: ["input", "control"],
+      label: 'adt.mcp.ownTerminals',
+      kind: 'the terminals an agent started itself',
+      rules: uniformRules(value.ownTerminals, 'adt.mcp.ownTerminals'),
+      actions: ['input', 'control'],
       target: targets.ownTerminals,
-      levels: OWN_TERMINAL_LEVELS,
+      levels: OWN_TERMINAL_LEVELS
     },
     {
-      label: "adt.mcp.shell",
-      kind: patternsKind("command lines outside the configuration", value.shell),
-      rules: uniformRules(value.shell.level, "adt.mcp.shell.level"),
-      actions: ["run"],
+      label: 'adt.mcp.shell',
+      kind: patternsKind('command lines outside the configuration', value.shell),
+      rules: uniformRules(value.shell.level, 'adt.mcp.shell.level'),
+      actions: ['run'],
       target: targets.shell,
-      levels: PATTERN_LEVELS,
+      levels: PATTERN_LEVELS
     },
-    { label: "adt.mcp.devtool", kind: "holders of a port (read), reloading the configuration (control)", rules: value.devtool, actions: ["read", "control"], target: targets.devtool },
-    { label: "adt.mcp.certificates", kind: "every certificate, refined below", rules: value.certificates, actions: CERTIFICATE_ACTIONS, target: targets.certificates },
-  ];
-});
+    { label: 'adt.mcp.devtool', kind: 'holders of a port (read), reloading the configuration (control)', rules: value.devtool, actions: ['read', 'control'], target: targets.devtool },
+    { label: 'adt.mcp.certificates', kind: 'every certificate, refined below', rules: value.certificates, actions: CERTIFICATE_ACTIONS, target: targets.certificates }
+  ]
+})
 </script>
 
 <template>

@@ -1,15 +1,15 @@
 <script setup lang="ts">
-import { cn } from "@/lib/utils";
-import { shortPath } from "@/lib/mcp";
+import { cn } from '@/lib/utils'
+import { shortPath } from '@/lib/mcp'
 
 defineProps<{
   /** The personal override, null when the server loads none. */
-  localFile: string | null;
+  localFile: string | null
   /** What a shared change writes to. */
-  sharedHint: string;
-}>();
+  sharedHint: string
+}>()
 
-const file = defineModel<"local" | "declared">({ required: true });
+const file = defineModel<'local' | 'declared'>({ required: true })
 </script>
 
 <template>

@@ -7,12 +7,12 @@ import {
   type CommandInputValue,
   type DirectoryDefinition,
   type DirectoryExtra,
-  type ProjectDefinition,
-} from "@appsys/devtool-shared";
-import commandInputsStore from "@/stores/command-inputs";
-import commandRunsStore from "@/stores/command-runs";
-import configStore from "@/stores/config";
-import wsStore from "@/stores/ws";
+  type ProjectDefinition
+} from '@appsys/devtool-shared'
+import commandInputsStore from '@/stores/command-inputs'
+import commandRunsStore from '@/stores/command-runs'
+import configStore from '@/stores/config'
+import wsStore from '@/stores/ws'
 
 /**
  * Gives the icon declared in the metadata of a project, a directory or a command.
@@ -20,13 +20,13 @@ import wsStore from "@/stores/ws";
  * @param fallback The icon used when none is declared.
  * @returns Its Iconify name, a bare name being taken from Lucide.
  */
-export function iconFromMeta(meta: unknown, fallback = "ph:terminal"): string {
-  const icon = typeof meta === "object" && meta !== null ? (meta as { icon?: unknown }).icon : null;
-  if (typeof icon !== "string" || !icon.trim()) {
-    return fallback;
+export function iconFromMeta (meta: unknown, fallback = 'ph:terminal'): string {
+  const icon = typeof meta === 'object' && meta !== null ? (meta as { icon?: unknown }).icon : null
+  if (typeof icon !== 'string' || !icon.trim()) {
+    return fallback
   }
 
-  return icon.includes(":") ? icon.trim() : `lucide:${icon.trim()}`;
+  return icon.includes(':') ? icon.trim() : `lucide:${icon.trim()}`
 }
 
 /**
@@ -34,8 +34,8 @@ export function iconFromMeta(meta: unknown, fallback = "ph:terminal"): string {
  * @param args The arguments of the command.
  * @returns The command line.
  */
-export function commandLine(args: CommandArg[]): string {
-  return args.map((arg) => (typeof arg === "string" ? arg : `<${arg.name}>`)).join(" ");
+export function commandLine (args: CommandArg[]): string {
+  return args.map(arg => (typeof arg === 'string' ? arg : `<${arg.name}>`)).join(' ')
 }
 
 /**
@@ -43,8 +43,8 @@ export function commandLine(args: CommandArg[]): string {
  * @param command The command.
  * @returns Its name, else its command line for the main command, else its slug.
  */
-export function commandName(command: DirectoryExtra): string {
-  return command.name || (command.slug === "main" ? commandLine(command.args) : command.slug);
+export function commandName (command: DirectoryExtra): string {
+  return command.name || (command.slug === 'main' ? commandLine(command.args) : command.slug)
 }
 
 /**
@@ -54,25 +54,25 @@ export function commandName(command: DirectoryExtra): string {
  * @param ask Whether the dialog is shown even when the default values are enough.
  * @param run Receives the values.
  */
-function withInputs(command: DirectoryExtra, ask: boolean, run: (inputs: CommandInputValue[]) => void): void {
-  const defaults = defaultCommandInputs(command.args);
+function withInputs (command: DirectoryExtra, ask: boolean, run: (inputs: CommandInputValue[]) => void): void {
+  const defaults = defaultCommandInputs(command.args)
   if (!defaults.length || (!ask && !missingCommandInputs(command.args, defaults).length)) {
-    run(defaults);
-    return;
+    run(defaults)
+    return
   }
-  commandInputsStore.ask(command, run);
+  commandInputsStore.ask(command, run)
 }
 
 /** How a command of a directory runs. */
 export interface RunDirectoryCommandOptions {
   /** Whether the interface then shows the terminal of the command. */
-  redirect?: boolean;
+  redirect?: boolean
   /** The values of its inputs; without them, they are asked in a dialog. */
-  inputs?: CommandInputValue[];
+  inputs?: CommandInputValue[]
   /** Whether the command starts on its own, with its default values when they are enough. */
-  automatic?: boolean;
+  automatic?: boolean
   /** Runs once the command is finished, the command then running in the background. */
-  onFinished?: () => void;
+  onFinished?: () => void
 }
 
 /**
@@ -83,18 +83,18 @@ export interface RunDirectoryCommandOptions {
  * @param command The command.
  * @param options How it runs.
  */
-export function runDirectoryCommand(projectSlug: string, directorySlug: string, command: DirectoryExtra, options: RunDirectoryCommandOptions = {}): void {
-  const { redirect = true, inputs, automatic = false, onFinished } = options;
+export function runDirectoryCommand (projectSlug: string, directorySlug: string, command: DirectoryExtra, options: RunDirectoryCommandOptions = {}): void {
+  const { redirect = true, inputs, automatic = false, onFinished } = options
   if (!inputs) {
-    withInputs(command, !automatic, (values) => runDirectoryCommand(projectSlug, directorySlug, command, { ...options, inputs: values }));
-    return;
+    withInputs(command, !automatic, values => runDirectoryCommand(projectSlug, directorySlug, command, { ...options, inputs: values }))
+    return
   }
 
-  const args = expandCommandArgs(command.args, inputs);
-  const name = [commandName(command), ...expandCommandArgs(commandInputs(command.args), inputs)].join(" ");
+  const args = expandCommandArgs(command.args, inputs)
+  const name = [commandName(command), ...expandCommandArgs(commandInputs(command.args), inputs)].join(' ')
   if (command.detached) {
-    wsStore.newCommandDetached(projectSlug, directorySlug, args, command.env, { command: command.slug, inputs });
-    return;
+    wsStore.newCommandDetached(projectSlug, directorySlug, args, command.env, { command: command.slug, inputs })
+    return
   }
 
   if (command.prompt || onFinished) {
@@ -108,9 +108,9 @@ export function runDirectoryCommand(projectSlug: string, directorySlug: string, 
       name,
       command: command.slug,
       inputs,
-      onFinished,
-    });
-    return;
+      onFinished
+    })
+    return
   }
 
   wsStore.newCommandStream(
@@ -122,8 +122,8 @@ export function runDirectoryCommand(projectSlug: string, directorySlug: string, 
     command.killSignal,
     command.notifications,
     name,
-    { redirect, command: command.slug, inputs },
-  );
+    { redirect, command: command.slug, inputs }
+  )
 }
 
 /**
@@ -131,18 +131,18 @@ export function runDirectoryCommand(projectSlug: string, directorySlug: string, 
  * its main command, each one only when it does not run already.
  * @param project The section.
  */
-export function startSection(project: ProjectDefinition): void {
-  const running = configStore.commandStreams.value.filter((stream) => stream.projectSlug === project.slug && stream.status === "RUNNING");
+export function startSection (project: ProjectDefinition): void {
+  const running = configStore.commandStreams.value.filter(stream => stream.projectSlug === project.slug && stream.status === 'RUNNING')
   for (const directory of Object.values(project.directories)) {
-    const mainCommand = directory.defaultAction?.shortcut.type === "command" ? directory.defaultAction.shortcut.slug : null;
-    for (const command of Object.values(directory.extras).filter((extra) => extra.startWithSection)) {
-      const directoryStreams = running.filter((stream) => stream.directorySlug === directory.slug);
+    const mainCommand = directory.defaultAction?.shortcut.type === 'command' ? directory.defaultAction.shortcut.slug : null
+    for (const command of Object.values(directory.extras).filter(extra => extra.startWithSection)) {
+      const directoryStreams = running.filter(stream => stream.directorySlug === directory.slug)
       if (command.slug === mainCommand) {
-        if (!directoryStreams.some((stream) => stream.primary)) {
-          startDefaultCommand(project.slug, directory);
+        if (!directoryStreams.some(stream => stream.primary)) {
+          startDefaultCommand(project.slug, directory)
         }
-      } else if (!directoryStreams.some((stream) => !stream.primary && stream.command === command.slug)) {
-        runDirectoryCommand(project.slug, directory.slug, command, { redirect: false, automatic: true });
+      } else if (!directoryStreams.some(stream => !stream.primary && stream.command === command.slug)) {
+        runDirectoryCommand(project.slug, directory.slug, command, { redirect: false, automatic: true })
       }
     }
   }
@@ -152,10 +152,10 @@ export function startSection(project: ProjectDefinition): void {
  * Stops every running command of a section.
  * @param projectSlug The slug of the section.
  */
-export function stopSection(projectSlug: string): void {
+export function stopSection (projectSlug: string): void {
   for (const stream of configStore.commandStreams.value) {
-    if (stream.projectSlug === projectSlug && stream.status === "RUNNING") {
-      wsStore.updateCommandStream(stream.slug, "stop");
+    if (stream.projectSlug === projectSlug && stream.status === 'RUNNING') {
+      wsStore.updateCommandStream(stream.slug, 'stop')
     }
   }
 }
@@ -166,30 +166,30 @@ export function stopSection(projectSlug: string): void {
  * @param projectSlug The slug of the project.
  * @param directory The directory.
  */
-export function startDefaultCommand(
+export function startDefaultCommand (
   projectSlug: string,
-  directory: Pick<DirectoryDefinition, "slug" | "name" | "args" | "env" | "killSignal" | "notifications" | "defaultAction" | "extras">,
+  directory: Pick<DirectoryDefinition, 'slug' | 'name' | 'args' | 'env' | 'killSignal' | 'notifications' | 'defaultAction' | 'extras'>
 ): void {
-  const streamSlug = configStore.getDirectoryStreamPrimary(projectSlug, directory.slug);
+  const streamSlug = configStore.getDirectoryStreamPrimary(projectSlug, directory.slug)
   if (streamSlug) {
-    wsStore.updateCommandStream(streamSlug, "start");
-    return;
+    wsStore.updateCommandStream(streamSlug, 'start')
+    return
   }
 
-  const args = directory.args;
+  const args = directory.args
   if (!args) {
-    return;
+    return
   }
-  const action = directory.defaultAction?.shortcut;
-  const command = action?.type === "command" ? directory.extras[action.slug] : undefined;
+  const action = directory.defaultAction?.shortcut
+  const command = action?.type === 'command' ? directory.extras[action.slug] : undefined
   const start = (inputs: CommandInputValue[]): void =>
     wsStore.newCommandStream(projectSlug, directory.slug, true, expandCommandArgs(args, inputs), directory.env, directory.killSignal, directory.notifications, directory.name, {
       command: command?.slug,
-      inputs,
-    });
+      inputs
+    })
   if (command) {
-    withInputs(command, false, start);
+    withInputs(command, false, start)
   } else {
-    start([]);
+    start([])
   }
 }

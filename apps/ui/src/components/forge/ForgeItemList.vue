@@ -1,35 +1,35 @@
 <script setup lang="ts">
-import { computed } from "vue";
-import { RouterLink, useRoute, useRouter } from "vue-router";
-import { TabsList, TabsRoot, TabsTrigger } from "reka-ui";
-import type { ForgeItemsPayload, IntegrationDefinition } from "@appsys/devtool-shared";
-import { forgeEntries } from "@appsys/devtool-shared";
-import ForgeItemActions from "@/components/forge/ForgeItemActions.vue";
-import ForgeItemSummary from "@/components/forge/ForgeItemSummary.vue";
-import type { AgentPlace } from "@/lib/agents";
-import { FORGE_FILTERS, FORGE_ICONS, forgeItemRoute, startForgeAction } from "@/lib/forge";
-import { formatRelativeDate } from "@/lib/format";
-import configStore from "@/stores/config";
+import { computed } from 'vue'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
+import { TabsList, TabsRoot, TabsTrigger } from 'reka-ui'
+import type { ForgeItemsPayload, IntegrationDefinition } from '@appsys/devtool-shared'
+import { forgeEntries } from '@appsys/devtool-shared'
+import ForgeItemActions from '@/components/forge/ForgeItemActions.vue'
+import ForgeItemSummary from '@/components/forge/ForgeItemSummary.vue'
+import type { AgentPlace } from '@/lib/agents'
+import { FORGE_FILTERS, FORGE_ICONS, forgeItemRoute, startForgeAction } from '@/lib/forge'
+import { formatRelativeDate } from '@/lib/format'
+import configStore from '@/stores/config'
 
 const props = defineProps<{
-  integration: IntegrationDefinition;
+  integration: IntegrationDefinition
   /** The section or project declaring the integration, where the agents work. */
-  place: AgentPlace;
+  place: AgentPlace
   /** The items, as last read. */
-  state: ForgeItemsPayload;
-}>();
+  state: ForgeItemsPayload
+}>()
 
-const route = useRoute();
-const router = useRouter();
-const filters = computed(() => FORGE_FILTERS[props.state.kind]);
+const route = useRoute()
+const router = useRouter()
+const filters = computed(() => FORGE_FILTERS[props.state.kind])
 const tab = computed({
-  get: () => filters.value.find((filter) => filter.value === route.query.tab)?.value ?? filters.value[0].value,
-  set: (value: string) => void router.replace({ query: { ...route.query, tab: value } }),
-});
+  get: () => filters.value.find(filter => filter.value === route.query.tab)?.value ?? filters.value[0].value,
+  set: (value: string) => void router.replace({ query: { ...route.query, tab: value } })
+})
 
-const entries = computed(() => forgeEntries(props.state));
-const tabs = computed(() => filters.value.map((filter) => ({ ...filter, count: entries.value.filter(filter.keep).length })));
-const shown = computed(() => entries.value.filter(filters.value.find((filter) => filter.value === tab.value)?.keep ?? (() => true)));
+const entries = computed(() => forgeEntries(props.state))
+const tabs = computed(() => filters.value.map(filter => ({ ...filter, count: entries.value.filter(filter.keep).length })))
+const shown = computed(() => entries.value.filter(filters.value.find(filter => filter.value === tab.value)?.keep ?? (() => true)))
 </script>
 
 <template>

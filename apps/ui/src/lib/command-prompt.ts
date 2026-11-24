@@ -1,24 +1,24 @@
 /** The answers to a yes/no question, as the question spells them. */
 export interface CommandPromptChoice {
-  yes: string;
-  no: string;
+  yes: string
+  no: string
   /** The answer given by an empty reply, null when there is none. */
-  defaultAnswer: "yes" | "no" | null;
+  defaultAnswer: 'yes' | 'no' | null
 }
 
 /** A question a running command waits an answer to. */
 export interface CommandPrompt {
-  text: string;
+  text: string
   /** Whether the answer must not be shown, the question asking for a password or a passphrase. */
-  secret: boolean;
+  secret: boolean
   /** The answers of a yes/no question, null for any other question. */
-  choice: CommandPromptChoice | null;
+  choice: CommandPromptChoice | null
 }
 
-const ANSI_SEQUENCE = /\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]/g;
-const YES_NO = /[[(]\s*(y(?:es)?)\s*\/\s*(n(?:o)?)\s*[\])]/i;
-const SECRET = /pass(?:word|phrase)|secret|token|\bpin\b/i;
-const QUESTION_END = /[:?\])>]$/;
+const ANSI_SEQUENCE = /\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]/g
+const YES_NO = /[[(]\s*(y(?:es)?)\s*\/\s*(n(?:o)?)\s*[\])]/i
+const SECRET = /pass(?:word|phrase)|secret|token|\bpin\b/i
+const QUESTION_END = /[:?\])>]$/
 
 /**
  * Turns terminal output into plain text: escape sequences dropped, and every carriage return
@@ -26,14 +26,14 @@ const QUESTION_END = /[:?\])>]$/;
  * @param output The output chunks, in order.
  * @returns The text.
  */
-export function terminalText(output: string[]): string {
+export function terminalText (output: string[]): string {
   return output
-    .join("")
-    .replace(ANSI_SEQUENCE, "")
-    .replace(/\r+\n/g, "\n")
-    .split("\n")
-    .map((line) => line.slice(line.lastIndexOf("\r") + 1))
-    .join("\n");
+    .join('')
+    .replace(ANSI_SEQUENCE, '')
+    .replace(/\r+\n/g, '\n')
+    .split('\n')
+    .map(line => line.slice(line.lastIndexOf('\r') + 1))
+    .join('\n')
 }
 
 /**
@@ -42,20 +42,20 @@ export function terminalText(output: string[]): string {
  * @param question The question.
  * @returns The answers, or null when the question is not a yes/no one.
  */
-function choiceOf(question: string): CommandPromptChoice | null {
-  const match = YES_NO.exec(question);
+function choiceOf (question: string): CommandPromptChoice | null {
+  const match = YES_NO.exec(question)
   if (!match) {
-    return null;
+    return null
   }
 
-  const [, yes, no] = match;
-  let defaultAnswer: CommandPromptChoice["defaultAnswer"] = null;
-  if (yes[0] === "Y" && no[0] === "n") {
-    defaultAnswer = "yes";
-  } else if (yes[0] === "y" && no[0] === "N") {
-    defaultAnswer = "no";
+  const [, yes, no] = match
+  let defaultAnswer: CommandPromptChoice['defaultAnswer'] = null
+  if (yes.startsWith('Y') && no.startsWith('n')) {
+    defaultAnswer = 'yes'
+  } else if (yes.startsWith('y') && no.startsWith('N')) {
+    defaultAnswer = 'no'
   }
-  return { yes: yes.toLowerCase(), no: no.toLowerCase(), defaultAnswer };
+  return { yes: yes.toLowerCase(), no: no.toLowerCase(), defaultAnswer }
 }
 
 /**
@@ -64,12 +64,12 @@ function choiceOf(question: string): CommandPromptChoice | null {
  * @param text The plain output of the command.
  * @returns The question, or null when the output does not end with one.
  */
-export function pendingPrompt(text: string): CommandPrompt | null {
-  const trimmed = text.trimEnd();
-  const line = trimmed.slice(trimmed.lastIndexOf("\n") + 1).trim();
+export function pendingPrompt (text: string): CommandPrompt | null {
+  const trimmed = text.trimEnd()
+  const line = trimmed.slice(trimmed.lastIndexOf('\n') + 1).trim()
   if (!QUESTION_END.test(line)) {
-    return null;
+    return null
   }
 
-  return { text: line, secret: SECRET.test(line), choice: choiceOf(line) };
+  return { text: line, secret: SECRET.test(line), choice: choiceOf(line) }
 }

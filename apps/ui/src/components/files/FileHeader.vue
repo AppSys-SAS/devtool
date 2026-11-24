@@ -1,48 +1,48 @@
 <script setup lang="ts">
-import { computed } from "vue";
-import { Eye, EyeOff, Loader2, Save, TriangleAlert, Undo2 } from "@lucide/vue";
-import type { FilePayload } from "@appsys/devtool-shared";
-import SidebarToggle from "@/components/SidebarToggle.vue";
-import { Button } from "@/components/ui/button";
-import { formatRelativeDate } from "@/lib/format";
-import { cn } from "@/lib/utils";
+import { computed } from 'vue'
+import { Eye, EyeOff, Loader2, Save, TriangleAlert, Undo2 } from '@lucide/vue'
+import type { FilePayload } from '@appsys/devtool-shared'
+import SidebarToggle from '@/components/SidebarToggle.vue'
+import { Button } from '@/components/ui/button'
+import { formatRelativeDate } from '@/lib/format'
+import { cn } from '@/lib/utils'
 
 const props = withDefaults(
   defineProps<{
-    root: string;
-    file: FilePayload;
-    dirty: boolean;
-    saving: boolean;
+    root: string
+    file: FilePayload
+    dirty: boolean
+    saving: boolean
     /** Whether the file can be shown rendered next to the editor. */
-    previewable?: boolean;
+    previewable?: boolean
   }>(),
-  { previewable: false },
-);
+  { previewable: false }
+)
 
-const preview = defineModel<boolean>("preview", { default: false });
+const preview = defineModel<boolean>('preview', { default: false })
 
 const emit = defineEmits<{
-  save: [];
-  revert: [];
-}>();
+  save: []
+  revert: []
+}>()
 
-const location = computed(() => `${props.root.replace(/^\/(Users|home)\/[^/]+/, "~")}/${props.file.path}`);
+const location = computed(() => `${props.root.replace(/^\/(Users|home)\/[^/]+/, '~')}/${props.file.path}`)
 
 const status = computed(() => {
   if (props.dirty) {
-    return "Unsaved changes";
+    return 'Unsaved changes'
   }
 
   if (props.file.error) {
-    return "";
+    return ''
   }
 
   if (props.file.binary) {
-    return "Binary file, not editable";
+    return 'Binary file, not editable'
   }
 
-  return props.file.updatedAt ? `Changed ${formatRelativeDate(props.file.updatedAt)}` : "Not created yet";
-});
+  return props.file.updatedAt ? `Changed ${formatRelativeDate(props.file.updatedAt)}` : 'Not created yet'
+})
 </script>
 
 <template>

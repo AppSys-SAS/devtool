@@ -1,25 +1,25 @@
 <script setup lang="ts">
-import { computed } from "vue";
-import { RouterLink, useRoute } from "vue-router";
-import { DialogContent, DialogDescription, DialogOverlay, DialogPortal, DialogRoot, DialogTitle } from "reka-ui";
-import type { CommandInputValue, McpAnswer } from "@appsys/devtool-shared";
-import McpRequestDetails from "@/components/mcp/McpRequestDetails.vue";
-import mcpStore from "@/stores/mcp";
+import { computed } from 'vue'
+import { RouterLink, useRoute } from 'vue-router'
+import { DialogContent, DialogDescription, DialogOverlay, DialogPortal, DialogRoot, DialogTitle } from 'reka-ui'
+import type { CommandInputValue, McpAnswer } from '@appsys/devtool-shared'
+import McpRequestDetails from '@/components/mcp/McpRequestDetails.vue'
+import mcpStore from '@/stores/mcp'
 
-const route = useRoute();
-const request = mcpStore.current;
-const waiting = computed(() => mcpStore.state.value?.pending.length ?? 0);
-const answeredInPage = computed(() => route.name === "agents" && route.query.tab === "waiting");
-const open = computed(() => request.value !== null && !answeredInPage.value);
+const route = useRoute()
+const request = mcpStore.current
+const waiting = computed(() => mcpStore.state.value?.pending.length ?? 0)
+const answeredInPage = computed(() => route.name === 'agents' && route.query.tab === 'waiting')
+const open = computed(() => request.value !== null && !answeredInPage.value)
 
 /**
  * Answers the request shown, the next one then shown.
  * @param answer The answer.
  * @param inputs The values of the inputs of its command.
  */
-function answer(answer: McpAnswer, inputs: CommandInputValue[] | null): void {
+function answer (answer: McpAnswer, inputs: CommandInputValue[] | null): void {
   if (request.value) {
-    mcpStore.answer(request.value.id, answer, inputs);
+    mcpStore.answer(request.value.id, answer, inputs)
   }
 }
 
@@ -27,9 +27,9 @@ function answer(answer: McpAnswer, inputs: CommandInputValue[] | null): void {
  * Denies the request shown when the dialog is closed with Escape.
  * @param event The key event, prevented so that the dialog closes once the request is answered.
  */
-function escape(event: KeyboardEvent): void {
-  event.preventDefault();
-  answer("deny", null);
+function escape (event: KeyboardEvent): void {
+  event.preventDefault()
+  answer('deny', null)
 }
 </script>
 
