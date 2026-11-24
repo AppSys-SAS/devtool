@@ -1,25 +1,28 @@
 ---
-description: Connect the devtool to the CDN that stores the shared environment, with an OpenID Connect sign-in.
+description: Connect the devtool to the CDN that stores the shared environment.
 ---
 
 # CDN
 
 The CDN stores the files your team shares: the devtool configuration, application configurations,
-database archives, bucket snapshots. Every call carries an access token from your identity provider, and
-the CDN decides from it who may download, upload and delete. Configure it once and the
-[environment](/configuration/environment) commands work for everyone.
+database archives, bucket snapshots. Every call carries the access token of your
+[sign-in](/configuration/auth), and the CDN decides from it who may download, upload and delete.
+Configure it once and the [environment](/configuration/environment) commands work for everyone.
 
 ```yaml [config.local.yml]
+auth:
+  issuer: https://auth.example.dev
+  clientId: devtool
 cdn:
   url: https://cdn.example.dev
-  openid:
-    issuer: https://auth.example.dev
-    clientId: devtool
 ```
 
+The CDN needs an [`auth`](/configuration/auth) section: without it, the devtool warns
+`cdn: needs an auth section, signing the developers in` and cannot reach the CDN.
+
 ::: tip Where to put it
-A new developer has no shared configuration yet, so the `cdn` section usually goes in their
-`config.local.yml` first. Once `devtool env pull` brought the shared `config.yml`, it can live there too.
+A new developer has no shared configuration yet, so `auth` and `cdn` usually go in their
+`config.local.yml` first. Once `devtool env pull` brought the shared `config.yml`, they can live there too.
 :::
 
 ## Sign in
@@ -28,13 +31,8 @@ A new developer has no shared configuration yet, so the `cdn` section usually go
 devtool login
 ```
 
-The devtool opens the issuer in your browser (authorization code with PKCE, as a public client: no secret
-to share) and waits for the redirect on `http://127.0.0.1:<callbackPort>/callback`. Register that address
-as a redirect URI of the `clientId` client in your identity provider.
-
-The tokens are kept in `session.json` in the configuration folder, readable by you only (mode 600). The
-access token is renewed with the refresh token when it expires, one devtool process at a time.
-`devtool server` signs in first when no session exists. `devtool logout` forgets the session.
+Sign-in is described on the [Sign-in](/configuration/auth) page. The CDN calls renew the access token
+on their own when it expires.
 
 ## Files by hand
 
@@ -58,13 +56,9 @@ devtool cdn rm api/old.yml
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `url` | string | required | Base URL of the CDN. A trailing `/` is removed. |
-| `openid.issuer` | string | required | OpenID Connect issuer. A trailing `/` is removed. |
-| `openid.clientId` | string | required | Public client of the devtool at the issuer. |
-| `openid.name` | string | none | Name of the identity provider shown in the sign-in texts. |
-| `openid.callbackPort` | integer | `6732` | Local port the issuer redirects to. |
 
-### Errors
+### Warnings and errors
 
-The `cdn` section shows no warning: when `url`, `openid.issuer` or `openid.clientId` is missing, the CDN
-simply counts as not configured, and the CLI stops with "no `cdn` section (url, openid.issuer,
-openid.clientId) in the devtool configuration". An invalid `callbackPort` falls back to `6732`.
+- `cdn: needs an auth section, signing the developers in`
+- Without `url`, the CDN counts as not configured, and the CLI stops with "no `cdn` section (url) in the
+  devtool configuration". Without a complete `auth` section, it stops naming what `auth` misses.

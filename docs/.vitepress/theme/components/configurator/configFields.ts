@@ -65,11 +65,16 @@ export const S3_FIELDS: FieldDefinition[] = [
   { path: ['environment', 's3', 'secretAccessKey'], label: 'S3 secret key' }
 ]
 
+export const AUTH_FIELDS: FieldDefinition[] = [
+  { path: ['auth', 'type'], label: 'Provider', type: 'select', options: ['openid'], defaultValue: 'openid' },
+  { path: ['auth', 'name'], label: 'Name shown', placeholder: 'My SSO' },
+  { path: ['auth', 'issuer'], label: 'OpenID issuer', placeholder: 'https://auth.example.dev' },
+  { path: ['auth', 'clientId'], label: 'Client ID', placeholder: 'devtool' },
+  { path: ['auth', 'scopes'], label: 'Scopes', type: 'list', placeholder: 'openid, offline_access, groups, profile' }
+]
+
 export const CDN_FIELDS: FieldDefinition[] = [
-  { path: ['cdn', 'url'], label: 'CDN URL', placeholder: 'https://cdn.example.dev' },
-  { path: ['cdn', 'openid', 'issuer'], label: 'OpenID issuer', placeholder: 'https://auth.example.dev' },
-  { path: ['cdn', 'openid', 'clientId'], label: 'Client ID', placeholder: 'devtool' },
-  { path: ['cdn', 'openid', 'name'], label: 'Sign-in name', placeholder: 'My SSO' }
+  { path: ['cdn', 'url'], label: 'CDN URL', placeholder: 'https://cdn.example.dev' }
 ]
 
 export const AGENT_FIELDS: FieldDefinition[] = [

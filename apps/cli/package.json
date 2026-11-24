@@ -16,6 +16,7 @@
     "dev": "tsx src/index.ts"
   },
   "dependencies": {
+    "@appsys/devtool-auth": "workspace:*",
     "@appsys/devtool-cdn": "workspace:*",
     "@appsys/devtool-config": "workspace:*",
     "@appsys/devtool-proxy": "workspace:*",

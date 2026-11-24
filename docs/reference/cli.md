@@ -62,12 +62,13 @@ devtool login
 devtool logout
 ```
 
-`login` signs in to the [CDN](/configuration/cdn) with its OpenID Connect issuer, in your browser.
-`logout` forgets the session.
+`login` signs in with the [identity provider](/configuration/auth) of the configuration, in your browser:
+it needs an `auth` section. `logout` forgets the session of the identity provider.
 
 ## devtool cdn
 
-Reads and changes the devtool files of the CDN directly.
+Reads and changes the devtool files of the CDN directly. Like `devtool env`, it needs both the
+[`auth`](/configuration/auth) and the [`cdn`](/configuration/cdn) sections.
 
 ```bash
 devtool cdn pull api/config.yml ./config.yml

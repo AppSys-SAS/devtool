@@ -8,6 +8,7 @@ import ItemList from './configurator/ItemList.vue'
 import ProjectForm from './configurator/ProjectForm.vue'
 import {
   AGENT_FIELDS,
+  AUTH_FIELDS,
   BUCKET_FIELDS,
   CDN_FIELDS,
   CERTIFICATE_FIELDS,
@@ -181,7 +182,11 @@ function startFromExample (): void {
         <ConfigField v-for="field in S3_FIELDS" :key="field.label" v-bind="field" />
       </ConfigGroup>
 
-      <ConfigGroup title="CDN" description="Where the environment is shared, and how developers sign in.">
+      <ConfigGroup title="Sign-in" description="The identity provider signing developers in, for the CDN and the auth:// value blocks.">
+        <ConfigField v-for="field in AUTH_FIELDS" :key="field.label" v-bind="field" />
+      </ConfigGroup>
+
+      <ConfigGroup title="CDN" description="Where the environment is shared.">
         <ConfigField v-for="field in CDN_FIELDS" :key="field.label" v-bind="field" />
       </ConfigGroup>
 

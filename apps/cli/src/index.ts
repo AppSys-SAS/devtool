@@ -7,10 +7,10 @@ import { pipeline } from 'node:stream/promises'
 import { fileURLToPath } from 'node:url'
 import { checkbox, confirm, select } from '@inquirer/prompts'
 import { Command } from 'commander'
+import { type AuthOptions, AuthSignInRequiredError, login, logout, openInBrowser, readAuthOptions } from '@appsys/devtool-auth'
 import {
   CdnClient,
   type CdnOptions,
-  CdnSignInRequiredError,
   defaultEnvironmentFolder,
   Environment,
   type EnvironmentItem,
@@ -18,9 +18,6 @@ import {
   type EnvironmentSelection,
   listTables,
   localPathOf,
-  login,
-  logout,
-  openInBrowser,
   overwritesLocalData,
   parseTargets,
   readCdnOptions,
@@ -41,25 +38,39 @@ const __dirname = path.dirname(__filename)
 const UI_PATH = path.resolve(__dirname, '../../ui/dist')
 
 /**
- * Reads the CDN options of the configuration of the devtool installation.
+ * Reads the identity provider of the configuration of the devtool installation.
  * @returns The options.
  */
-async function requireConfiguredCdn (): Promise<CdnOptions> {
-  const options = readCdnOptions((await loadMergedConfig()).config.cdn)
+async function requireConfiguredAuth (): Promise<AuthOptions> {
+  const { options, problems } = readAuthOptions((await loadMergedConfig()).config.auth)
   if (!options) {
-    throw new Error('no `cdn` section (url, openid.issuer, openid.clientId) in the devtool configuration')
+    const details = problems.map(problem => `${problem.setting} ${problem.message}`).join('; ')
+    throw new Error(`no complete \`auth\` section (type, issuer, clientId) in the devtool configuration${details ? `: ${details}` : ''}`)
   }
-
   return options
 }
 
 /**
- * Signs the developer in to the CDN in the browser.
- * @param options The CDN options.
+ * Reads the CDN options of the configuration of the devtool installation.
+ * @returns The options.
  */
-async function signIn (options: CdnOptions): Promise<void> {
+async function requireConfiguredCdn (): Promise<CdnOptions> {
+  const { config } = await loadMergedConfig()
+  const options = readCdnOptions(config.cdn, config.auth)
+  if (!options) {
+    await requireConfiguredAuth()
+    throw new Error('no `cdn` section (url) in the devtool configuration')
+  }
+  return options
+}
+
+/**
+ * Signs the developer in with the identity provider in the browser.
+ * @param options The settings of the identity provider.
+ */
+async function signIn (options: AuthOptions): Promise<void> {
   await login(options, url => {
-    logger.info('CLI', 'Login', `Sign in${options.issuerName ? ` with ${options.issuerName}` : ''} on ${url}`)
+    logger.info('CLI', 'Login', `Sign in${options.name ? ` with ${options.name}` : ''} on ${url}`)
     openInBrowser(url)
   })
   logger.info('CLI', 'Login', 'Signed in')
@@ -185,7 +196,7 @@ async function transfer (selections: EnvironmentSelection[], run: (selection: En
         logger.warn('CLI', 'Env', `${targetOf(selection)}: ${result.detail}`)
       }
     } catch (error) {
-      if (error instanceof CdnSignInRequiredError) {
+      if (error instanceof AuthSignInRequiredError) {
         throw error
       }
 
@@ -299,14 +310,14 @@ async function main (): Promise<void> {
 
   program
     .command('login')
-    .description('Sign in to the CDN with its OpenID Connect issuer')
+    .description('Sign in with the identity provider of the configuration')
     .action(async () => {
-      await signIn(await requireConfiguredCdn())
+      await signIn(await requireConfiguredAuth())
     })
 
   program
     .command('logout')
-    .description('Forget the CDN session')
+    .description('Forget the session of the identity provider')
     .action(async () => {
       await logout()
       logger.info('CLI', 'Logout', 'Signed out')

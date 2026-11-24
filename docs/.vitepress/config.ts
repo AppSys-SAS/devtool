@@ -66,6 +66,7 @@ export default defineConfig({
           { text: 'Integrations', link: '/configuration/integrations' },
           { text: 'Files', link: '/configuration/files' },
           { text: 'Environment', link: '/configuration/environment' },
+          { text: 'Sign-in', link: '/configuration/auth' },
           { text: 'CDN', link: '/configuration/cdn' },
           { text: 'Agent permissions (MCP)', link: '/configuration/mcp' },
           { text: 'All keys', link: '/configuration/reference' }

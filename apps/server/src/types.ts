@@ -100,11 +100,11 @@ export type ConnectionMessage
     data: Record<string, never>
   }
   | {
-    type: 'cdnLogin'
+    type: 'authLogin'
     data: Record<string, never>
   }
   | {
-    type: 'cdnLogout'
+    type: 'authLogout'
     data: Record<string, never>
   }
   | {

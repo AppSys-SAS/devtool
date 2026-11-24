@@ -32,6 +32,7 @@ The schema is also published with the npm package, as `@appsys/devtool-config/sc
 | `passthrough` | list | | [Network and DNS](/configuration/network) |
 | `dns` | map | | [Network and DNS](/configuration/network) |
 | `environment` | map | | [Environment](/configuration/environment) |
+| `auth` | map | | [Sign-in](/configuration/auth) |
 | `cdn` | map | | [CDN](/configuration/cdn) |
 
 ## adt
@@ -195,12 +196,19 @@ Also under `sections.<slug>.integrations` and `projects.<slug>.integrations`.
 | `environment.s3.endpoint`, `.accessKeyId`, `.secretAccessKey` | string | required | [Environment](/configuration/environment#buckets-and-s3) |
 | `environment.s3.region` | string | `us-east-1` | [Environment](/configuration/environment#buckets-and-s3) |
 
+## auth
+
+| Key | Type | Default | Page |
+|---|---|---|---|
+| `auth.type` | `openid` | `openid` | [Sign-in](/configuration/auth) |
+| `auth.name` | string | none | [Sign-in](/configuration/auth) |
+| `auth.issuer` | string | required | [Sign-in](/configuration/auth) |
+| `auth.clientId` | string | required | [Sign-in](/configuration/auth) |
+| `auth.callbackPort` | integer | `6732` | [Sign-in](/configuration/auth) |
+| `auth.scopes` | list of strings | `[ openid, offline_access, groups, profile ]` | [Sign-in](/configuration/auth#scopes) |
+
 ## cdn
 
 | Key | Type | Default | Page |
 |---|---|---|---|
 | `cdn.url` | string | required | [CDN](/configuration/cdn) |
-| `cdn.openid.issuer` | string | required | [CDN](/configuration/cdn) |
-| `cdn.openid.clientId` | string | required | [CDN](/configuration/cdn) |
-| `cdn.openid.name` | string | none | [CDN](/configuration/cdn) |
-| `cdn.openid.callbackPort` | integer | `6732` | [CDN](/configuration/cdn) |

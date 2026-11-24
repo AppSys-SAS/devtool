@@ -34,6 +34,7 @@
       "items": { "$ref": "#/$defs/passthrough" }
     },
     "dns": { "$ref": "#/$defs/dns" },
+    "auth": { "$ref": "#/$defs/auth" },
     "cdn": { "$ref": "#/$defs/cdn" },
     "integrations": {
       "type": "object",
@@ -356,21 +357,30 @@
     },
     "cdn": {
       "type": "object",
-      "description": "The CDN storing the shared files of the environment, and its OpenID Connect sign-in.",
+      "description": "The CDN storing the shared files of the environment, reached with the access token of the auth section.",
       "additionalProperties": false,
-      "required": ["url", "openid"],
+      "required": ["url"],
       "properties": {
-        "url": { "type": "string", "pattern": "^https?://", "description": "Base URL of the CDN; files live under <url>/devtool/." },
-        "openid": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["issuer", "clientId"],
-          "properties": {
-            "issuer": { "type": "string", "pattern": "^https?://" },
-            "clientId": { "type": "string" },
-            "name": { "type": "string", "description": "Name of the identity provider shown in the sign-in texts." },
-            "callbackPort": { "type": ["integer", "string"], "default": 6732, "description": "Local port the issuer redirects to: http://127.0.0.1:<port>/callback." }
-          }
+        "url": { "type": "string", "pattern": "^https?://", "description": "Base URL of the CDN; files live under <url>/devtool/." }
+      }
+    },
+    "auth": {
+      "type": "object",
+      "description": "The identity provider signing the developers in, for the CDN and the {{ auth://... }} value blocks.",
+      "additionalProperties": false,
+      "required": ["issuer", "clientId"],
+      "properties": {
+        "type": { "type": "string", "enum": ["openid"], "default": "openid", "description": "The kind of identity provider." },
+        "name": { "type": "string", "description": "Name of the identity provider shown in the sign-in texts." },
+        "issuer": { "type": "string", "pattern": "^https?://", "description": "The OpenID Connect issuer." },
+        "clientId": { "type": "string", "description": "Public client of the devtool at the issuer." },
+        "callbackPort": { "type": ["integer", "string"], "default": 6732, "description": "Local port the issuer redirects to: http://127.0.0.1:<port>/callback." },
+        "scopes": {
+          "type": "array",
+          "items": { "type": "string" },
+          "contains": { "const": "openid" },
+          "default": ["openid", "offline_access", "groups", "profile"],
+          "description": "Scopes asked at sign-in; add email to read {{ auth://email }}."
         }
       }
     },

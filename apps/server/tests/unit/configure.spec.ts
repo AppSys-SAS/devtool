@@ -630,6 +630,32 @@ describe('passthrough', () => {
   })
 })
 
+describe('auth', () => {
+  it('reads the identity provider without warnings', async () => {
+    const configure = await load({ auth: { type: 'openid', name: 'My SSO', issuer: 'https://auth.example.dev/', clientId: 'devtool' } })
+    expect(configure.warnings).toEqual([])
+    expect(configure.auth).toMatchObject({ type: 'openid', name: 'My SSO', issuer: 'https://auth.example.dev', clientId: 'devtool', callbackPort: 6732 })
+  })
+
+  it('has no identity provider without auth section', async () => {
+    expect((await load({})).auth).toBeNull()
+  })
+
+  it('warns about a CDN without identity provider', async () => {
+    expect((await load({ cdn: { url: 'https://cdn.example.dev' } })).warnings).toEqual(['cdn: needs an auth section, signing the developers in.'])
+  })
+
+  it('warns about an unknown provider and incomplete settings', async () => {
+    expect((await load({ auth: { type: 'saml' } })).warnings).toEqual(['auth.type: must be one of openid.'])
+    const configure = await load({ auth: { issuer: 'https://auth.example.dev', callbackPort: 0 } })
+    expect(configure.auth).toBeNull()
+    expect(configure.warnings).toEqual([
+      'auth.clientId: must be the client of the devtool at the issuer.',
+      'auth.callbackPort: must be a port between 1 and 65535, 6732 is used.'
+    ])
+  })
+})
+
 describe('dns', () => {
   it('reads the records, port and access', async () => {
     const configure = await load({
@@ -1251,9 +1277,9 @@ describe('commands', () => {
     })
     expect(configure.automations['main/api/login']).toEqual({ unless: null, opAccount: null, answers: [{ pattern: /Name/i, value: '{{ name }}' }] })
     expect(configure.warnings).toEqual([
-      `${API}.extras[login].args[1]: unknown value block {{ secret }}, expected {{ op://… }}, {{ file://… }} or {{ $(…) }}.`,
-      `${API}.extras[login].env.TOKEN: unknown value block {{ vault }}, expected {{ op://… }}, {{ file://… }} or {{ $(…) }}.`,
-      `${API}.extras[login].answers[2].value: unknown value block {{ name }}, expected {{ op://… }}, {{ file://… }} or {{ $(…) }}.`,
+      `${API}.extras[login].args[1]: unknown value block {{ secret }}, expected {{ op://… }}, {{ file://… }}, {{ $(…) }} or {{ auth://… }}.`,
+      `${API}.extras[login].env.TOKEN: unknown value block {{ vault }}, expected {{ op://… }}, {{ file://… }}, {{ $(…) }} or {{ auth://… }}.`,
+      `${API}.extras[login].answers[2].value: unknown value block {{ name }}, expected {{ op://… }}, {{ file://… }}, {{ $(…) }} or {{ auth://… }}.`,
       `${API}.extras[login].unless: must be an array of strings or numbers.`,
       `${API}.extras[login].answers[0]: must be { match, value }.`,
       `${API}.extras[login].answers[1].match: is not a valid regular expression.`

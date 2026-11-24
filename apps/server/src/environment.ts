@@ -103,13 +103,13 @@ export class DevtoolEnvironment {
   constructor (private readonly _publish: (payload: EnvironmentPayload) => Promise<void>) {}
 
   /**
-   * Takes the `cdn` and `environment` sections of the configuration and schedules the pulls they
+   * Takes the `auth`, `cdn` and `environment` sections of the configuration and schedules the pulls they
    * declare, replacing the previous schedule.
    *
    * @param config - The raw configuration.
    */
   configure (config: RawConfig): void {
-    this._cdn = readCdnOptions(config.cdn)
+    this._cdn = readCdnOptions(config.cdn, config.auth)
     try {
       this._options = readEnvironmentOptions(config.environment)
       this._error = null

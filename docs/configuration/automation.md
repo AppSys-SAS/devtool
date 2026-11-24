@@ -120,6 +120,14 @@ projects:
       pulls: { name: Pull requests, type: pullRequests, token: "{{ $(gh auth token) }}" }
 ```
 
+### `{{ auth://value }}`: who is signed in
+
+Reads a value of the developer signed in with the [identity provider](/configuration/auth):
+`{{ auth://token }}` (the access token), `{{ auth://username }}`, `{{ auth://name }}`,
+`{{ auth://email }}` and `{{ auth://groups }}` (separated by commas). If nobody is signed in, the command
+stops before it starts. The [Sign-in](/configuration/auth#values-of-the-signed-in-developer) page has
+examples.
+
 ### Where and when blocks are read
 
 | Where | When |
@@ -169,13 +177,14 @@ These keys go in a command, an agent of `adt.agents`, an integration or the `acm
 | `{{ op://<vault>/<item>/<field> }}` | A 1Password field, with `opAccount`. |
 | `{{ file://<path>#<pointer> }}` | A value of a YAML, JSON or `.env` file, or a whole file. |
 | `{{ $(<command>) }}` | The output of a command in the login shell. |
+| `{{ auth://<value> }}` | `token`, `username`, `name`, `email` or `groups` of the signed-in developer. |
 
 ### Warnings
 
 - `unless: must be an array of strings or numbers`.
 - `answers: must be { match, value }`.
 - `answers[i].match: is not a valid regular expression`.
-- `unknown value block {{...}}, expected {{ op://… }}, {{ file://… }} or {{ $(…) }}`: shown when the
-  command starts.
+- `unknown value block {{...}}, expected {{ op://… }}, {{ file://… }}, {{ $(…) }} or {{ auth://… }}`:
+  shown when the configuration is read, for a block no source reads (`{{ auth://password }}` too).
 
 ::::
