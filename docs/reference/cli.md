@@ -111,6 +111,26 @@ devtool cert renew example.dev
 Renews now the [certificates](/configuration/certificates) declaring `acme`, every one without name, and
 writes them where they are served. It reads the default configuration files.
 
+## devtool skills sync
+
+```bash
+devtool skills sync
+devtool skills sync --target ~/.agents/skills ~/.claude/skills --link
+```
+
+Installs or updates the [agent skills](/agents/skills) of the devtool in the skill folders of your
+agents. Without `--target`, it asks for the folders, the mode and whether to replace a skill of your own
+with the same name; without a terminal, `--target` is required.
+
+| Option | Meaning |
+|---|---|
+| `-t, --target <folders...>` | Skill folders to sync, asked when omitted. |
+| `--copy` | Copy the skills (the default without a terminal). |
+| `--link` | Link the skills to this installation of the devtool. |
+
+Skills it installed earlier and the devtool no longer ships are removed; your own skills are never
+touched without your agreement.
+
 ## Environment variables
 
 Read by the devtool:

@@ -2,6 +2,7 @@
 
 import { createWriteStream } from 'node:fs'
 import fs from 'node:fs/promises'
+import os from 'node:os'
 import path from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import { fileURLToPath } from 'node:url'
@@ -31,11 +32,13 @@ import runProxy from '@appsys/devtool-proxy'
 import runServer, { relaunchUnderApp, renewCertificates } from '@appsys/devtool-server'
 import { logger, type LogLevel } from '@appsys/devtool-shared'
 import pkg from '../package.json' with { type: 'json' }
+import { agentSkillFolders, distinctFolders, foreignSkills, type SkillInstallMode, syncSkills, wasSynced } from './skills.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
 const UI_PATH = path.resolve(__dirname, '../../ui/dist')
+const SKILLS_PATH = path.resolve(__dirname, '../../../skills')
 
 /**
  * Reads the identity provider of the configuration of the devtool installation.
@@ -234,6 +237,60 @@ async function syncEnvironment (direction: 'pull' | 'push', targets: string[], f
   await transfer(selections, selection => environment.pull(selection))
 }
 
+/**
+ * Installs the skills of the devtool in the skill folders of the agents, the folders, the mode and the
+ * replacement of the skills of the user asked when not given and a terminal is there.
+ * @param flags The folders and the mode given on the command line.
+ * @param flags.target The folders.
+ * @param flags.copy Copy the skills.
+ * @param flags.link Link the skills.
+ */
+async function syncAgentSkills (flags: { target?: string[], copy?: boolean, link?: boolean }): Promise<void> {
+  if (flags.copy && flags.link) {
+    throw new Error('pass --copy or --link, not both')
+  }
+  const interactive = process.stdin.isTTY && !flags.target
+  if (!interactive && !flags.target) {
+    throw new Error('no terminal to choose the folders: pass --target <folders...>')
+  }
+
+  const known = agentSkillFolders()
+  const folders = flags.target?.map(folder => path.resolve(folder)) ?? await checkbox({
+    message: 'Skill folders to sync',
+    choices: await Promise.all(known.map(async folder => ({
+      name: `${folder.path.replace(os.homedir(), '~')}  (${folder.label})`,
+      value: folder.path,
+      checked: (await wasSynced(folder.path)) || (folder.global && (await fs.stat(folder.path).then(() => true, () => false)))
+    }))),
+    required: true
+  })
+  let mode: SkillInstallMode = flags.link ? 'link' : 'copy'
+  if (interactive && !flags.copy && !flags.link) {
+    mode = await select({
+      message: 'How to put the skills',
+      choices: [
+        { name: 'Copy (kept if the devtool moves; sync again after an update)', value: 'copy' as const },
+        { name: 'Link (always up to date; broken if the devtool is reinstalled elsewhere)', value: 'link' as const }
+      ]
+    })
+  }
+
+  for (const folder of await distinctFolders(folders)) {
+    const replace: string[] = []
+    for (const skill of await foreignSkills(SKILLS_PATH, folder)) {
+      if (interactive && (await confirm({ message: `${folder} already has a ${skill} skill of its own: replace it?`, default: false }))) {
+        replace.push(skill)
+      }
+    }
+    const result = await syncSkills({ source: SKILLS_PATH, folder, mode, replace })
+    const parts = (['added', 'updated', 'removed', 'unchanged'] as const).filter(kind => result[kind].length).map(kind => `${kind} ${result[kind].join(', ')}`)
+    logger.info('CLI', 'Skills', `${folder.replace(os.homedir(), '~')}: ${parts.join('; ') || 'nothing to do'}`)
+    if (result.skipped.length) {
+      logger.warn('CLI', 'Skills', `${folder.replace(os.homedir(), '~')}: kept the skills of the same name you made: ${result.skipped.join(', ')}`)
+    }
+  }
+}
+
 function parsePort (input: string, label: string): number {
   const parsed = Number(input)
   if (!Number.isInteger(parsed) || parsed <= 0) {
@@ -396,6 +453,18 @@ async function main (): Promise<void> {
     .description('Renew certificates declaring acme now, every one without name, and write them where they are served')
     .action(async (names: string[]) => {
       await renewCertificates(names)
+    })
+
+  program
+    .command('skills')
+    .description('Agent skills teaching coding agents to use the devtool')
+    .command('sync')
+    .description('Install or update the skills of the devtool in the skill folders of the agents, asked when no --target is given')
+    .option('-t, --target <folders...>', 'skill folders of the agents to sync')
+    .option('--copy', 'copy the skills (default without terminal)')
+    .option('--link', 'link the skills to this installation of the devtool')
+    .action(async (flags: { target?: string[], copy?: boolean, link?: boolean }) => {
+      await syncAgentSkills(flags)
     })
 
   await program.parseAsync()
