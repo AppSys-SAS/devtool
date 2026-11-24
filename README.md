@@ -16,6 +16,8 @@ Web-based devtool, built with:
 - `apps/ui`: web frontend
 - `packages/config`: YAML config loading/merging
 - `packages/cdn`: OpenID Connect sign-in and devtool files of the CDN (Node library, no CLI dependency)
+- `packages/git`: repositories and their pull requests on the forges (GitHub, GitLab), one strategy per
+  forge in its registry
 - `packages/mcp`: MCP server for agents (tools, approvals, history), plugged into the server through the
   interfaces it declares (`McpServerHost`)
 - `packages/shared`: shared types/logger
@@ -174,6 +176,71 @@ and Configs) or by a project (listed in its side panel):
 - `name`, `url` (http or https): required; `icon`: an Iconify name.
 - `embed` (default `true`): shown in a frame of the devtool, the load balancer then letting the devtool
   host frame the host of `url` (`X-Frame-Options` removed, `frame-ancestors` set); `false` opens a new tab.
+- `type`: `web` (default), or `pullRequests` (below).
+
+## Pull requests and agents
+
+An integration of a project with `type: pullRequests` lists the open pull requests of a repository,
+refreshed from the Reload button of its page, filtered by Open, Review requested and Mine:
+
+- `url`: the web address or a remote of the repository (https, ssh, `git@host:group/repo.git`), the
+  `origin` remote of the project by default.
+- `provider`: the forge, `github` (github.com and GitHub Enterprise Server) or `gitlab`; guessed from a
+  host named `github.com`, `github.*`, `gitlab.com` or `gitlab.*`, required otherwise.
+- `token`: read with value blocks and `opAccount` as in commands, once per run of the server (again after
+  a change of the configuration or a refusal of the forge); GitHub needs one, GitLab reads public
+  projects without. GitLab shows only running checks, from the merge status of each merge request.
+- `refresh` (default `5`): minutes between two reads once an interface opened, `0` to read from the
+  button only.
+- `badge` (default `true`): the sidebar counts the pull requests waiting for a review of the person,
+  next to its icon in `icons` and at the right of its row in `lines`.
+- `prompt`: what an agent reviewing a pull request is asked, `%{ADT:PR_URL}`, `%{ADT:PR_NUMBER}`,
+  `%{ADT:PR_TITLE}`, `%{ADT:PR_BRANCH}`, `%{ADT:PR_BASE}` and `%{ADT:PR_AUTHOR}` standing for it; a
+  review reading its changes without checking out its branch by default.
+
+`adt.agents`, usually in `config.local.yml`, lists the agents the Review button starts, `args` run in a
+terminal of the project (with `env`, `opAccount` and value blocks as in commands) or `url` opened by the
+browser (a web page in a new tab, any other link by the application registered for it):
+`%{ADT:PROMPT}` stands for the prompt and `%{ADT:CWD}` for the folder of the project, encoded in a
+`url`; the text of a pull request is never read as value blocks. The button starts the agent used last
+in this browser, else asks which one; its arrow lists them all.
+
+```yaml
+adt:
+  agents:
+    claude-code: { name: Claude Code, icon: simple-icons:claude, args: [ claude, "%{ADT:PROMPT}" ] }
+    claude-desktop: { name: Claude Desktop, icon: simple-icons:claude, url: "claude://code/new?folder=%{ADT:CWD}&q=%{ADT:PROMPT}" }
+projects:
+  web:
+    integrations:
+      pulls: { name: Pull requests, type: pullRequests, token: "{{ $(gh auth token) }}" }
+    lines: [ integration:pulls ]
+```
+
+## Agent skills
+
+A folder of files with `type: agentSkills` holds one agent skill per folder at its root, each described
+by its `SKILL.md` (whatever the case of its name): a YAML header with `name` and `description`, then the
+instructions in Markdown. Its page lists the skills with their description and what does not follow the
+format (header missing or not a YAML map, `name` not matching the folder or not in lowercase letters,
+digits and single hyphens, `description` missing or over 1024 characters), and edits a `SKILL.md` as a
+form (name, description, instructions) or as its source; other keys of the header are kept. A
+`SKILL.md` whose header is not a YAML map is not saved. A new folder at the root is a new skill, created
+with its `SKILL.md`. `type` is `files` by default.
+
+In any folder of files, a Markdown file (`.md`, `.markdown`) can be shown rendered next to its editor
+with the Preview button, off by default; its YAML front matter is left out of the preview.
+
+```yaml
+projects:
+  agents:
+    path: ~/.agents
+    files:
+      skills: { name: Skills, path: skills, type: agentSkills }
+  api:
+    files:
+      skills: { name: Skills, path: .claude/skills, type: agentSkills }
+```
 
 ## Sidebar shortcuts
 
@@ -288,6 +355,11 @@ A command of the configuration may run on its own:
   (a case-insensitive regular expression), each answer once, in the declared order.
 - Value blocks in `args`, `env` and answer values, replaced by what they read, anywhere in the text:
   - `{{ op://<vault>/<item>/<field> }}`: `op read`, from the 1Password account `opAccount` when declared;
+  - `{{ file://<path>#<pointer> }}`: the value a JSON pointer (`/hosts/0/token`, `~1` for a `/` in a
+    key) designates in a YAML (`.yml`, `.yaml`), JSON (`.json`) or environment file (`.env`, `.env.*`,
+    `*.env`); without `#<pointer>`, the whole file of any kind, trailing newlines removed. The path
+    accepts `~/` and is relative to the folder of the command; a missing file or key, or a key holding
+    a map or a list, stops the command before it starts;
   - `{{ $(<command>) }}`: the standard output of a command run in the login shell of the command,
     trailing newlines removed, a failure stopping the command before it starts.
 
@@ -308,7 +380,10 @@ login:
   opAccount: ABCDEFGHIJ
   unless: [ my-cli, status ]
   args: [ my-cli, login, --user, "{{ op://vault/item/username }}" ]
-  env: { TOKEN: "{{ $(security find-generic-password -w -s my-token) }}" }
+  env:
+    TOKEN: "{{ $(security find-generic-password -w -s my-token) }}"
+    API_KEY: "{{ file://.env#/API_KEY }}"
+    GITLAB_TOKEN: "{{ file://~/.config/glab-cli/config.yml#/hosts/gitlab.example.dev/token }}"
   answers:
     - { match: "Enter password", value: "{{ op://vault/item/password }}" }
     - { match: OTP, value: "{{ op://vault/item/otp?attribute=otp }}" }
@@ -330,7 +405,7 @@ the screen), `wait_for_output`, `search_terminals`, `run_command`, `run_shell`, 
 `control_terminal`, `resize_terminal`, `resolve_port_conflict`, `port_owners`, `start_section`,
 `stop_section`, `restore_folder`, `list_files`, `read_file`, `write_file`, `update_keys`, `change_files`,
 `environment_status`, `environment_keys`, `environment_tables`, `environment_sync`, `pull_shared_config`,
-`list_certificates`, `renew_certificate`, `reload_config`, `notify_user`; the terminals are also resources
+`list_certificates`, `renew_certificate`, `list_pull_requests`, `reload_config`, `notify_user`; the terminals are also resources
 an agent may subscribe to (`devtool://terminals`, `devtool://terminal/<slug>`).
 
 A new client is accepted first, by `adt.mcp.clients` or by the user. Then each call follows the level of

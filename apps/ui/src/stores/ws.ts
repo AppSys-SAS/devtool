@@ -3,6 +3,7 @@ import type { EnvironmentKeyChoicePayload, FileEntryPayload, PortConflictAction 
 import configStore from "./config";
 import filesStore from "./files";
 import certificatesStore from "./certificates";
+import pullRequestsStore from "./pull-requests";
 import environmentStore from "./environment";
 import mcpStore from "./mcp";
 import sessionStore from "./session";
@@ -57,6 +58,9 @@ class WsStore {
             break;
           case "certificates":
             certificatesStore.load(payload.data as never);
+            break;
+          case "pullRequests":
+            pullRequestsStore.load(payload.data as never);
             break;
           case "environmentKeys":
             environmentStore.loadKeys(payload.data as never);
@@ -202,6 +206,26 @@ class WsStore {
   }
 
   /**
+   * Asks the server to read the pull requests of an integration now.
+   * @param key The integration, `<section>/<project>/<slug>`.
+   */
+  pullRequestsRefresh(key: string): void {
+    this.send("pullRequestsRefresh", { key });
+  }
+
+  /**
+   * Asks the server to start an agent run by a command, in a terminal of a directory shown once started.
+   * @param agent The slug of the agent.
+   * @param projectSlug The project of the directory.
+   * @param directorySlug The directory the agent works in.
+   * @param prompt The prompt given to the agent.
+   * @param name The name of the terminal.
+   */
+  agentStart(agent: string, projectSlug: string, directorySlug: string, prompt: string, name: string): void {
+    this.send("agentStart", { agent, projectSlug, directorySlug, prompt, name });
+  }
+
+  /**
    * Asks the server to describe the development environment again.
    */
   envRefresh(): void {
@@ -308,6 +332,7 @@ class WsStore {
     sessionStore.load(null);
     environmentStore.load(null);
     certificatesStore.load([]);
+    pullRequestsStore.load([]);
   }
 }
 

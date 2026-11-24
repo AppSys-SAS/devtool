@@ -2,10 +2,13 @@
 import { computed, useTemplateRef, watchEffect } from "vue";
 import { Icon } from "@iconify/vue";
 import { ExternalLink, RotateCw } from "@lucide/vue";
+import PullRequestList from "@/components/pull-requests/PullRequestList.vue";
 import SidebarToggle from "@/components/SidebarToggle.vue";
 import { Button } from "@/components/ui/button";
 import configStore from "@/stores/config";
 import embedStore from "@/stores/embeds";
+import pullRequestsStore from "@/stores/pull-requests";
+import wsStore from "@/stores/ws";
 
 const props = defineProps<{
   integration: string;
@@ -13,13 +16,10 @@ const props = defineProps<{
   directorySlug?: string;
 }>();
 
-const integrations = computed(() => {
-  if (props.projectSlug && props.directorySlug) {
-    return configStore.getDirectory(props.projectSlug, props.directorySlug)?.directory.integrations ?? [];
-  }
-  return configStore.integrations.value;
-});
+const directory = computed(() => (props.projectSlug && props.directorySlug ? (configStore.getDirectory(props.projectSlug, props.directorySlug)?.directory ?? null) : null));
+const integrations = computed(() => (props.projectSlug && props.directorySlug ? (directory.value?.integrations ?? []) : configStore.integrations.value));
 const definition = computed(() => integrations.value.find((item) => item.slug === props.integration) ?? null);
+const pullRequestsKey = computed(() => (definition.value?.type === "pullRequests" ? `${props.projectSlug}/${props.directorySlug}/${props.integration}` : null));
 const frameArea = useTemplateRef<HTMLElement>("frameArea");
 
 watchEffect((onCleanup) => {
@@ -54,6 +54,17 @@ watchEffect((onCleanup) => {
           <RotateCw class="size-3.5" />
         </Button>
         <Button
+          v-if="pullRequestsKey"
+          size="icon"
+          variant="ghost"
+          class="size-7"
+          title="Read the pull requests again"
+          :disabled="pullRequestsStore.get(pullRequestsKey)?.loading"
+          @click="wsStore.pullRequestsRefresh(pullRequestsKey)"
+        >
+          <RotateCw class="size-3.5" />
+        </Button>
+        <Button
           as-child
           size="icon"
           variant="ghost"
@@ -63,7 +74,7 @@ watchEffect((onCleanup) => {
             :href="definition.url"
             target="_blank"
             rel="noopener"
-            title="Open in a new tab"
+            :title="definition.provider ? `Open on ${definition.provider.label}` : 'Open in a new tab'"
           >
             <ExternalLink class="size-3.5" />
           </a>
@@ -75,8 +86,14 @@ watchEffect((onCleanup) => {
       >No integration {{ integration }}.</span>
       <SidebarToggle side="right" />
     </div>
+    <PullRequestList
+      v-if="definition && pullRequestsKey && directory && projectSlug"
+      :integration="definition"
+      :project-slug="projectSlug"
+      :directory="directory"
+    />
     <div
-      v-if="definition?.embed"
+      v-else-if="definition?.embed"
       ref="frameArea"
       class="min-h-0 flex-1"
     />

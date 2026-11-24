@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { defaultEnvironmentFolder, readEnvironmentOptions, readYaml, readYamlMap, SHARED_CONFIG_PATH, writeLocalFile } from "@appsys/devtool-cdn";
 import type { RawConfig } from "@appsys/devtool-config";
-import type { FileEntryPayload, FilePayload, FileTreePayload, ProjectDefinition } from "@appsys/devtool-shared";
+import { AGENT_SKILL_FILE, agentSkillFolderOf, type AgentSkillSummary, type FileEntryPayload, type FilePayload, type FileTreePayload, newAgentSkill, type ProjectDefinition, readAgentSkill } from "@appsys/devtool-shared";
 
 /** Identifier of the file space of the configuration files of the development environment. */
 export const CONFIGS_SPACE = "configs";
@@ -94,7 +94,7 @@ export abstract class FileSpace {
    * @returns The files, with why they could not be listed, if they could not.
    */
   async tree(): Promise<FileTreePayload> {
-    const payload: FileTreePayload = { space: this.id, root: this.root, exists: false, editable: this.editable, entries: [], error: null };
+    const payload: FileTreePayload = { space: this.id, root: this.root, exists: false, editable: this.editable, entries: [], agentSkills: null, error: null };
     try {
       const stat = await fs.stat(this.root);
       if (!stat.isDirectory()) {
@@ -358,6 +358,68 @@ export class TreeFileSpace extends FileSpace {
 }
 
 /**
+ * A file space holding one agent skill per folder at its root, each described by the `SKILL.md` of its
+ * folder, whatever the case of its name.
+ */
+export class AgentSkillsFileSpace extends TreeFileSpace {
+  /**
+   * Describes the files of the space and its skills.
+   *
+   * @returns The files and the skills, with why they could not be listed, if they could not.
+   */
+  override async tree(): Promise<FileTreePayload> {
+    const tree = await super.tree();
+    const skillFiles = new Map(
+      tree.entries.flatMap((entry) => {
+        const folder = entry.kind === "file" ? agentSkillFolderOf(entry.path) : null;
+        return folder ? [[folder, entry.path] as const] : [];
+      }),
+    );
+    const folders = tree.entries.filter((entry) => entry.kind === "directory" && !entry.path.includes("/")).map((entry) => entry.path);
+    const agentSkills = await Promise.all(
+      folders.map(async (folder): Promise<AgentSkillSummary> => {
+        const skillFile = skillFiles.get(folder);
+        const file = skillFile ? await this.read(skillFile) : null;
+        if (file === null || file.content === null) {
+          return { folder, name: null, description: null, problems: [file?.error ?? `${AGENT_SKILL_FILE} is missing`] };
+        }
+        const { name, description, problems } = readAgentSkill(file.content, folder);
+        return { folder, name, description, problems };
+      }),
+    );
+    return { ...tree, agentSkills };
+  }
+
+  /**
+   * Refuses a `SKILL.md` whose header is not a YAML map, and checks the syntax of a YAML file.
+   *
+   * @param filePath - The path of the file.
+   * @param content - The content.
+   */
+  protected override validate(filePath: string, content: string): void {
+    super.validate(filePath, content);
+    const folder = agentSkillFolderOf(filePath);
+    const error = folder ? readAgentSkill(content, folder).error : null;
+    if (error) {
+      throw new Error(`${filePath}: ${error}`);
+    }
+  }
+
+  /**
+   * Creates a file or a folder, a folder at the root being a new skill with its `SKILL.md`.
+   *
+   * @param filePath - The path of the file or folder.
+   * @param kind - Whether a file or a folder is created.
+   */
+  override async create(filePath: string, kind: FileEntryPayload["kind"]): Promise<void> {
+    await super.create(filePath, kind);
+    if (kind === "directory" && !filePath.includes("/")) {
+      await fs.writeFile(await this.resolve(`${filePath}/${AGENT_SKILL_FILE}`), newAgentSkill(filePath), { flag: "wx", mode: 0o600 });
+    }
+  }
+}
+
+/**
  * The file spaces of the configuration: the configuration files of the development environment and
  * the folders of files declared by the directories of the projects.
  */
@@ -381,7 +443,7 @@ export class DevtoolFileSpaces {
       for (const directory of Object.values(project.directories)) {
         for (const files of Object.values(directory.files)) {
           const id = `${project.slug}/${directory.slug}/${files.slug}`;
-          spaces.set(id, new TreeFileSpace(id, files.path));
+          spaces.set(id, files.type === "agentSkills" ? new AgentSkillsFileSpace(id, files.path) : new TreeFileSpace(id, files.path));
         }
       }
     }

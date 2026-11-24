@@ -26,6 +26,8 @@ export interface AdtDefinition {
   sidebar: SidebarSettings;
   /** What agents may do through the MCP server of the devtool. */
   mcp: McpSettings;
+  /** The AI agents the interface starts, in the order of the configuration. */
+  agents: AgentDefinition[];
 }
 
 /** How an agent may do something: freely, after asking, on the keys of a file only, or never. */
@@ -192,15 +194,85 @@ export interface CertificatePayload {
   push: string[];
 }
 
+/** What an integration shows: a web page, or the pull requests of a repository. */
+export type IntegrationType = "web" | "pullRequests";
+
 /** An external tool reachable from the interface, shown in the devtool or opened in a new tab. */
 export interface IntegrationDefinition {
   slug: string;
   name: string;
+  type: IntegrationType;
   /** Iconify name of its icon. */
   icon: string;
+  /** The page, or the web address of the repository of pull requests. */
   url: string;
   /** Whether the interface shows it in a frame, the load balancer then allowing the devtool to frame its host. */
   embed: boolean;
+  /** The forge hosting the repository of pull requests, its name in the configuration and the one shown, null for a web page. */
+  provider: { name: string; label: string } | null;
+  /** The prompt given to an agent reviewing a pull request, null for a web page. */
+  prompt: string | null;
+  /** Whether the sidebar counts the pull requests waiting for a review of the person. */
+  badge: boolean;
+  /** Minutes between two reads of the pull requests, 0 to read them on demand only. */
+  refresh: number;
+}
+
+/** An AI agent started with a prompt: a command run in a terminal, or a link opened by the interface. */
+export interface AgentDefinition {
+  slug: string;
+  name: string;
+  /** Iconify name of its icon. */
+  icon: string;
+  /** Its command, `%{ADT:PROMPT}` standing for the prompt and `%{ADT:CWD}` for its folder, null for a link. */
+  args: string[] | null;
+  /** Its link, with the same variables, null for a command. */
+  url: string | null;
+  env: Record<string, string>;
+}
+
+/** The state of the checks of the last commit of a pull request. */
+export type PullRequestChecks = "success" | "pending" | "failure";
+
+/** Where the review of a pull request stands. */
+export type PullRequestReview = "approved" | "changesRequested" | "required";
+
+/** An open pull request of a repository. */
+export interface PullRequestPayload {
+  number: number;
+  title: string;
+  url: string;
+  /** The username of its author, null when unknown. */
+  author: string | null;
+  /** Its source branch. */
+  branch: string;
+  /** Its target branch. */
+  base: string;
+  draft: boolean;
+  /** Its last change, in ISO format. */
+  updatedAt: string;
+  /** The checks of its last commit, null when it has none or the forge does not tell. */
+  checks: PullRequestChecks | null;
+  /** Where its review stands, null when nothing is required. */
+  review: PullRequestReview | null;
+  /** Whether a review of the person is requested. */
+  reviewRequested: boolean;
+  /** Whether the person wrote it. */
+  mine: boolean;
+}
+
+/** The open pull requests of an integration. */
+export interface PullRequestsPayload {
+  /** The integration, `<section>/<project>/<slug>`. */
+  key: string;
+  items: PullRequestPayload[];
+  /** The username the token belongs to, null when unknown. */
+  viewer: string | null;
+  /** When the pull requests were last read, in ISO format, null before the first read. */
+  updatedAt: string | null;
+  loading: boolean;
+  /** Why the last read failed. */
+  error: string | null;
 }
 
 /** A reference to something of a directory the sidebar offers in one click. */
@@ -328,10 +400,14 @@ export interface DirectoryScripts {
   mcpTarget: McpTarget;
 }
 
+/** What a folder of files holds: any files, or one agent skill per folder. */
+export type DirectoryFilesType = "files" | "agentSkills";
+
 /** A folder of editable files declared by a directory. */
 export interface DirectoryFiles {
   slug: string;
   name: string;
+  type: DirectoryFilesType;
   /** Absolute path of the folder. */
   path: string;
   /** Extras of the directory offered next to the files. */
@@ -426,6 +502,8 @@ export interface ClientConfigPayload {
   integrations: IntegrationDefinition[];
   projects: Record<string, ProjectDefinition>;
   sidebar: SidebarSettings;
+  /** The AI agents the interface starts. */
+  agents: AgentDefinition[];
   /** The MCP server and its rules, those of the certificates by name. */
   mcp: McpSettings & {
     port: number;
@@ -605,8 +683,22 @@ export interface FileTreePayload {
   /** Whether files and folders can be created, renamed and removed. */
   editable: boolean;
   entries: FileEntryPayload[];
+  /** The skills of a folder of agent skills, one per folder at its root, null for any other folder. */
+  agentSkills: AgentSkillSummary[] | null;
   /** Why the files could not be listed or changed. */
   error: string | null;
+}
+
+/** An agent skill of a folder of agent skills. */
+export interface AgentSkillSummary {
+  /** Its folder, at the root of the space. */
+  folder: string;
+  /** Its name, null when its header gives none. */
+  name: string | null;
+  /** Its description, null when its header gives none. */
+  description: string | null;
+  /** What does not follow the format of agent skills. */
+  problems: string[];
 }
 
 /** A file of a file space, as it stands on disk. */
@@ -634,6 +726,7 @@ export interface WsPayloadMap {
   cdnSession: CdnSessionPayload;
   environment: EnvironmentPayload;
   certificates: CertificatePayload[];
+  pullRequests: PullRequestsPayload[];
   environmentTables: EnvironmentTablesPayload;
   environmentKeys: EnvironmentKeysPayload;
   streamUpdate: StreamUpdatePayload;

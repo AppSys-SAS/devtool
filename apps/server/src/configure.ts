@@ -1,10 +1,11 @@
 import path from "node:path";
 import fs from "node:fs/promises";
 import net from "node:net";
-import type { CertificateAcme, ClientConfigPayload, CommandArg, CommandChoice, CommandForm, CommandInput, CommandInputValue, DirectoryDefinition, DirectoryFiles, DirectoryScripts, ScriptSettings, AdtDefinition, DirectoryDefaultAction, DirectoryShortcut, DnsDefinition, DnsRecord, HostAccess, IntegrationDefinition, LoadBalancerCertificate, McpCategory, McpEnvironmentItem, McpPatterns, McpRules, McpSettings, McpTarget, PassthroughRule, ProjectDefinition, ProjectRestore, RuntimeConfig, SidebarSettings } from "@appsys/devtool-shared";
-import { defaultMcpRules, isMcpLevel, logger, readMcpRules } from "@appsys/devtool-shared";
+import type { AgentDefinition, CertificateAcme, ClientConfigPayload, CommandArg, CommandChoice, CommandForm, CommandInput, CommandInputValue, DirectoryDefinition, DirectoryFiles, DirectoryFilesType, DirectoryScripts, ScriptSettings, AdtDefinition, DirectoryDefaultAction, DirectoryShortcut, DnsDefinition, DnsRecord, HostAccess, IntegrationDefinition, IntegrationType, LoadBalancerCertificate, McpCategory, McpEnvironmentItem, McpPatterns, McpRules, McpSettings, McpTarget, PassthroughRule, ProjectDefinition, ProjectRestore, RuntimeConfig, SidebarSettings } from "@appsys/devtool-shared";
+import { DEFAULT_REVIEW_PROMPT, defaultMcpRules, isMcpLevel, logger, readMcpRules } from "@appsys/devtool-shared";
 import { type LegoOptionValue, legoRunArgs } from "@appsys/devtool-certs";
 import { configSourceKey, resolveAppIdentity, resolveCacheFolder } from "@appsys/devtool-config";
+import { FORGES, findForge, originUrl, repositoryOf } from "@appsys/devtool-git";
 import { type CommandAnswer, type CommandAutomation, findInvalidValueBlocks } from "./command-automation.js";
 import { listScripts } from "./scripts.js";
 import type { ConfigOrigin } from "./types.js";
@@ -22,8 +23,29 @@ const LEGO_OWNED_OPTIONS = ["path", "cert.name", "accept-tos", "renew-force", "r
 export function certificateAutomationKey(name: string): string {
   return `loadBalancers/${name}/acme`;
 }
+
+/**
+ * Names the automation reading the token of an integration among the automations of the configuration.
+ * @param key The integration, `<section>/<project>/<slug>`.
+ * @returns The key of its automation.
+ */
+export function integrationAutomationKey(key: string): string {
+  return `integrations/${key}`;
+}
+
+/**
+ * Names the automation of an agent among the automations of the configuration.
+ * @param slug The slug of the agent.
+ * @returns The key of its automation.
+ */
+export function agentAutomationKey(slug: string): string {
+  return `agents/${slug}`;
+}
 const HOST_PATTERN_REGEXP = /^(\*\.)?[a-z0-9-]+(\.[a-z0-9-]+)*$/;
 const DEFAULT_INTEGRATION_ICON = "lucide:app-window";
+const DEFAULT_PULL_REQUESTS_ICON = "lucide:git-pull-request";
+const DEFAULT_AGENT_ICON = "lucide:bot";
+const INTEGRATION_TYPES: readonly IntegrationType[] = ["web", "pullRequests"];
 
 /**
  * Gives the settings of the devtool before the configuration is read.
@@ -45,6 +67,7 @@ function defaultAdt(): AdtDefinition {
     access: "local",
     sidebar: { environment: false, configs: false, login: false },
     mcp: defaultMcpSettings(true),
+    agents: [],
   };
 }
 
@@ -80,6 +103,7 @@ const ENVIRONMENT_LISTS = { files: "file", databases: "database", buckets: "buck
 
 /** The categories of `adt.mcp` refining `adt.mcp.default`. */
 const MCP_CATEGORIES: readonly McpCategory[] = ["commands", "scripts", "files", "terminals", "certificates", "devtool"];
+const FILES_TYPES: readonly DirectoryFilesType[] = ["files", "agentSkills"];
 
 /** An `mcp` setting declared by something holding others, applied over the rules of what it holds. */
 interface McpLayer {
@@ -109,6 +133,9 @@ export class DevtoolConfigure {
 
   public integrations: IntegrationDefinition[];
 
+  /** The tokens of the integrations, value blocks not read yet, by `<section>/<project>/<slug>`, never sent to the interfaces. */
+  public integrationTokens: Record<string, string>;
+
   /** Where the settings of the configuration come from. */
   private readonly origin: ConfigOrigin;
 
@@ -124,6 +151,7 @@ export class DevtoolConfigure {
     this.passthrough = [];
     this.dns = null;
     this.integrations = [];
+    this.integrationTokens = {};
     this.projects = {};
     this.automations = {};
     this.warnings = [];
@@ -160,6 +188,7 @@ export class DevtoolConfigure {
       integrations: this.integrations,
       projects: this.projects,
       sidebar: this.adt.sidebar,
+      agents: this.adt.agents,
       mcp: {
         ...this.adt.mcp,
         port: this.adt.ports.server,
@@ -247,6 +276,7 @@ export class DevtoolConfigure {
     this.passthrough = [];
     this.dns = null;
     this.integrations = [];
+    this.integrationTokens = {};
     this.projects = {};
     this.automations = {};
     this.warnings = [];
@@ -266,7 +296,7 @@ export class DevtoolConfigure {
 
     this.passthrough = this.readPassthrough("passthrough", this.initialConfig.passthrough);
     this.dns = this.readDns("dns", this.initialConfig.dns);
-    this.integrations = this.readIntegrations("integrations", this.initialConfig.integrations);
+    this.integrations = this.readIntegrations("integrations", this.initialConfig.integrations, null);
 
     try {
       await this.reconfigureProjects();
@@ -277,7 +307,7 @@ export class DevtoolConfigure {
 
   /**
    * Reads the settings of the devtool itself, `adt`: its host, interface, cache, names, icon, shell, ports,
-   * access and the optional parts of its sidebar.
+   * access, the optional parts of its sidebar and its agents.
    */
   private async reconfigureAdt(): Promise<void> {
     const adt = toRecord(this.initialConfig.adt);
@@ -345,6 +375,8 @@ export class DevtoolConfigure {
         this.addWarning(`adt.sidebar.${key}`, "is not a boolean");
       }
     }
+
+    this.adt.agents = this.readAgents(adt.agents);
   }
 
   /**
@@ -853,7 +885,7 @@ export class DevtoolConfigure {
       directoryDefinition.args = directoryDefinition.extras[mainCommand]?.args ?? null;
     }
     directoryDefinition.files = this.readFiles(`${slug}.files`, directoryDefinition, directory.files, this.layeredRules(this.adt.mcp.files, layers));
-    directoryDefinition.integrations = this.readIntegrations(`${slug}.integrations`, directory.integrations);
+    directoryDefinition.integrations = this.readIntegrations(`${slug}.integrations`, directory.integrations, { path: directoryPath, key: `${projectDefinition.slug}/${directorySlug}` });
     directoryDefinition.defaultAction = this.readDefaultAction(`${slug}.default`, directoryDefinition, directory.default);
     directoryDefinition.icons = this.readShortcuts(`${slug}.icons`, directoryDefinition, directory.icons);
     directoryDefinition.lines = this.readShortcuts(`${slug}.lines`, directoryDefinition, directory.lines);
@@ -968,12 +1000,15 @@ export class DevtoolConfigure {
   }
 
   /**
-   * Reads the integrations, `{ <slug>: { name, url, icon, embed } }`, in the order they are declared.
+   * Reads the integrations, `{ <slug>: { name, type, url, icon, embed } }`, in the order they are
+   * declared; those of `type: pullRequests` also read `provider`, `token`, `opAccount`, `refresh`,
+   * `badge` and `prompt`, their token kept in {@link integrationTokens}.
    * @param slug Names the setting in warnings.
    * @param value The raw setting.
+   * @param project The folder and the key of the project declaring them, null at the root.
    * @returns The valid integrations.
    */
-  private readIntegrations(slug: string, value: unknown): IntegrationDefinition[] {
+  private readIntegrations(slug: string, value: unknown, project: { path: string; key: string } | null): IntegrationDefinition[] {
     if (value === undefined) {
       return [];
     }
@@ -989,11 +1024,26 @@ export class DevtoolConfigure {
       if (!this.checkSlug(setting, integrationSlug) || !this.checkString(`${setting}.name`, integration.name)) {
         continue;
       }
-      if (typeof integration.url !== "string" || !/^https?:\/\/[^/]/.test(integration.url)) {
-        this.addWarning(`${setting}.url`, "must be an http or https URL");
+      const type = integration.type ?? "web";
+      if (!INTEGRATION_TYPES.includes(type as IntegrationType)) {
+        this.addWarning(`${setting}.type`, `must be ${INTEGRATION_TYPES.join(" or ")}`);
         continue;
       }
       if (integration.icon !== undefined && !this.checkString(`${setting}.icon`, integration.icon)) {
+        continue;
+      }
+      if (type === "pullRequests") {
+        const pullRequests = project ? this.readPullRequests(setting, integrationSlug, integration, project) : null;
+        if (!project) {
+          this.addWarning(`${setting}.type`, "pullRequests needs a project, whose folder the agents work in");
+        }
+        if (pullRequests) {
+          integrations.push(pullRequests);
+        }
+        continue;
+      }
+      if (typeof integration.url !== "string" || !/^https?:\/\/[^/]/.test(integration.url)) {
+        this.addWarning(`${setting}.url`, "must be an http or https URL");
         continue;
       }
       if (integration.embed !== undefined && typeof integration.embed !== "boolean") {
@@ -1004,12 +1054,129 @@ export class DevtoolConfigure {
       integrations.push({
         slug: integrationSlug,
         name: integration.name as string,
+        type: "web",
         icon: (integration.icon as string | undefined) ?? DEFAULT_INTEGRATION_ICON,
         url: integration.url,
         embed: integration.embed ?? true,
+        provider: null,
+        prompt: null,
+        badge: false,
+        refresh: 0,
       });
     }
     return integrations;
+  }
+
+  /**
+   * Reads an integration listing the pull requests of a repository: `url`, the `origin` remote of the
+   * project by default, `provider`, guessed from the host by default, `token`, read with value blocks,
+   * `opAccount`, `refresh` in minutes, `badge` and `prompt`.
+   * @param setting Names the integration in warnings.
+   * @param slug The slug of the integration.
+   * @param integration The raw integration.
+   * @param project The folder and the key of the project declaring it.
+   * @returns The integration, null when invalid.
+   */
+  private readPullRequests(setting: string, slug: string, integration: Record<string, unknown>, project: { path: string; key: string }): IntegrationDefinition | null {
+    const url = integration.url ?? originUrl(project.path);
+    const repository = typeof url === "string" ? repositoryOf(url) : null;
+    if (!repository) {
+      this.addWarning(`${setting}.url`, integration.url === undefined ? `is missing and ${project.path} has no origin remote` : "must name a repository");
+      return null;
+    }
+    const names = FORGES.map((known) => known.name).join(", ");
+    const forge = integration.provider === undefined || typeof integration.provider === "string" ? findForge((integration.provider as string | undefined) ?? null, repository) : null;
+    if (!forge) {
+      this.addWarning(`${setting}.provider`, integration.provider === undefined ? `cannot be guessed from ${repository.host}, set one of ${names}` : `must be one of ${names}`);
+      return null;
+    }
+    const refresh = integration.refresh ?? 5;
+    if (typeof refresh !== "number" || refresh < 0) {
+      this.addWarning(`${setting}.refresh`, "must be a number of minutes, 0 to read on demand only");
+      return null;
+    }
+    if (integration.badge !== undefined && typeof integration.badge !== "boolean") {
+      this.addWarning(`${setting}.badge`, "must be true or false");
+      return null;
+    }
+    if ((integration.token !== undefined && !this.checkString(`${setting}.token`, integration.token)) || (integration.prompt !== undefined && !this.checkString(`${setting}.prompt`, integration.prompt))) {
+      return null;
+    }
+
+    const key = `${project.key}/${slug}`;
+    if (typeof integration.token === "string") {
+      this.integrationTokens[key] = integration.token;
+      const automation = this.readAutomation(setting, integration, [], { token: integration.token });
+      if (automation) {
+        this.automations[integrationAutomationKey(key)] = automation;
+      }
+    }
+    return {
+      slug,
+      name: integration.name as string,
+      type: "pullRequests",
+      icon: (integration.icon as string | undefined) ?? DEFAULT_PULL_REQUESTS_ICON,
+      url: repository.webUrl,
+      embed: false,
+      provider: { name: forge.name, label: forge.label },
+      prompt: (integration.prompt as string | undefined) ?? DEFAULT_REVIEW_PROMPT,
+      badge: (integration.badge as boolean | undefined) ?? true,
+      refresh,
+    };
+  }
+
+  /**
+   * Reads the AI agents the interface starts, `adt.agents`: `{ <slug>: { name, icon, args | url, env,
+   * opAccount } }`, their automations kept under {@link agentAutomationKey}.
+   * @param value The raw setting.
+   * @returns The valid agents, in the order they are declared.
+   */
+  private readAgents(value: unknown): AgentDefinition[] {
+    if (value === undefined) {
+      return [];
+    }
+    if (!isObject(value)) {
+      this.addWarning("adt.agents", "must be a map of agents");
+      return [];
+    }
+
+    const agents: AgentDefinition[] = [];
+    for (const [agentSlug, raw] of Object.entries(value)) {
+      const agent = toRecord(raw);
+      const setting = `adt.agents.${agentSlug}`;
+      if (!this.checkSlug(setting, agentSlug) || !this.checkString(`${setting}.name`, agent.name)) {
+        continue;
+      }
+      if (agent.icon !== undefined && !this.checkString(`${setting}.icon`, agent.icon)) {
+        continue;
+      }
+      if ((agent.args === undefined) === (agent.url === undefined)) {
+        this.addWarning(setting, "needs either args, run in a terminal, or url, opened by the interface");
+        continue;
+      }
+      const args = agent.args === undefined ? null : toCommandArgsArray(agent.args);
+      if (agent.args !== undefined && !args?.length) {
+        this.addWarning(`${setting}.args`, "must be a non-empty array of strings or numbers");
+        continue;
+      }
+      if (agent.url !== undefined && !this.checkString(`${setting}.url`, agent.url)) {
+        continue;
+      }
+      const env = toStringRecord(agent.env) ?? {};
+      const automation = this.readAutomation(setting, agent, args ?? [], env);
+      if (automation) {
+        this.automations[agentAutomationKey(agentSlug)] = automation;
+      }
+      agents.push({
+        slug: agentSlug,
+        name: agent.name as string,
+        icon: (agent.icon as string | undefined) ?? DEFAULT_AGENT_ICON,
+        args,
+        url: (agent.url as string | undefined) ?? null,
+        env,
+      });
+    }
+    return agents;
   }
 
   /**
@@ -1062,7 +1229,7 @@ export class DevtoolConfigure {
   /**
    * Reads what the server does on its own around a command: `unless`, a command whose success skips
    * it, `answers`, `{ match, value }` typed when the output asks `match`, and the value blocks of its
-   * arguments, environment and answers, `{{ op://… }}` read from `opAccount` or `{{ $(…) }}`.
+   * arguments, environment and answers, `{{ op://… }}` read from `opAccount`, `{{ file://… }}` or `{{ $(…) }}`.
    * @param slug Names the command in warnings.
    * @param command The raw command.
    * @param args The arguments of the command, whose inputs hold no value block.
@@ -1077,7 +1244,7 @@ export class DevtoolConfigure {
     ];
     for (const value of values) {
       for (const block of findInvalidValueBlocks(value.text)) {
-        this.addWarning(value.slug, `unknown value block ${block}, expected {{ op://… }} or {{ $(…) }}`);
+        this.addWarning(value.slug, `unknown value block ${block}, expected {{ op://… }}, {{ file://… }} or {{ $(…) }}`);
       }
     }
 
@@ -1351,10 +1518,16 @@ export class DevtoolConfigure {
       if (entry.restore !== undefined && !restore) {
         this.addWarning(`${slug}[${filesSlug}].restore`, "must name a command of the directory");
       }
+      const type = FILES_TYPES.find((candidate) => candidate === (entry.type ?? "files"));
+      if (!type) {
+        this.addWarning(`${slug}[${filesSlug}].type`, `must be ${FILES_TYPES.join(" or ")}`);
+        continue;
+      }
 
       files[filesSlug] = {
         slug: filesSlug,
         name: typeof entry.name === "string" ? entry.name : filesSlug,
+        type,
         path: this.pathFrom(directory.path, entry.path as string),
         restore,
         commands: commands.filter((command) => command in directory.extras),

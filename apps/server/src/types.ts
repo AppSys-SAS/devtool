@@ -52,7 +52,20 @@ export interface CommandStreamCreatePayload {
     restore?: boolean;
     /** The agent starting the command, absent for a person. */
     origin?: string;
+    /** The values of the variables `%{ADT:<NAME>}` of its arguments, replaced once their value blocks are read. */
+    values?: Record<string, string>;
   };
+}
+
+/** Asks to start an agent of the configuration with a prompt, in a terminal of a directory. */
+export interface AgentStartPayload {
+  /** The slug of the agent. */
+  agent: string;
+  projectSlug: string;
+  directorySlug: string;
+  prompt: string;
+  /** The name of the terminal. */
+  name: string;
 }
 
 export interface CommandStreamUpdatePayload {
@@ -96,6 +109,14 @@ export type ConnectionMessage =
   | {
       type: "certificateRenew";
       data: { name: string; tag: string | null };
+    }
+  | {
+      type: "pullRequestsRefresh";
+      data: { key: string };
+    }
+  | {
+      type: "agentStart";
+      data: AgentStartPayload;
     }
   | {
       type: "envRefresh";

@@ -2,7 +2,7 @@
 import { computed } from "vue";
 import { RouterLink } from "vue-router";
 import { Icon } from "@iconify/vue";
-import { FolderTree, Globe, Play, RotateCcw, ScrollText, Square } from "@lucide/vue";
+import { FolderTree, Globe, Play, RotateCcw, ScrollText, Sparkles, Square } from "@lucide/vue";
 import type { DirectoryDefinition, HostAccess } from "@appsys/devtool-shared";
 import SummaryRow from "@/components/project/SummaryRow.vue";
 import { Button } from "@/components/ui/button";
@@ -176,7 +176,10 @@ const directoryRoute = computed(() => ({ name: "directory", params: { projectSlu
           :class="CHIP"
           :title="space.path"
         >
-          <FolderTree class="size-3.5 shrink-0 text-muted-foreground" />
+          <component
+            :is="space.type === 'agentSkills' ? Sparkles : FolderTree"
+            class="size-3.5 shrink-0 text-muted-foreground"
+          />
           <span class="truncate">{{ space.name }}</span>
         </RouterLink>
         <RouterLink

@@ -284,7 +284,7 @@ export async function renewCertificates(names: string[], configPaths: string[] =
     const certificate = certificates[name];
     const renewal = await prepareRenewal(name, certificate, configure.runtimeConfig.adt.cacheDir, true, (line) => logger.info("Certificates", name, line));
     const automation = configure.automations[certificateAutomationKey(name)];
-    const secrets = new CommandSecrets(automation?.opAccount ?? null, async (command) => (await execFileAsync("/bin/sh", ["-c", command])).stdout.replace(/\n+$/, ""));
+    const secrets = new CommandSecrets(automation?.opAccount ?? null, renewal.cwd, async (command) => (await execFileAsync("/bin/sh", ["-c", command], { cwd: renewal.cwd })).stdout.replace(/\n+$/, ""));
     try {
       const env: Record<string, string> = {};
       for (const [key, value] of Object.entries(certificate.acme?.env ?? {})) {

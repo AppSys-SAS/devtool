@@ -56,6 +56,17 @@ export function expandCommandArgs(args: CommandArg[], values: CommandInputValue[
 }
 
 /**
+ * Replaces the variables `%{ADT:<NAME>}` of a text in a single pass, values never read again.
+ * @param text The text.
+ * @param values The value of each variable, by name.
+ * @param encode Turns a value into what is written, such as a part of a link.
+ * @returns The text, unknown variables left as written.
+ */
+export function replaceVariables(text: string, values: Record<string, string>, encode: (value: string) => string = (value) => value): string {
+  return text.replace(/%\{ADT:([A-Z_]+)\}/g, (variable, name: string) => (Object.hasOwn(values, name) ? encode(values[name]) : variable));
+}
+
+/**
  * Lists the choices a command needs that have no valid value.
  * @param args The arguments of the command.
  * @param values The values of its inputs, in order.

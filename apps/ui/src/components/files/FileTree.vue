@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, shallowRef, watch } from "vue";
-import { RouterLink } from "vue-router";
-import { ChevronRight, FileCog, FileKey, FilePlus, FileText, Folder, FolderOpen, FolderPlus, Pencil, Trash2 } from "@lucide/vue";
-import type { FileEntryPayload } from "@appsys/devtool-shared";
+import { RouterLink, useRouter } from "vue-router";
+import { ChevronRight, FileCog, FileKey, FilePlus, FileText, Folder, FolderOpen, FolderPlus, Pencil, Sparkles, Trash2, TriangleAlert } from "@lucide/vue";
+import { agentSkillFolderOf, type AgentSkillSummary, type FileEntryPayload } from "@appsys/devtool-shared";
 import { cn } from "@/lib/utils";
 
 interface TreeNode {
@@ -12,12 +12,19 @@ interface TreeNode {
   children: TreeNode[];
 }
 
-const props = defineProps<{
-  entries: FileEntryPayload[];
-  current: string | null;
-  dirty: boolean;
-  editable: boolean;
-}>();
+const props = withDefaults(
+  defineProps<{
+    entries: FileEntryPayload[];
+    current: string | null;
+    dirty: boolean;
+    editable: boolean;
+    /** The agent skills of the folders at the root, null when the folder does not hold agent skills. */
+    agentSkills?: AgentSkillSummary[] | null;
+  }>(),
+  { agentSkills: null },
+);
+
+const router = useRouter();
 
 const emit = defineEmits<{
   create: [parent: string, kind: FileEntryPayload["kind"]];
@@ -73,11 +80,13 @@ const root = computed(() => {
   return nodes.get("")!;
 });
 
+const skillsByFolder = computed(() => new Map(props.agentSkills?.map((skill) => [skill.folder, skill])));
+
 const rows = computed(() => {
-  const visible: { node: TreeNode; depth: number }[] = [];
+  const visible: { node: TreeNode; depth: number; skill: AgentSkillSummary | null }[] = [];
   const walk = (node: TreeNode, depth: number): void => {
     for (const child of node.children) {
-      visible.push({ node: child, depth });
+      visible.push({ node: child, depth, skill: depth === 0 ? (skillsByFolder.value.get(child.path) ?? null) : null });
       if (child.kind === "directory" && (!props.editable || expanded.value.has(child.path))) {
         walk(child, depth + 1);
       }
@@ -108,17 +117,60 @@ function toggle(path: string): void {
   }
   expanded.value = next;
 }
+
+/**
+ * Opens the `SKILL.md` of a skill not shown yet, or opens or closes its folder.
+ * @param path The path of the folder of the skill.
+ */
+function selectSkill(path: string): void {
+  const skillFile = props.entries.find((entry) => entry.kind === "file" && agentSkillFolderOf(entry.path) === path)?.path;
+  if (!skillFile || props.current === skillFile) {
+    toggle(path);
+    return;
+  }
+  void router.push({ query: { path: skillFile } });
+}
 </script>
 
 <template>
   <div class="flex flex-col gap-0.5">
     <div
-      v-for="{ node, depth } in rows"
+      v-for="{ node, depth, skill } in rows"
       :key="node.path"
       class="group relative flex items-center"
     >
       <button
-        v-if="node.kind === 'directory'"
+        v-if="skill"
+        type="button"
+        :class="cn(
+          'flex min-w-0 flex-1 items-start gap-1.5 rounded-md py-1.5 pr-2 pl-2 text-left text-sm transition-colors',
+          current?.startsWith(`${node.path}/`) ? 'bg-accent/60 text-foreground' : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground',
+        )"
+        @click="selectSkill(node.path)"
+      >
+        <ChevronRight
+          :class="cn('mt-0.5 size-3.5 shrink-0 transition-transform', expanded.has(node.path) && 'rotate-90')"
+          @click.stop="toggle(node.path)"
+        />
+        <Sparkles class="mt-0.5 size-4 shrink-0" />
+        <span class="min-w-0 flex-1">
+          <span class="flex items-center gap-1">
+            <span class="truncate">{{ node.name }}</span>
+            <span
+              v-if="skill.problems.length"
+              :title="skill.problems.join('\n')"
+            >
+              <TriangleAlert class="size-3.5 shrink-0 text-amber-500" />
+            </span>
+          </span>
+          <span
+            v-if="skill.description"
+            class="line-clamp-2 text-xs text-muted-foreground"
+          >{{ skill.description }}</span>
+        </span>
+      </button>
+      <button
+        v-else-if="node.kind === 'directory'"
         type="button"
         class="flex min-w-0 flex-1 items-center gap-1.5 rounded-md py-1.5 pr-2 text-left text-sm text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
         :style="{ paddingLeft: `${0.5 + depth * 0.875}rem` }"

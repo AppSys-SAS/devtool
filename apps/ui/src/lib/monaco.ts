@@ -1,5 +1,6 @@
 import * as monaco from "monaco-editor/editor";
 import "monaco-editor/features/register.all";
+import "monaco-editor/languages/definitions/markdown/register";
 import "monaco-editor/languages/definitions/yaml/register";
 import EditorWorker from "monaco-editor/editor/editor.worker?worker";
 import { parseDocument } from "yaml";

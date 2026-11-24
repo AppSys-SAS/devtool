@@ -2,9 +2,11 @@
 import { computed, shallowRef, watch } from "vue";
 import { onBeforeRouteLeave, onBeforeRouteUpdate, type RouteLocationNormalized, useRoute, useRouter } from "vue-router";
 import { useEventListener } from "@vueuse/core";
-import type { DirectoryExtra, FileEntryPayload } from "@appsys/devtool-shared";
+import { AGENT_SKILL_FILE, agentSkillFolderOf, type DirectoryExtra, type FileEntryPayload } from "@appsys/devtool-shared";
 import CodeEditor from "@/components/CodeEditor.vue";
 import ConfirmDialog from "@/components/ConfirmDialog.vue";
+import AgentSkillEditor from "@/components/files/AgentSkillEditor.vue";
+import MarkdownPreview from "@/components/files/MarkdownPreview.vue";
 import FileExplorer from "@/components/files/FileExplorer.vue";
 import FileHeader from "@/components/files/FileHeader.vue";
 import PromptDialog from "@/components/PromptDialog.vue";
@@ -27,6 +29,8 @@ const props = withDefaults(
   { commands: () => [], restore: null, projectSlug: null, directorySlug: null },
 );
 
+const MARKDOWN_EXTENSION = /\.(md|markdown)$/i;
+
 const route = useRoute();
 const router = useRouter();
 
@@ -40,6 +44,9 @@ const path = computed(() => {
   return tree.value && !tree.value.editable ? (filePaths.value[0] ?? null) : null;
 });
 const { file, draft, dirty, saving, save, revert } = useEditedFile(() => props.space, path);
+const skillFolder = computed(() => (tree.value?.agentSkills && path.value ? agentSkillFolderOf(path.value) : null));
+const markdown = computed(() => MARKDOWN_EXTENSION.test(path.value ?? ""));
+const preview = shallowRef(false);
 
 const leaveOpen = shallowRef(false);
 let pendingLeave: string | null = null;
@@ -112,15 +119,17 @@ function askPath(title: string, label: string, value: string, action: (value: st
 }
 
 /**
- * Asks for the path of a new file or folder, then creates it and opens it when it is a file.
+ * Asks for the path of a new file or folder, then creates it and opens it when it is a file. A folder at
+ * the root of a folder of agent skills is a new skill, whose `SKILL.md` is opened.
  * @param parent The folder it goes in, empty for the root.
  * @param kind Whether a file or a folder is created.
  */
 function create(parent: string, kind: FileEntryPayload["kind"]): void {
-  askPath(kind === "file" ? "New file" : "New folder", "Create", parent ? `${parent}/` : "", (value) => {
+  const skill = Boolean(tree.value?.agentSkills) && !parent && kind === "directory";
+  askPath(skill ? "New skill" : kind === "file" ? "New file" : "New folder", "Create", parent ? `${parent}/` : "", (value) => {
     wsStore.fileCreate(props.space, value, kind);
-    if (kind === "file") {
-      pendingSelect.value = value;
+    if (kind === "file" || skill) {
+      pendingSelect.value = skill ? `${value}/${AGENT_SKILL_FILE}` : value;
     }
   });
 }
@@ -203,17 +212,35 @@ useEventListener(window, "beforeunload", (event: BeforeUnloadEvent) => {
         :file="file"
         :dirty="dirty"
         :saving="saving"
+        :previewable="markdown && !file.binary"
+        v-model:preview="preview"
         @save="save"
         @revert="revert"
       />
-      <div
-        v-if="!file.binary"
+      <AgentSkillEditor
+        v-if="!file.binary && skillFolder"
+        v-model="draft"
         class="min-h-0 flex-1"
+        :path="path"
+        :folder="skillFolder"
+        :preview="preview"
+        @save="save"
+      />
+      <div
+        v-else-if="!file.binary"
+        class="flex min-h-0 flex-1"
       >
-        <CodeEditor
-          v-model="draft"
-          :path="path"
-          @save="save"
+        <div class="min-w-0 flex-1">
+          <CodeEditor
+            v-model="draft"
+            :path="path"
+            @save="save"
+          />
+        </div>
+        <MarkdownPreview
+          v-if="markdown && preview"
+          :source="draft"
+          class="min-w-0 flex-1 border-l"
         />
       </div>
     </div>

@@ -8,8 +8,13 @@ description: Reads and changes the files the devtool exposes (folders of files o
 ## Files
 
 - `list_files` lists the spaces: `configs` (configurations of the environment) and the folders of files
-  of the projects, `<section>/<project>/<slug>`, with your `read` and `write` levels. `list_files
-  { space }` lists the files of one space.
+  of the projects, `<section>/<project>/<slug>`, with their `type` and your `read` and `write` levels.
+  `list_files { space }` lists the files of one space.
+- A space of `type: agentSkills` holds one agent skill per folder (`<skill>/SKILL.md`, any case: YAML header with
+  `name`, equal to the folder, and `description`, then Markdown instructions); `list_files { space }`
+  also gives each skill with its description and what does not follow the format. A `SKILL.md` whose
+  header is not a YAML map is refused; `change_files { action: create, kind: directory }` at the root
+  creates a skill with its `SKILL.md`.
 - `read_file { space, path }` gives the content and its `updatedAt`.
 - `read_file { space, path, mode: "keys" }` gives the keys of a YAML, JSON or .env file with the type of
   each value (`<string>`, `<number>`, `<boolean>`, `<list:3>`, `""` for an empty string) instead of the
@@ -42,5 +47,7 @@ Synchronizing overwrites data: only pull or push what the task needs, and say wh
 
 - `list_certificates`: expiry, issuer, errors and renewal of the certificates of the load balancer;
   `renew_certificate { name }` renews one in a terminal.
+- `list_pull_requests`: the open pull requests of the repositories of the projects, as last read from
+  their forge (author, branches, draft, checks, review, review requested from the user, written by the user).
 - `reload_config` reloads the devtool configuration after its files changed; agents never write the
   devtool configuration itself.

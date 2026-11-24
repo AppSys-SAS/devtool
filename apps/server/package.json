@@ -27,6 +27,7 @@
     "@appsys/devtool-cdn": "workspace:*",
     "@appsys/devtool-certs": "workspace:*",
     "@appsys/devtool-config": "workspace:*",
+    "@appsys/devtool-git": "workspace:*",
     "@appsys/devtool-mcp": "workspace:*",
     "@appsys/devtool-shared": "workspace:*",
     "@iconify-json/akar-icons": "^1.2.7",

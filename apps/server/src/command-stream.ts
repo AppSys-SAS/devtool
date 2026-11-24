@@ -7,7 +7,7 @@ import xtermHeadless, { type Terminal as ScreenTerminal } from "@xterm/headless"
 import { spawn as spawnPty, type IPty } from "node-pty";
 import treeKill from "tree-kill";
 import type { CommandArg, CommandInputValue, PortConflict, PortConflictAction, StreamOutputLine, StreamUpdatePayload } from "@appsys/devtool-shared";
-import { expandCommandArgs, logger, missingCommandInputs } from "@appsys/devtool-shared";
+import { expandCommandArgs, logger, missingCommandInputs, replaceVariables } from "@appsys/devtool-shared";
 import type { WebSocket } from "ws";
 import { AnswerMatcher, type CommandAutomation, CommandSecrets } from "./command-automation.js";
 import { killPortOwners, PortConflictWatcher } from "./ports.js";
@@ -211,6 +211,9 @@ export class DevtoolCommandStream {
   /** The values typed for the inputs of the template, in order. */
   private _inputs: CommandInputValue[];
 
+  /** The values of the variables `%{ADT:<NAME>}` of its arguments, by name. */
+  private _values: Record<string, string>;
+
   /** Called each time the process ends, with its exit code, -1 when it was stopped. */
   private _onExit: ((exitCode: number) => void) | null = null;
 
@@ -267,6 +270,7 @@ export class DevtoolCommandStream {
     this.command = null;
     this._template = null;
     this._inputs = [];
+    this._values = {};
     this.cwd = process.cwd();
     this.env = {};
     this.shell = null;
@@ -373,6 +377,7 @@ export class DevtoolCommandStream {
     this.command = restoreArgs ? null : (command?.slug ?? null);
     this._template = restoreArgs ? null : (command?.args ?? null);
     this._inputs = inputs;
+    this._values = Object.fromEntries(Object.entries(options.values ?? {}).filter(([, value]) => typeof value === "string"));
     this.args = restoreArgs ?? (this._template ? expandCommandArgs(this._template, inputs) : args);
     this.name = name ?? this.args.join(" ");
     this.tag = typeof options.tag === "string" ? options.tag : null;
@@ -547,13 +552,13 @@ export class DevtoolCommandStream {
   }
 
   /**
-   * Replaces `%{ADT:CWD}` by the folder of the command in its fixed arguments.
+   * Replaces the variables of arguments whose value blocks are read: `%{ADT:CWD}` by the folder of
+   * the command, the others by the values it was started with, their text never read as value blocks.
    * @param args The arguments.
-   * @returns The arguments, inputs left untouched.
+   * @returns The arguments to run.
    */
-  private convertArgs<T extends CommandArg>(args: T[]): T[] {
-    // noinspection RegExpRedundantEscape
-    return args.map((item) => (typeof item === "string" ? (item.replace(/%\{ADT:CWD\}/g, this.cwd) as T) : item));
+  private replaceVariables(args: string[]): string[] {
+    return args.map((arg) => replaceVariables(arg, { ...this._values, CWD: this.cwd }));
   }
 
   /**
@@ -562,7 +567,7 @@ export class DevtoolCommandStream {
    */
   private async startDetached(): Promise<void> {
     ensureNodePtySpawnHelperExecutable();
-    const finalArgs = expandCommandArgs(this.convertArgs(this._template ?? this.args), this._inputs);
+    const finalArgs = this.replaceVariables(expandCommandArgs(this._template ?? this.args, this._inputs));
     const env = { ...process.env, ...this.defaultEnv, ...this.env };
     let child = null as ReturnType<typeof spawnDetached> | null;
     const spawnErrors: string[] = [];
@@ -629,13 +634,13 @@ export class DevtoolCommandStream {
     notifications?: boolean;
   } = {}): Promise<void> {
     ensureNodePtySpawnHelperExecutable();
-    const template = this.convertArgs(this._template ?? args);
-    const finalArgs = expandCommandArgs(template, this._inputs);
+    const template = this._template ?? args;
+    const finalArgs = this.replaceVariables(expandCommandArgs(template, this._inputs));
     if (this.proc) {
       throw new Error("Command already running");
     }
 
-    const secrets = new CommandSecrets(this.automation?.opAccount ?? null, (command) => this.runInShell(command));
+    const secrets = new CommandSecrets(this.automation?.opAccount ?? null, this.cwd, (command) => this.runInShell(command));
     let resolvedArgs = finalArgs;
     let resolvedEnv = this.env;
     if (this.automation) {
@@ -649,7 +654,7 @@ export class DevtoolCommandStream {
         for (const arg of template) {
           resolvedTemplate.push(typeof arg === "string" ? await secrets.resolve(arg) : arg);
         }
-        resolvedArgs = expandCommandArgs(resolvedTemplate, this._inputs);
+        resolvedArgs = this.replaceVariables(expandCommandArgs(resolvedTemplate, this._inputs));
         resolvedEnv = {};
         for (const [key, value] of Object.entries(this.env)) {
           resolvedEnv[key] = await secrets.resolve(value);
@@ -773,7 +778,7 @@ export class DevtoolCommandStream {
    * @returns True when the check succeeded.
    */
   private async alreadyDone(unless: string[]): Promise<boolean> {
-    const result = await this.execInShell(this.convertArgs(unless).map(shellEscapePosix).join(" "));
+    const result = await this.execInShell(this.replaceVariables(unless).map(shellEscapePosix).join(" "));
     if (result.code !== 0) {
       return false;
     }

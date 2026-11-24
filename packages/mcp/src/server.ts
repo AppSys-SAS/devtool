@@ -22,7 +22,7 @@ const SESSION_SWEEP_MS = 15_000;
 const RESOURCE_LINES = 200;
 const HISTORY_INPUT_LENGTH = 300;
 const INSTRUCTIONS = [
-  "Tools of the devtool, a local development environment: its terminals, the commands and scripts of its configuration, its files, its environment synchronized with a CDN and its certificates.",
+  "Tools of the devtool, a local development environment: its terminals, the commands and scripts of its configuration, its files, its environment synchronized with a CDN, its certificates and the pull requests of its repositories.",
   "Start with list_projects, list_commands and list_terminals. Prefer run_command (commands of the configuration) over run_shell.",
   "Read terminals with read_terminal, passing the returned cursor as `since` to get only new output; use mode `screen` for interactive prompts, then send_input.",
   "Some calls wait for the user to accept them in the devtool interface; a refused call returns an error saying why: do not retry it unchanged.",

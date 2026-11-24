@@ -1,8 +1,14 @@
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { parseEnv } from "node:util";
+import { parse as parseYaml } from "yaml";
 import { OpTerminal } from "./op-terminal.js";
 import { stripAnsi } from "./utils.js";
 
 const VALUE_BLOCK = /\{\{\s*(.*?)\s*\}\}/gs;
 const SECRET_REFERENCE = /^op:\/\/[^\r\n]+$/;
+const FILE_REFERENCE = /^file:\/\/([^#\r\n]+)(?:#(\/[^\r\n]*))?$/;
 const SHELL_SUBSTITUTION = /^\$\((.+)\)$/s;
 const MAX_OUTPUT_LENGTH = 8192;
 const MIN_SCRUBBED_LENGTH = 4;
@@ -28,18 +34,42 @@ export interface CommandAutomation {
 export type ShellRunner = (command: string) => Promise<string>;
 
 /**
- * Lists the value blocks of a text that are neither a 1Password reference nor a shell substitution.
+ * Lists the value blocks of a text that are neither a 1Password reference, a file reference nor a
+ * shell substitution.
  * @param text The text.
  * @returns Each invalid block, as written.
  */
 export function findInvalidValueBlocks(text: string): string[] {
-  return [...text.matchAll(VALUE_BLOCK)].filter(([, expression]) => !SECRET_REFERENCE.test(expression) && !SHELL_SUBSTITUTION.test(expression)).map(([block]) => block);
+  return [...text.matchAll(VALUE_BLOCK)]
+    .filter(([, expression]) => !SECRET_REFERENCE.test(expression) && !FILE_REFERENCE.test(expression) && !SHELL_SUBSTITUTION.test(expression))
+    .map(([block]) => block);
+}
+
+/**
+ * Parses a YAML, JSON or environment file, its format told by its name.
+ * @param file The path of the file.
+ * @param content Its content.
+ * @returns The parsed document.
+ */
+function parseValueFile(file: string, content: string): unknown {
+  const name = path.basename(file);
+  if (/\.ya?ml$/i.test(name)) {
+    return parseYaml(content);
+  }
+  if (/\.json$/i.test(name)) {
+    return JSON.parse(content);
+  }
+  if (/^\.env(\..+)?$|\.env$/i.test(name)) {
+    return parseEnv(content);
+  }
+  throw new Error(`unknown format of ${file}, expected .yml, .yaml, .json or .env`);
 }
 
 /**
  * Reads the value blocks of the texts of a command, `{{ op://<vault>/<item>/<field> }}` from
- * 1Password in a terminal of its own and `{{ $(<command>) }}` from the output of a shell command,
- * each expression once, and hides every value read from the output.
+ * 1Password in a terminal of its own, `{{ file://<path>#<pointer> }}` from a file and
+ * `{{ $(<command>) }}` from the output of a shell command, each expression once, and hides every
+ * value read from the output.
  */
 export class CommandSecrets {
   private readonly _values = new Map<string, string>();
@@ -48,10 +78,12 @@ export class CommandSecrets {
 
   /**
    * @param _account The 1Password account the references are read from, null for the default one.
+   * @param _folder The folder relative file references are resolved from.
    * @param _runShell Runs the shell commands of the substitutions.
    */
   constructor(
     private readonly _account: string | null,
+    private readonly _folder: string,
     private readonly _runShell: ShellRunner,
   ) {}
 
@@ -119,12 +151,44 @@ export class CommandSecrets {
       return this._terminal.read(expression);
     }
 
+    const reference = FILE_REFERENCE.exec(expression);
+    if (reference) {
+      return this.readFile(reference[1], reference[2] ?? null);
+    }
+
     const substitution = SHELL_SUBSTITUTION.exec(expression);
     if (substitution) {
       return (await this._runShell(substitution[1])).replace(/[\r\n]+$/, "");
     }
 
     throw new Error(`Unknown value block {{ ${expression} }}`);
+  }
+
+  /**
+   * Reads a file, or the value a JSON pointer designates in a YAML, JSON or environment file.
+   * @param filePath The path of the file, `~/` for the home folder, relative to the folder of the command.
+   * @param pointer A JSON pointer such as `/hosts/0/token`, null for the whole file.
+   * @returns The content of the file without its trailing newlines, or the value as text.
+   */
+  private async readFile(filePath: string, pointer: string | null): Promise<string> {
+    const file = path.resolve(this._folder, filePath.startsWith("~/") ? path.join(os.homedir(), filePath.slice(2)) : filePath);
+    const content = await fs.readFile(file, "utf8");
+    if (pointer === null) {
+      return content.replace(/[\r\n]+$/, "");
+    }
+
+    let value = parseValueFile(file, content);
+    const keys = pointer.split("/").slice(1).map((key) => key.replaceAll("~1", "/").replaceAll("~0", "~"));
+    for (const [index, key] of keys.entries()) {
+      if (value === null || typeof value !== "object" || !Object.hasOwn(value, key)) {
+        throw new Error(`file://${filePath}#${pointer}: no key /${keys.slice(0, index + 1).join("/")}`);
+      }
+      value = (value as Record<string, unknown>)[key];
+    }
+    if (typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean") {
+      throw new Error(`file://${filePath}#${pointer}: not a text, number or boolean`);
+    }
+    return String(value);
   }
 }
 

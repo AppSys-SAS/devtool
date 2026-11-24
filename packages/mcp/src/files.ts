@@ -1,5 +1,5 @@
 import { configFormatOf } from "@appsys/devtool-cdn";
-import { environmentRules, type McpDetail, type McpRules } from "@appsys/devtool-shared";
+import { type DirectoryFilesType, environmentRules, type McpDetail, type McpRules } from "@appsys/devtool-shared";
 import { z } from "zod";
 import { McpRefusal } from "./approvals.js";
 import type { McpFileSpace, McpHost } from "./host.js";
@@ -9,6 +9,7 @@ import { defineTool, McpToolError, type McpCall, type McpTool } from "./tool.js"
 interface AgentFileSpace {
   id: string;
   name: string;
+  type: DirectoryFilesType;
   /** The rules of the space as a whole. */
   rules: McpRules;
   /**
@@ -32,6 +33,7 @@ function fileSpaces(host: McpHost): AgentFileSpace[] {
     {
       id: host.fileSpaces.configsSpace,
       name: "Configs of the environment",
+      type: "files" as const,
       rules: mcp.environment,
       rulesOf: (filePath: string) => environmentRules(mcp, filePath),
       readable: [mcp.environment, ...mcp.environmentItems.filter((item) => item.kind === "file").map((item) => item.rules)].some((rules) => rules.read.level !== "deny"),
@@ -41,6 +43,7 @@ function fileSpaces(host: McpHost): AgentFileSpace[] {
         Object.values(project.files).map((files) => ({
           id: `${section.slug}/${project.slug}/${files.slug}`,
           name: files.name,
+          type: files.type,
           rules: files.mcp,
           rulesOf: () => files.mcp,
           readable: files.mcp.read.level !== "deny",
@@ -201,6 +204,7 @@ export function fileTools(host: McpHost): McpTool[] {
           return fileSpaces(host).map((item) => ({
             space: item.id,
             name: item.name,
+            type: item.type,
             root: item.space.root,
             editable: item.space.editable,
             levels: { read: item.rules.read.level, write: item.rules.write.level },

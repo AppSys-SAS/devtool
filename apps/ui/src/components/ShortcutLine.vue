@@ -10,6 +10,8 @@ const props = defineProps<{
   compact?: boolean;
 }>();
 
+const COUNT_CLASS = "rounded-full bg-sky-500/20 px-1.5 text-[10px] leading-4 font-semibold tabular-nums text-sky-700 dark:text-sky-300";
+
 const route = useRoute();
 const router = useRouter();
 const active = computed(() => props.shortcut.route !== null && router.resolve(props.shortcut.route).fullPath === route.fullPath);
@@ -19,15 +21,19 @@ const active = computed(() => props.shortcut.route !== null && router.resolve(pr
   <button
     v-if="compact"
     type="button"
-    class="flex size-5 shrink-0 items-center justify-center rounded transition"
-    :class="active ? '' : 'opacity-50 grayscale hover:opacity-100 hover:grayscale-0'"
-    :title="shortcut.name"
+    class="group flex h-5 min-w-5 shrink-0 items-center justify-center gap-1 rounded"
+    :title="shortcut.count ? `${shortcut.name}: ${shortcut.count}` : shortcut.name"
     @click.prevent.stop="shortcut.open()"
   >
     <Icon
       :icon="shortcut.icon"
-      class="size-3.5"
+      class="size-3.5 transition"
+      :class="active ? '' : 'opacity-50 grayscale group-hover:opacity-100 group-hover:grayscale-0'"
     />
+    <span
+      v-if="shortcut.count"
+      :class="COUNT_CLASS"
+    >{{ shortcut.count }}</span>
   </button>
   <button
     v-else
@@ -41,5 +47,9 @@ const active = computed(() => props.shortcut.route !== null && router.resolve(pr
       class="size-3.5 shrink-0 text-muted-foreground"
     />
     <span class="min-w-0 flex-1 truncate">{{ shortcut.name }}</span>
+    <span
+      v-if="shortcut.count"
+      :class="COUNT_CLASS"
+    >{{ shortcut.count }}</span>
   </button>
 </template>

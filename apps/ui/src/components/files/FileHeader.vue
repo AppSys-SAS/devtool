@@ -1,18 +1,25 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { Loader2, Save, TriangleAlert, Undo2 } from "@lucide/vue";
+import { Eye, EyeOff, Loader2, Save, TriangleAlert, Undo2 } from "@lucide/vue";
 import type { FilePayload } from "@appsys/devtool-shared";
 import SidebarToggle from "@/components/SidebarToggle.vue";
 import { Button } from "@/components/ui/button";
 import { formatRelativeDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
-const props = defineProps<{
-  root: string;
-  file: FilePayload;
-  dirty: boolean;
-  saving: boolean;
-}>();
+const props = withDefaults(
+  defineProps<{
+    root: string;
+    file: FilePayload;
+    dirty: boolean;
+    saving: boolean;
+    /** Whether the file can be shown rendered next to the editor. */
+    previewable?: boolean;
+  }>(),
+  { previewable: false },
+);
+
+const preview = defineModel<boolean>("preview", { default: false });
 
 const emit = defineEmits<{
   save: [];
@@ -45,6 +52,22 @@ const status = computed(() => {
       <span
         :class="cn('shrink-0 text-xs', dirty ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground')"
       >{{ status }}</span>
+      <Button
+        v-if="previewable"
+        :variant="preview ? 'secondary' : 'outline'"
+        size="sm"
+        @click="preview = !preview"
+      >
+        <EyeOff
+          v-if="preview"
+          class="size-4"
+        />
+        <Eye
+          v-else
+          class="size-4"
+        />
+        Preview
+      </Button>
       <Button
         variant="outline"
         size="sm"

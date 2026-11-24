@@ -1,13 +1,15 @@
 <script setup lang="ts">
+import { computed, shallowRef } from "vue";
 import { Icon } from "@iconify/vue";
-import { FilePlus, FolderPlus, RefreshCw, TriangleAlert } from "@lucide/vue";
+import { FilePlus, FolderPlus, RefreshCw, Sparkles, TriangleAlert } from "@lucide/vue";
 import type { DirectoryExtra, FileEntryPayload, FileTreePayload } from "@appsys/devtool-shared";
 import FileTree from "@/components/files/FileTree.vue";
 import SidebarToggle from "@/components/SidebarToggle.vue";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
-defineProps<{
+const props = defineProps<{
   name: string;
   tree: FileTreePayload | null;
   current: string | null;
@@ -24,6 +26,19 @@ const emit = defineEmits<{
   rename: [path: string];
   remove: [path: string, kind: FileEntryPayload["kind"]];
 }>();
+
+const search = shallowRef("");
+
+const entries = computed(() => {
+  const query = search.value.trim().toLowerCase();
+  const skills = props.tree?.agentSkills;
+  if (!skills || !query) {
+    return props.tree?.entries ?? [];
+  }
+
+  const folders = new Set(skills.filter((skill) => [skill.folder, skill.name, skill.description].some((text) => text?.toLowerCase().includes(query))).map((skill) => skill.folder));
+  return props.tree?.entries.filter((entry) => folders.has(entry.path.split("/")[0] ?? "")) ?? [];
+});
 
 /**
  * Gives the icon of a command from its metadata.
@@ -47,7 +62,17 @@ function commandIcon(command: DirectoryExtra): string {
         class="-ml-1.5"
       />
       <span class="min-w-0 flex-1 truncate text-xs font-semibold tracking-wide text-muted-foreground uppercase">{{ name }}</span>
-      <template v-if="tree?.editable && tree.exists">
+      <Button
+        v-if="tree?.agentSkills && tree.editable && tree.exists"
+        size="icon"
+        variant="ghost"
+        class="size-7"
+        title="New skill"
+        @click="emit('create', '', 'directory')"
+      >
+        <Sparkles class="size-3.5" />
+      </Button>
+      <template v-else-if="tree?.editable && tree.exists">
         <Button
           size="icon"
           variant="ghost"
@@ -98,6 +123,17 @@ function commandIcon(command: DirectoryExtra): string {
     </div>
 
     <div
+      v-if="tree?.agentSkills?.length"
+      class="border-b p-2"
+    >
+      <Input
+        v-model="search"
+        placeholder="Search skills"
+        class="h-8"
+      />
+    </div>
+
+    <div
       v-if="tree?.error"
       class="m-2 flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive"
     >
@@ -135,10 +171,11 @@ function commandIcon(command: DirectoryExtra): string {
       <FileTree
         v-else
         class="p-2"
-        :entries="tree.entries"
+        :entries="entries"
         :current="current"
         :dirty="dirty"
         :editable="tree.editable"
+        :agent-skills="tree.agentSkills"
         @create="(parent, kind) => emit('create', parent, kind)"
         @rename="(path) => emit('rename', path)"
         @remove="(path, kind) => emit('remove', path, kind)"

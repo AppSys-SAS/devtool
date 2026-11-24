@@ -9,14 +9,16 @@ import type { CommandAutomation } from "./command-automation.js";
 import { DevtoolCertificates } from "./certificates.js";
 import { type CommandStreamHooks, DevtoolCommandStream } from "./command-stream.js";
 import { acceptsMcpLevel, writeMcpLevel } from "./config-edit.js";
-import { DevtoolConfigure } from "./configure.js";
+import { agentAutomationKey, DevtoolConfigure } from "./configure.js";
 import { DevtoolEnvironment } from "./environment.js";
 import { DevtoolFileSpaces, type FileSpace, isDevtoolConfig } from "./file-spaces.js";
 import { DevtoolHttp } from "./http.js";
 import { DevtoolLB } from "./lb.js";
 import { DevtoolMcp, type McpLevelChange, type McpServerHost, type McpUiMessage } from "@appsys/devtool-mcp";
 import { listPortOwners } from "./ports.js";
+import { DevtoolPullRequests } from "./pull-requests.js";
 import type {
+  AgentStartPayload,
   CommandStreamCreatePayload,
   CommandStreamInputPayload,
   CommandStreamPortConflictPayload,
@@ -59,6 +61,8 @@ export class DevtoolServer implements McpServerHost {
 
   readonly certificates: DevtoolCertificates;
 
+  readonly pullRequests: DevtoolPullRequests;
+
   readonly fileSpaces = new DevtoolFileSpaces();
 
   private readonly mcp: DevtoolMcp;
@@ -93,6 +97,11 @@ export class DevtoolServer implements McpServerHost {
       run: (data, hooks) => this.newCommandStream(data, hooks),
       reload: () => this.reconfigure(),
       synchronizedPaths: (files) => this.environment.synchronizedPaths(files),
+    });
+    this.pullRequests = new DevtoolPullRequests({
+      publish: async (payload) => {
+        await this.http?.sendToWsConnections("pullRequests", payload);
+      },
     });
     this.mcp = new DevtoolMcp(this);
   }
@@ -205,7 +214,8 @@ export class DevtoolServer implements McpServerHost {
 
   /**
    * Sends a new interface the configuration, the CDN sign-in state, the development environment, the
-   * certificates, the command streams and the agents.
+   * certificates, the pull requests, the command streams and the agents; the pull requests are read
+   * from the first interface on.
    * @param ws The connection of the interface.
    */
   async onNewConnection(ws: WebSocket): Promise<void> {
@@ -213,6 +223,8 @@ export class DevtoolServer implements McpServerHost {
     await this.http.sendToWsConnections("cdnSession", await this.cdnSession.status(), ws);
     await this.http.sendToWsConnections("environment", this.environment.state(), ws);
     await this.http.sendToWsConnections("certificates", this.certificates.state(), ws);
+    await this.http.sendToWsConnections("pullRequests", this.pullRequests.state(), ws);
+    this.pullRequests.start();
     for (const stream of this.commandStreams) {
       await stream.sendUpdate(ws);
       await stream.sendOutput(null, ws);
@@ -251,6 +263,16 @@ export class DevtoolServer implements McpServerHost {
 
     if (message.type === "certificateRenew") {
       await this.certificates.renew(message.data.name, message.data.tag);
+      return;
+    }
+
+    if (message.type === "pullRequestsRefresh") {
+      await this.pullRequests.refresh(message.data.key);
+      return;
+    }
+
+    if (message.type === "agentStart") {
+      await this.startAgent(message.data);
       return;
     }
 
@@ -368,7 +390,7 @@ export class DevtoolServer implements McpServerHost {
     const space = this.fileSpaces.get(spaceId);
     const tree: FileTreePayload = space
       ? await space.tree()
-      : { space: spaceId, root: "", exists: false, editable: false, entries: [], error: `${spaceId} is not a file space` };
+      : { space: spaceId, root: "", exists: false, editable: false, entries: [], agentSkills: null, error: `${spaceId} is not a file space` };
     await this.http.sendToWsConnections("fileTree", error ? { ...tree, error } : tree, ws);
   }
 
@@ -510,6 +532,30 @@ export class DevtoolServer implements McpServerHost {
   }
 
   /**
+   * Starts an agent of the configuration run by a command in a terminal of a directory, its prompt
+   * given once the value blocks of the command are read, and shows the terminal to the interface.
+   * @param data The agent, the directory, the prompt and the terminal.
+   */
+  private async startAgent(data: AgentStartPayload): Promise<void> {
+    const agent = this.config.adt.agents.find((item) => item.slug === data.agent);
+    if (!agent?.args || !this.config.projects[data.projectSlug]?.directories[data.directorySlug]) {
+      logger.warn("Server", "Agents", `No agent ${data.agent} run by a command in ${data.projectSlug}/${data.directorySlug}`);
+      return;
+    }
+    await this.newCommandStream(
+      {
+        projectSlug: data.projectSlug,
+        directorySlug: data.directorySlug,
+        args: agent.args,
+        env: agent.env,
+        name: data.name,
+        options: { redirect: true, values: { PROMPT: data.prompt } },
+      },
+      { automation: this.configWrapper.automations[agentAutomationKey(agent.slug)] ?? null },
+    );
+  }
+
+  /**
    * Starts a command outside of any terminal, leaving it running on its own.
    * @param data The command.
    */
@@ -557,7 +603,7 @@ export class DevtoolServer implements McpServerHost {
 
   /**
    * Loads the configuration and hands it to the CDN session, the environment, the certificates, the
-   * file spaces and the MCP server, then watches its folders of scripts.
+   * pull requests, the file spaces and the MCP server, then watches its folders of scripts.
    */
   private async loadConfig(): Promise<void> {
     const nextConfig = await this.configProvider();
@@ -567,6 +613,7 @@ export class DevtoolServer implements McpServerHost {
     this.cdnSession.configure(nextConfig.raw.cdn);
     this.environment.configure(nextConfig.raw);
     await this.certificates.configure(this.config, this.configWrapper.automations);
+    this.pullRequests.configure(this.config, this.configWrapper.automations, this.configWrapper.integrationTokens);
     this.fileSpaces.configure(nextConfig.raw, this.config.projects, (filePath) => this.afterConfigWrite(filePath));
     await this.mcp.configure();
     this.watchScriptFolders();

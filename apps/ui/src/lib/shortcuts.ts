@@ -2,6 +2,7 @@ import type { RouteLocationRaw } from "vue-router";
 import type { DirectoryDefinition, DirectoryShortcut, IntegrationDefinition } from "@appsys/devtool-shared";
 import router from "@/router";
 import { commandName, iconFromMeta, runDirectoryCommand, startDefaultCommand } from "@/lib/directory-commands";
+import pullRequestsStore from "@/stores/pull-requests";
 
 const GENERIC_INTEGRATION_ICON = "lucide:app-window";
 
@@ -14,6 +15,8 @@ export interface SidebarShortcut {
   /** The page of the devtool it shows, null when it opens a tab or runs a command. */
   route: RouteLocationRaw | null;
   open: () => void;
+  /** A number shown with it, such as what waits for the person, absent when there is none. */
+  count?: number;
 }
 
 /**
@@ -31,20 +34,32 @@ export function integrationRoute(integration: IntegrationDefinition, projectSlug
 }
 
 /**
- * Gives the shortcut opening an integration: its page when embedded, else its URL in a new tab.
+ * Tells whether an integration is shown in a page of the devtool rather than opened in a new tab.
+ * @param integration The integration.
+ * @returns Whether it has a page: embedded, or listing pull requests.
+ */
+export function hasIntegrationPage(integration: IntegrationDefinition): boolean {
+  return integration.embed || integration.type === "pullRequests";
+}
+
+/**
+ * Gives the shortcut opening an integration: its page when embedded or listing pull requests, else its
+ * URL in a new tab; pull requests count those waiting for a review of the person, unless `badge` is off.
  * @param integration The integration.
  * @param projectSlug The project of the directory declaring it, if any.
  * @param directorySlug The directory declaring it, if any.
  * @returns The shortcut.
  */
 export function integrationShortcut(integration: IntegrationDefinition, projectSlug?: string, directorySlug?: string): SidebarShortcut {
-  const route = integration.embed ? integrationRoute(integration, projectSlug, directorySlug) : null;
+  const route = hasIntegrationPage(integration) ? integrationRoute(integration, projectSlug, directorySlug) : null;
+  const waiting = integration.badge ? (pullRequestsStore.get(`${projectSlug}/${directorySlug}/${integration.slug}`)?.items.filter((item) => item.reviewRequested).length ?? 0) : 0;
   return {
     key: `integration:${integration.slug}`,
     name: integration.name,
     icon: integration.icon,
     route,
     open: () => (route ? void router.push(route) : openTab(integration.url)),
+    ...(waiting ? { count: waiting } : {}),
   };
 }
 
@@ -69,7 +84,8 @@ export function directoryShortcuts(projectSlug: string, directory: DirectoryDefi
     if (shortcut.type === "files") {
       const files = directory.files[shortcut.slug];
       const route = { name: "directory-files", params: { projectSlug, directorySlug: directory.slug, fileSpace: shortcut.slug } };
-      return files ? [{ key, name: files.name, icon: "lucide:folder-open", route, open: () => void router.push(route) }] : [];
+      const icon = files?.type === "agentSkills" ? "lucide:sparkles" : "lucide:folder-open";
+      return files ? [{ key, name: files.name, icon, route, open: () => void router.push(route) }] : [];
     }
     const host = directory.loadBalancer[shortcut.slug]?.hosts[shortcut.index];
     return host ? [{ key, name: host, icon: "lucide:globe", route: null, open: () => openTab(`https://${host}`) }] : [];

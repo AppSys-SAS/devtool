@@ -268,6 +268,39 @@ export function environmentTools(host: McpHost): McpTool[] {
       },
     }),
     defineTool({
+      name: "list_pull_requests",
+      title: "List pull requests",
+      description:
+        "Lists the open pull requests of the repositories of the projects, as last read from their forge: number, title, link, author, branches, draft, checks, review, whether a review of the user is requested and whether the user wrote it.",
+      input: {},
+      readOnly: true,
+      run: async () => {
+        const states = new Map(host.pullRequests.state().map((state) => [state.key, state]));
+        return Object.values(host.config.projects).flatMap((section) =>
+          Object.values(section.directories)
+            .filter((project) => project.mcp.read.level !== "deny")
+            .flatMap((project) =>
+              project.integrations
+                .filter((integration) => integration.type === "pullRequests")
+                .map((integration) => {
+                  const state = states.get(`${section.slug}/${project.slug}/${integration.slug}`);
+                  return {
+                    section: section.slug,
+                    project: project.slug,
+                    integration: integration.slug,
+                    repository: integration.url,
+                    forge: integration.provider?.label ?? null,
+                    viewer: state?.viewer ?? null,
+                    updatedAt: state?.updatedAt ?? null,
+                    error: state?.error ?? null,
+                    pullRequests: state?.items ?? [],
+                  };
+                }),
+            ),
+        );
+      },
+    }),
+    defineTool({
       name: "notify_user",
       title: "Notify the user",
       description: "Shows a message to the user in the devtool interface, and as a notification when they are enabled.",
