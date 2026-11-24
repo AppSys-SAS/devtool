@@ -120,7 +120,8 @@ source, check a change and write commits.
 
 ## Security
 
-Please report vulnerabilities privately, as described in [SECURITY.md](SECURITY.md).
+The devtool is a development tool for the machine of a developer: **do not use it in production**.
+[SECURITY.md](SECURITY.md) explains why, and how to report a vulnerability privately.
 
 ## License
 
