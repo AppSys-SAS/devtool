@@ -1,0 +1,25 @@
+workspace: ../workspace
+
+adt:
+  cacheDir: ../cache
+  ports:
+    server: 16730
+    loadBalancer: 16731
+
+sections:
+  demo:
+    name: Demo
+    path: demo
+
+projects:
+  app:
+    section: demo
+    name: App
+    default: { action: command:hello }
+    commands:
+      hello: { name: Hello, args: [ sh, -c, 'echo hello-e2e' ] }
+    files:
+      docs: { name: Docs, path: docs }
+  ghost:
+    section: demo
+    name: Ghost
