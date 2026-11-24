@@ -1,0 +1,646 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://appsys-sas.github.io/devtool/schema/config.json",
+  "title": "Devtool configuration",
+  "description": "A devtool configuration file: config.yml, config.local.yml or any file they include.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "workspace": {
+      "type": "string",
+      "description": "Folder holding your repositories. Relative section paths are resolved from it. Usually personal, in config.local.yml.",
+      "examples": ["~/Workspace"]
+    },
+    "sectionPath": {
+      "type": "string",
+      "default": ".",
+      "description": "Path, from the workspace, of the sections that declare no path."
+    },
+    "include": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Other configuration files to merge over this one, relative to this file. Globs, ~/ and $VAR work.",
+      "examples": [["projects/*.yml"]]
+    },
+    "adt": { "$ref": "#/$defs/adt" },
+    "loadBalancers": {
+      "type": "object",
+      "description": "TLS certificates served by the load balancer, by domain. The certificate of a domain also covers its subdomains.",
+      "additionalProperties": { "$ref": "#/$defs/loadBalancer" }
+    },
+    "passthrough": {
+      "type": "array",
+      "description": "TLS connections forwarded untouched by their server name, for tools serving their own certificates.",
+      "items": { "$ref": "#/$defs/passthrough" }
+    },
+    "dns": { "$ref": "#/$defs/dns" },
+    "cdn": { "$ref": "#/$defs/cdn" },
+    "integrations": {
+      "type": "object",
+      "description": "Web tools shown under Environment and Configs in the sidebar.",
+      "additionalProperties": { "$ref": "#/$defs/integration" }
+    },
+    "sections": {
+      "type": "object",
+      "description": "Groups of projects shown in the sidebar, by slug.",
+      "additionalProperties": { "$ref": "#/$defs/section" }
+    },
+    "projects": {
+      "type": "object",
+      "description": "Projects (folders) with their commands, services, files and integrations, by slug.",
+      "additionalProperties": { "$ref": "#/$defs/project" }
+    },
+    "environment": { "$ref": "#/$defs/environment" }
+  },
+  "$defs": {
+    "iconName": {
+      "type": "string",
+      "description": "An Iconify icon name, prefix:name.",
+      "examples": ["lucide:server", "mdi:email", "simple-icons:docker"]
+    },
+    "access": {
+      "type": "string",
+      "enum": ["local", "network"],
+      "default": "local",
+      "description": "Who may connect: local (this machine only) or network (any client of the network)."
+    },
+    "stringMap": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "argument": {
+      "anyOf": [
+        { "type": "string" },
+        { "type": "number" },
+        { "$ref": "#/$defs/input" }
+      ]
+    },
+    "args": {
+      "type": "array",
+      "description": "The command and its arguments; an item may be an input asked when the command starts. Empty: an interactive shell.",
+      "items": { "$ref": "#/$defs/argument" }
+    },
+    "plainArgs": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": ["string", "number"] }
+    },
+    "choice": {
+      "anyOf": [
+        { "type": ["string", "number"] },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["label", "value"],
+          "properties": {
+            "label": { "type": "string" },
+            "value": { "type": ["string", "number"] }
+          }
+        }
+      ]
+    },
+    "input": {
+      "type": "object",
+      "description": "An input asked when the command starts: one of choices, a flag or free text.",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "description": "Label of the input; a flag adds it to the command when ticked." },
+        "choices": { "type": "array", "items": { "$ref": "#/$defs/choice" }, "description": "Values to pick from." },
+        "optional": { "type": "boolean", "default": false, "description": "A choice may be left empty." },
+        "display": { "type": "string", "enum": ["buttons", "dropdown"], "default": "buttons", "description": "How choices are shown." },
+        "flag": { "const": true, "description": "A checkbox adding the name when ticked." },
+        "text": { "const": true, "description": "Free text, split like a shell does." },
+        "default": { "type": ["string", "number", "boolean"], "description": "Value filled in: one of the choices, a boolean for a flag, a text." }
+      }
+    },
+    "answer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["match", "value"],
+      "properties": {
+        "match": { "type": "string", "description": "Case-insensitive regular expression matched against the output." },
+        "value": { "type": "string", "description": "Text typed when it matches. Value blocks are read." }
+      }
+    },
+    "automation": {
+      "type": "object",
+      "properties": {
+        "opAccount": { "type": "string", "description": "1Password account (ID or sign-in address) used to read op:// value blocks." },
+        "unless": { "$ref": "#/$defs/plainArgs", "description": "A check run first; its success skips the command." },
+        "answers": { "type": "array", "items": { "$ref": "#/$defs/answer" }, "description": "Answers typed when the output matches, each once, in order." }
+      }
+    },
+    "restore": {
+      "type": "object",
+      "description": "Command run in the parent folder to bring back a missing folder. %{ADT:PATH} stands for the missing folder.",
+      "additionalProperties": false,
+      "required": ["args"],
+      "properties": {
+        "name": { "type": "string", "default": "Restore" },
+        "args": { "$ref": "#/$defs/plainArgs" }
+      }
+    },
+    "meta": {
+      "type": "object",
+      "description": "Display settings.",
+      "properties": {
+        "icon": { "type": "string", "description": "An Iconify name (prefix:name); a bare name gets the lucide: prefix." }
+      }
+    },
+    "killSignal": {
+      "type": "string",
+      "pattern": "^\\s*[Ss][Ii][Gg][A-Za-z0-9]+\\s*$",
+      "default": "SIGTERM",
+      "description": "Signal sent to stop the command."
+    },
+    "env": {
+      "description": "Environment variables, as a map or a list of maps merged in order. Value blocks are read in commands.",
+      "anyOf": [{ "$ref": "#/$defs/stringMap" }, { "type": "array", "items": { "$ref": "#/$defs/stringMap" } }]
+    },
+    "shortcut": {
+      "type": "string",
+      "pattern": "^(integration|command|files):[^:]+$|^service:[^:]+(:[0-9]+)?$",
+      "description": "integration:<slug>, command:<slug>, files:<slug> or service:<slug>[:<index>]."
+    },
+    "mcpLevel": {
+      "type": "string",
+      "enum": ["allow", "keys", "ask", "deny"],
+      "description": "allow, ask (a dialog in the interface), deny, or keys (files only: keys and value types, never values)."
+    },
+    "mcpRules": {
+      "description": "Agent permission: one level for every action, or levels by action.",
+      "anyOf": [
+        { "$ref": "#/$defs/mcpLevel" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "read": { "$ref": "#/$defs/mcpLevel" },
+            "run": { "$ref": "#/$defs/mcpLevel" },
+            "input": { "$ref": "#/$defs/mcpLevel" },
+            "control": { "$ref": "#/$defs/mcpLevel" },
+            "write": { "$ref": "#/$defs/mcpLevel" }
+          }
+        }
+      ]
+    },
+    "mcpList": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "level": { "type": "string", "enum": ["allow", "ask", "deny"], "description": "Level of what no pattern matches." },
+        "allow": { "type": "array", "items": { "type": "string" }, "description": "Patterns allowed; * matches any text." },
+        "deny": { "type": "array", "items": { "type": "string" }, "description": "Patterns denied; deny wins over allow." }
+      }
+    },
+    "adt": {
+      "type": "object",
+      "description": "Settings of the devtool itself.",
+      "additionalProperties": false,
+      "properties": {
+        "displayName": { "type": "string", "pattern": "^[^/]*\\S[^/]*$", "default": "AppSys Devtool", "description": "Name shown in the tab, the sidebar, the notifications and the macOS app." },
+        "name": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$", "description": "Identifier of the MCP server and the macOS app. Default: the display name in lowercase." },
+        "icon": { "type": "string", "pattern": "\\.(svg|png|jpe?g|icns)$", "description": "Icon file (SVG, PNG, JPEG or ICNS), relative to the configuration folder." },
+        "cacheDir": { "type": "string", "default": "~/.cache/appsys/devtool", "description": "Folder of what the devtool rebuilds or keeps between runs. Given to commands as APPSYS_DEVTOOL_CACHE_DIR." },
+        "host": { "type": "string", "description": "Host name serving the interface through the load balancer.", "examples": ["devtool.example.dev"] },
+        "access": { "$ref": "#/$defs/access", "description": "Who may open the interface through adt.host." },
+        "ports": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "server": { "type": "integer", "minimum": 1, "default": 6730, "description": "Port of the server and the interface, on 127.0.0.1." },
+            "loadBalancer": { "type": "integer", "minimum": 1, "default": 6731, "description": "Port of the load balancer, on every interface." }
+          }
+        },
+        "shell": { "type": "string", "description": "Default shell of the commands. Default: $SHELL." },
+        "notifications": { "type": "boolean", "default": true, "description": "Notify when a command ends; the default of every section, project and command." },
+        "sidebar": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "environment": { "type": "boolean", "default": false, "description": "Show the link to the Environment page." },
+            "configs": { "type": "boolean", "default": false, "description": "Show the link to the Configs page." },
+            "login": { "type": "boolean", "default": false, "description": "Show the CDN sign-in state." },
+            "sort": { "type": "string", "enum": ["config", "name", "manual"], "default": "config", "description": "Order of the sections, and default order of their content." },
+            "order": { "type": "array", "items": { "type": "string" }, "description": "With sort: manual, the section slugs shown first." }
+          }
+        },
+        "agents": {
+          "type": "object",
+          "propertyNames": { "pattern": "^[a-zA-Z0-9\\-/_.]+$" },
+          "description": "Coding agents started by the agent buttons of pull requests and issues.",
+          "additionalProperties": { "$ref": "#/$defs/agent" }
+        },
+        "agentPrompts": { "$ref": "#/$defs/agentPrompts" },
+        "mcp": { "$ref": "#/$defs/mcp" }
+      }
+    },
+    "agent": {
+      "type": "object",
+      "allOf": [{ "$ref": "#/$defs/automation" }],
+      "required": ["name"],
+      "oneOf": [{ "required": ["args"] }, { "required": ["url"] }],
+      "unevaluatedProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "icon": { "$ref": "#/$defs/iconName", "default": "lucide:bot" },
+        "args": { "$ref": "#/$defs/plainArgs", "description": "Run in a terminal of the project. %{ADT:PROMPT} and %{ADT:CWD} are replaced." },
+        "url": { "type": "string", "description": "Opened by the browser. %{ADT:PROMPT} and %{ADT:CWD} are replaced, URL-encoded." },
+        "env": { "$ref": "#/$defs/env" }
+      }
+    },
+    "agentPrompts": {
+      "type": "object",
+      "description": "Prompts of the agent actions, by kind of integration.",
+      "additionalProperties": false,
+      "properties": {
+        "pullRequests": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "review": { "type": "string" } }
+        },
+        "issues": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "analyze": { "type": "string" }, "fix": { "type": "string" } }
+        }
+      }
+    },
+    "mcp": {
+      "type": "object",
+      "description": "The MCP server agents connect to, and what they may do.",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean", "default": false, "description": "Answer MCP clients of this machine at http://127.0.0.1:<adt.ports.server>/mcp." },
+        "notifications": { "type": "boolean", "description": "Notify when an agent asks for permission. Default: adt.notifications." },
+        "timeout": { "type": "integer", "minimum": 1, "default": 120, "description": "Seconds before an unanswered request is refused." },
+        "ownTerminals": { "type": "string", "enum": ["allow", "ask"], "default": "allow", "description": "Typing into and controlling the terminals an agent started itself." },
+        "default": { "$ref": "#/$defs/mcpRules", "description": "Levels every other setting inherits. Default: read allow, everything else ask." },
+        "commands": { "$ref": "#/$defs/mcpRules" },
+        "scripts": { "$ref": "#/$defs/mcpRules" },
+        "files": { "$ref": "#/$defs/mcpRules" },
+        "terminals": { "$ref": "#/$defs/mcpRules", "description": "Terminals a person opened without a command." },
+        "certificates": { "$ref": "#/$defs/mcpRules" },
+        "devtool": { "$ref": "#/$defs/mcpRules", "description": "port_owners (read) and reload_config (control)." },
+        "clients": { "$ref": "#/$defs/mcpList", "description": "Which agents may connect. Default level: ask." },
+        "shell": { "$ref": "#/$defs/mcpList", "description": "Shell commands of run_shell. Default level: deny." }
+      }
+    },
+    "loadBalancer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["crt", "key"],
+      "properties": {
+        "crt": { "type": "string", "description": "Certificate: a file (relative to the configuration folder) or PEM text." },
+        "key": { "type": "string", "description": "Private key: a file or PEM text." },
+        "warn": { "type": "integer", "minimum": 1, "default": 30, "description": "Days before the expiry from which the Server page warns." },
+        "acme": { "$ref": "#/$defs/acme" },
+        "mcp": { "$ref": "#/$defs/mcpRules" }
+      }
+    },
+    "acme": {
+      "type": "object",
+      "description": "Renewal of the certificate, by lego or by your own command. crt and key must be files.",
+      "allOf": [{ "$ref": "#/$defs/automation" }],
+      "oneOf": [{ "required": ["lego"] }, { "required": ["command"] }],
+      "unevaluatedProperties": false,
+      "properties": {
+        "trigger": { "type": "string", "enum": ["button", "auto", "both"], "default": "button", "description": "Renew from the Server page, on its own, or both." },
+        "before": { "type": "integer", "minimum": 1, "default": 30, "description": "Days before the expiry from which auto renews." },
+        "lego": {
+          "type": "object",
+          "description": "Options of lego run, without their dashes: a value gives --name value, a list repeats it, true gives it alone.",
+          "propertyNames": { "not": { "enum": ["path", "cert.name", "accept-tos", "renew-force", "renew-days", "no-random-sleep"] } },
+          "additionalProperties": {
+            "anyOf": [
+              { "type": ["string", "number", "boolean"] },
+              { "type": "array", "items": { "type": ["string", "number"] } }
+            ]
+          }
+        },
+        "command": { "$ref": "#/$defs/plainArgs", "description": "Your renewal command, run in the folder of the certificate. %{ADT:CRT} and %{ADT:KEY} are replaced." },
+        "env": { "$ref": "#/$defs/env" }
+      }
+    },
+    "passthrough": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hosts", "target"],
+      "properties": {
+        "hosts": { "type": "array", "items": { "type": "string", "pattern": "^(\\*\\.)?[a-zA-Z0-9-]+(\\.[a-zA-Z0-9-]+)*$" }, "description": "Host names or *.<domain>." },
+        "target": { "type": "string", "pattern": "^.+:[0-9]{1,5}$", "description": "<host>:<port> receiving the connections." },
+        "access": { "$ref": "#/$defs/access" }
+      }
+    },
+    "dns": {
+      "type": "object",
+      "description": "Local DNS server answering your own names, every other name resolved by the system.",
+      "additionalProperties": false,
+      "properties": {
+        "port": { "type": ["integer", "string"], "default": 53 },
+        "access": { "$ref": "#/$defs/access" },
+        "records": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["names", "address"],
+            "properties": {
+              "names": { "type": "array", "items": { "type": "string", "pattern": "^(\\*\\.)?[a-zA-Z0-9-]+(\\.[a-zA-Z0-9-]+)*$" } },
+              "address": { "type": "string", "pattern": "^(auto|[0-9]{1,3}(\\.[0-9]{1,3}){3})$", "description": "An IPv4 address, or auto for the current address of this machine." }
+            }
+          }
+        }
+      }
+    },
+    "cdn": {
+      "type": "object",
+      "description": "The CDN storing the shared files of the environment, and its OpenID Connect sign-in.",
+      "additionalProperties": false,
+      "required": ["url", "openid"],
+      "properties": {
+        "url": { "type": "string", "pattern": "^https?://", "description": "Base URL of the CDN; files live under <url>/devtool/." },
+        "openid": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["issuer", "clientId"],
+          "properties": {
+            "issuer": { "type": "string", "pattern": "^https?://" },
+            "clientId": { "type": "string" },
+            "name": { "type": "string", "description": "Name of the identity provider shown in the sign-in texts." },
+            "callbackPort": { "type": ["integer", "string"], "default": 6732, "description": "Local port the issuer redirects to: http://127.0.0.1:<port>/callback." }
+          }
+        }
+      }
+    },
+    "integration": {
+      "type": "object",
+      "allOf": [{ "$ref": "#/$defs/automation" }],
+      "required": ["name"],
+      "unevaluatedProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "icon": { "$ref": "#/$defs/iconName" },
+        "type": { "type": "string", "enum": ["web", "pullRequests", "issues"], "default": "web" },
+        "url": { "type": "string", "description": "web: the page shown. pullRequests and issues: the repository, its origin remote by default." },
+        "embed": { "type": "boolean", "default": true, "description": "Show the page inside the devtool; false opens a new tab." },
+        "provider": { "type": "string", "enum": ["github", "gitlab"], "description": "The forge, guessed from github.* and gitlab.* hosts." },
+        "token": { "type": "string", "description": "Access token of the forge. Value blocks are read." },
+        "refresh": { "type": "number", "minimum": 0, "default": 5, "description": "Minutes between two reads, 0 to read from the button only." },
+        "badge": { "type": "boolean", "default": true, "description": "Count in the sidebar the pull requests waiting for your review, or the issues assigned to you." },
+        "agentReview": { "type": "boolean", "default": false, "description": "pullRequests: a Review button starting an agent." },
+        "agentAnalyze": { "type": "boolean", "default": false, "description": "issues: a button asking an agent for a plan." },
+        "agentFix": { "type": "boolean", "default": false, "description": "issues: a button asking an agent to fix the issue on its own branch." },
+        "agentPrompts": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "review": { "type": "string" }, "analyze": { "type": "string" }, "fix": { "type": "string" } }
+        }
+      },
+      "if": { "properties": { "type": { "const": "web" } } },
+      "then": { "required": ["url"] }
+    },
+    "section": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "description": "Default: the slug." },
+        "description": { "type": "string" },
+        "path": { "type": "string", "description": "Folder of the section, relative to the workspace. Default: sectionPath." },
+        "restore": { "$ref": "#/$defs/restore" },
+        "notifications": { "type": "boolean" },
+        "mcp": { "$ref": "#/$defs/mcpRules" },
+        "integrations": { "type": "object", "additionalProperties": { "$ref": "#/$defs/integration" } },
+        "icons": { "type": "array", "items": { "type": "string", "pattern": "^integration:[^:]+$" }, "description": "Integrations shown as icons in the header of the section." },
+        "lines": { "type": "array", "items": { "type": "string", "pattern": "^integration:[^:]+$" }, "description": "Integrations shown as rows under the header of the section." },
+        "sort": { "type": "string", "enum": ["config", "name", "manual"], "description": "Order of the content. Default: adt.sidebar.sort." },
+        "order": { "type": "array", "items": { "type": "string" }, "description": "With sort: manual, project slugs and rows (integration:<slug>) shown first." },
+        "meta": { "$ref": "#/$defs/meta" }
+      }
+    },
+    "project": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "section": { "type": "string", "description": "Slug of the section holding the project." },
+        "name": { "type": "string", "description": "Default: the slug." },
+        "description": { "type": "string" },
+        "path": { "type": "string", "description": "Folder of the project, relative to its section. Default: the slug." },
+        "restore": { "$ref": "#/$defs/restore" },
+        "notifications": { "type": "boolean" },
+        "env": { "$ref": "#/$defs/env", "description": "Environment of the commands, scripts and terminals of the project; a command's own env wins." },
+        "shell": { "type": "string" },
+        "killSignal": { "$ref": "#/$defs/killSignal" },
+        "mcp": { "$ref": "#/$defs/mcpRules" },
+        "default": { "$ref": "#/$defs/projectDefault" },
+        "commands": {
+          "type": "object",
+          "propertyNames": { "not": { "const": "default" } },
+          "additionalProperties": { "$ref": "#/$defs/command" }
+        },
+        "scripts": { "type": "array", "items": { "$ref": "#/$defs/scriptFolder" } },
+        "services": { "type": "object", "additionalProperties": { "$ref": "#/$defs/service" } },
+        "files": {
+          "type": "object",
+          "propertyNames": { "not": { "const": "default" } },
+          "additionalProperties": { "$ref": "#/$defs/files" }
+        },
+        "integrations": { "type": "object", "additionalProperties": { "$ref": "#/$defs/integration" } },
+        "icons": { "type": "array", "items": { "$ref": "#/$defs/shortcut" }, "description": "Shortcuts shown as icons at the right of the project row." },
+        "lines": { "type": "array", "items": { "$ref": "#/$defs/shortcut" }, "description": "Shortcuts shown as rows under the project." },
+        "meta": { "$ref": "#/$defs/meta" }
+      }
+    },
+    "projectDefault": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action"],
+      "properties": {
+        "action": { "$ref": "#/$defs/shortcut", "description": "What the project does by default; command:<slug> becomes its main command." },
+        "trigger": { "type": "string", "enum": ["icon", "row", "row-icon"], "default": "icon", "description": "From a button on the row, a click on the row, or both." },
+        "icon": { "type": "string", "pattern": "^(own|[^:]+:.+)$", "description": "Icon of the button: an Iconify name, or own for the icon of the integration." }
+      }
+    },
+    "command": {
+      "type": "object",
+      "allOf": [{ "$ref": "#/$defs/automation" }],
+      "required": ["args"],
+      "unevaluatedProperties": false,
+      "properties": {
+        "name": { "type": "string", "description": "Default: the slug." },
+        "args": { "$ref": "#/$defs/args" },
+        "env": { "$ref": "#/$defs/env", "description": "Environment variables, added on top of the env of the project." },
+        "shell": { "type": "string" },
+        "killSignal": { "$ref": "#/$defs/killSignal" },
+        "detached": { "type": "boolean", "default": false, "description": "Run without a terminal; value blocks and unless are not read." },
+        "prompt": { "type": "boolean", "default": false, "description": "Run in the background and show its questions in a dialog, instead of opening its terminal." },
+        "startWithSection": { "type": "boolean", "default": false, "description": "Start when the section is started from its header." },
+        "form": { "type": "string", "enum": ["dialog", "inline"], "default": "dialog", "description": "Where the inputs are asked on the project page." },
+        "notifications": { "type": "boolean" },
+        "mcp": { "$ref": "#/$defs/mcpRules" },
+        "meta": { "$ref": "#/$defs/meta" }
+      }
+    },
+    "scriptSettings": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "prompt": { "type": "boolean" },
+        "args": { "$ref": "#/$defs/args" },
+        "form": { "type": "string", "enum": ["dialog", "inline"] },
+        "mcp": { "$ref": "#/$defs/mcpRules" }
+      }
+    },
+    "scriptFolder": {
+      "anyOf": [
+        { "type": "string", "description": "Short form of { path }." },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path"],
+          "properties": {
+            "path": { "type": "string", "description": "Folder of executables, relative to the project." },
+            "prompt": { "type": "boolean", "default": false },
+            "form": { "type": "string", "enum": ["dialog", "inline"], "default": "inline" },
+            "only": { "type": "array", "items": { "type": "string" }, "description": "Glob patterns of the file names kept." },
+            "mcp": { "$ref": "#/$defs/mcpRules" },
+            "scripts": { "type": "object", "additionalProperties": { "$ref": "#/$defs/scriptSettings" }, "description": "Settings by file name." }
+          }
+        }
+      ]
+    },
+    "target": {
+      "anyOf": [
+        { "type": "integer", "minimum": 1, "maximum": 65535 },
+        { "type": "string", "pattern": "^([0-9]{1,5}|.+:[0-9]{1,5}|https?://.+)$" }
+      ]
+    },
+    "service": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target"],
+      "anyOf": [{ "required": ["host"] }, { "required": ["hosts"] }],
+      "properties": {
+        "host": { "anyOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }], "description": "Host name served." },
+        "hosts": { "type": "array", "items": { "type": "string" }, "description": "Host names served." },
+        "target": {
+          "description": "Where requests go: a local port, <host>:<port> or an http(s) URL; a list shares the requests in turn.",
+          "anyOf": [{ "$ref": "#/$defs/target" }, { "type": "array", "items": { "$ref": "#/$defs/target" } }]
+        },
+        "tls": { "type": "boolean", "description": "Tell the target the request came over HTTPS (x-forwarded-proto)." },
+        "path": { "type": "string", "description": "Only requests whose path starts with it; the longest path wins." },
+        "pathNot": { "type": "string", "description": "Requests whose path starts with it are left out." },
+        "prefix": { "type": "string", "description": "Removed from the path before forwarding." },
+        "preserveHost": { "type": "boolean", "description": "Keep the original Host header." },
+        "access": { "$ref": "#/$defs/access" }
+      }
+    },
+    "files": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path"],
+      "properties": {
+        "name": { "type": "string" },
+        "path": { "type": "string", "description": "Folder, relative to the project. It may not exist yet." },
+        "type": { "type": "string", "enum": ["files", "agentSkills"], "default": "files", "description": "agentSkills edits one agent skill per folder." },
+        "restore": { "type": "string", "description": "Slug of a command of the project restoring the folder." },
+        "commands": { "type": "array", "items": { "type": "string" }, "description": "Slugs of commands of the project shown with the files." },
+        "mcp": { "$ref": "#/$defs/mcpRules" }
+      }
+    },
+    "pull": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Pull this item on its own while the server runs.",
+      "properties": {
+        "cron": { "type": "string", "description": "Cron expression.", "examples": ["0 8 * * 1-5"] },
+        "startup": { "type": "boolean", "description": "Pull when the server starts." }
+      }
+    },
+    "environment": {
+      "type": "object",
+      "description": "The development environment shared through the CDN.",
+      "additionalProperties": false,
+      "properties": {
+        "folder": { "type": "string", "description": "Local mirror of the CDN files. Default: the parent of the configuration folder." },
+        "mcp": { "$ref": "#/$defs/mcpRules" },
+        "files": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              { "type": "string", "description": "Short form of { path }." },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "path": { "type": "string" },
+                  "display": { "type": "boolean", "default": true, "description": "List it in the Configs tab." },
+                  "local": { "type": "boolean", "default": true, "description": "Offer a personal .local.yml override." },
+                  "sync": { "type": "boolean", "default": true, "description": "Synchronize it with the CDN." },
+                  "pull": { "$ref": "#/$defs/pull" },
+                  "mcp": { "$ref": "#/$defs/mcpRules" }
+                }
+              }
+            ]
+          }
+        },
+        "databases": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "engine", "container"],
+            "properties": {
+              "path": { "type": "string", "description": "Archive of the database in the environment folder." },
+              "engine": { "type": "string", "enum": ["postgres", "mariadb", "mongodb"] },
+              "container": { "type": "string", "description": "Docker container running the database." },
+              "pull": { "$ref": "#/$defs/pull" },
+              "mcp": { "$ref": "#/$defs/mcpRules" }
+            }
+          }
+        },
+        "buckets": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "bucket"],
+            "properties": {
+              "path": { "type": "string", "description": "Snapshot of the bucket in the environment folder." },
+              "bucket": { "type": "string" },
+              "pull": { "$ref": "#/$defs/pull" },
+              "mcp": { "$ref": "#/$defs/mcpRules" }
+            }
+          }
+        },
+        "redis": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "url"],
+            "properties": {
+              "path": { "type": "string", "description": "Dump of the Redis database in the environment folder." },
+              "url": { "type": "string", "pattern": "^rediss?://", "examples": ["redis://localhost:6379/0"] },
+              "pull": { "$ref": "#/$defs/pull" },
+              "mcp": { "$ref": "#/$defs/mcpRules" }
+            }
+          }
+        },
+        "s3": {
+          "type": "object",
+          "description": "S3 server holding the buckets.",
+          "additionalProperties": false,
+          "required": ["endpoint", "accessKeyId", "secretAccessKey"],
+          "properties": {
+            "endpoint": { "type": "string" },
+            "accessKeyId": { "type": "string" },
+            "secretAccessKey": { "type": "string" },
+            "region": { "type": "string", "default": "us-east-1" }
+          }
+        }
+      }
+    }
+  }
+}
