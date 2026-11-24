@@ -20,7 +20,7 @@
     "docs:dev": "pnpm --filter @appsys/devtool-docs docs:dev",
     "docs:build": "pnpm --filter @appsys/devtool-docs docs:build",
     "docs:preview": "pnpm --filter @appsys/devtool-docs docs:preview",
-    "lint": "eslint .",
+    "lint": "NODE_OPTIONS=--max-old-space-size=4096 eslint .",
     "test": "vitest run",
     "test:e2e": "playwright test"
   },
