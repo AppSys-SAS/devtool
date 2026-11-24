@@ -210,6 +210,8 @@ export interface IntegrationDefinition {
   embed: boolean;
   /** The forge hosting the repository of pull requests, its name in the configuration and the one shown, null for a web page. */
   provider: { name: string; label: string } | null;
+  /** Whether a pull request can be reviewed by an agent. */
+  agentReview: boolean;
   /** The prompt given to an agent reviewing a pull request, null for a web page. */
   prompt: string | null;
   /** Whether the sidebar counts the pull requests waiting for a review of the person. */

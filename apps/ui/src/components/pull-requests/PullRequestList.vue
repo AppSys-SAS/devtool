@@ -75,7 +75,7 @@ function review(pullRequest: PullRequestPayload, agent: AgentDefinition): void {
       {{ state.error }}
     </p>
     <p
-      v-if="!configStore.agents.value.length"
+      v-if="integration.agentReview && !configStore.agents.value.length"
       class="mx-4 mt-3 rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground"
     >
       Declare agents in <code>adt.agents</code> to review a pull request with one.
@@ -86,6 +86,7 @@ function review(pullRequest: PullRequestPayload, agent: AgentDefinition): void {
         :key="pullRequest.number"
         :pull-request="pullRequest"
         :forge="integration.provider?.label ?? 'the forge'"
+        :agent-review="integration.agentReview"
         @review="review(pullRequest, $event)"
       />
       <p

@@ -194,6 +194,7 @@ refreshed from the Reload button of its page, filtered by Open, Review requested
   button only.
 - `badge` (default `true`): the sidebar counts the pull requests waiting for a review of the person,
   next to its icon in `icons` and at the right of its row in `lines`.
+- `agentReview` (default `false`): each pull request offers a Review button starting an agent below.
 - `prompt`: what an agent reviewing a pull request is asked, `%{ADT:PR_URL}`, `%{ADT:PR_NUMBER}`,
   `%{ADT:PR_TITLE}`, `%{ADT:PR_BRANCH}`, `%{ADT:PR_BASE}` and `%{ADT:PR_AUTHOR}` standing for it; a
   review reading its changes without checking out its branch by default.
@@ -213,7 +214,7 @@ adt:
 projects:
   web:
     integrations:
-      pulls: { name: Pull requests, type: pullRequests, token: "{{ $(gh auth token) }}" }
+      pulls: { name: Pull requests, type: pullRequests, token: "{{ $(gh auth token) }}", agentReview: true }
     lines: [ integration:pulls ]
 ```
 

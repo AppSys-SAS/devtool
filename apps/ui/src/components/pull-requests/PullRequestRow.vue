@@ -11,6 +11,8 @@ const props = defineProps<{
   pullRequest: PullRequestPayload;
   /** The name of the forge, in the title of its link. */
   forge: string;
+  /** Whether it can be reviewed by an agent. */
+  agentReview: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -94,6 +96,7 @@ const review = computed(() => (props.pullRequest.review ? REVIEWS[props.pullRequ
         </a>
       </Button>
       <AgentButton
+        v-if="agentReview"
         label="Review"
         @start="emit('review', $event)"
       />

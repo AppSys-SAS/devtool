@@ -1002,7 +1002,7 @@ export class DevtoolConfigure {
   /**
    * Reads the integrations, `{ <slug>: { name, type, url, icon, embed } }`, in the order they are
    * declared; those of `type: pullRequests` also read `provider`, `token`, `opAccount`, `refresh`,
-   * `badge` and `prompt`, their token kept in {@link integrationTokens}.
+   * `badge`, `agentReview` and `prompt`, their token kept in {@link integrationTokens}.
    * @param slug Names the setting in warnings.
    * @param value The raw setting.
    * @param project The folder and the key of the project declaring them, null at the root.
@@ -1059,6 +1059,7 @@ export class DevtoolConfigure {
         url: integration.url,
         embed: integration.embed ?? true,
         provider: null,
+        agentReview: false,
         prompt: null,
         badge: false,
         refresh: 0,
@@ -1070,7 +1071,7 @@ export class DevtoolConfigure {
   /**
    * Reads an integration listing the pull requests of a repository: `url`, the `origin` remote of the
    * project by default, `provider`, guessed from the host by default, `token`, read with value blocks,
-   * `opAccount`, `refresh` in minutes, `badge` and `prompt`.
+   * `opAccount`, `refresh` in minutes, `badge`, `agentReview`, off by default, and `prompt`.
    * @param setting Names the integration in warnings.
    * @param slug The slug of the integration.
    * @param integration The raw integration.
@@ -1095,9 +1096,11 @@ export class DevtoolConfigure {
       this.addWarning(`${setting}.refresh`, "must be a number of minutes, 0 to read on demand only");
       return null;
     }
-    if (integration.badge !== undefined && typeof integration.badge !== "boolean") {
-      this.addWarning(`${setting}.badge`, "must be true or false");
-      return null;
+    for (const flag of ["badge", "agentReview"] as const) {
+      if (integration[flag] !== undefined && typeof integration[flag] !== "boolean") {
+        this.addWarning(`${setting}.${flag}`, "must be true or false");
+        return null;
+      }
     }
     if ((integration.token !== undefined && !this.checkString(`${setting}.token`, integration.token)) || (integration.prompt !== undefined && !this.checkString(`${setting}.prompt`, integration.prompt))) {
       return null;
@@ -1119,6 +1122,7 @@ export class DevtoolConfigure {
       url: repository.webUrl,
       embed: false,
       provider: { name: forge.name, label: forge.label },
+      agentReview: (integration.agentReview as boolean | undefined) ?? false,
       prompt: (integration.prompt as string | undefined) ?? DEFAULT_REVIEW_PROMPT,
       badge: (integration.badge as boolean | undefined) ?? true,
       refresh,
