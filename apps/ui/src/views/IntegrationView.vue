@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, useTemplateRef, watchEffect } from "vue";
 import { Icon } from "@iconify/vue";
-import { ExternalLink } from "@lucide/vue";
+import { ExternalLink, RotateCw } from "@lucide/vue";
 import SidebarToggle from "@/components/SidebarToggle.vue";
 import { Button } from "@/components/ui/button";
 import configStore from "@/stores/config";
+import embedStore from "@/stores/embeds";
 
 const props = defineProps<{
   integration: string;
@@ -19,6 +20,17 @@ const integrations = computed(() => {
   return configStore.integrations.value;
 });
 const definition = computed(() => integrations.value.find((item) => item.slug === props.integration) ?? null);
+const frameArea = useTemplateRef<HTMLElement>("frameArea");
+
+watchEffect((onCleanup) => {
+  const element = frameArea.value;
+  const integration = definition.value;
+  if (!element || !integration?.embed) {
+    return;
+  }
+  embedStore.show({ url: integration.url, title: integration.name }, element);
+  onCleanup(() => embedStore.hide(element));
+});
 </script>
 
 <template>
@@ -31,6 +43,16 @@ const definition = computed(() => integrations.value.find((item) => item.slug ==
           class="size-4 shrink-0"
         />
         <span class="min-w-0 flex-1 truncate text-sm font-medium">{{ definition.name }}</span>
+        <Button
+          v-if="definition.embed"
+          size="icon"
+          variant="ghost"
+          class="size-7"
+          title="Reload"
+          @click="embedStore.reload(definition.url)"
+        >
+          <RotateCw class="size-3.5" />
+        </Button>
         <Button
           as-child
           size="icon"
@@ -53,12 +75,10 @@ const definition = computed(() => integrations.value.find((item) => item.slug ==
       >No integration {{ integration }}.</span>
       <SidebarToggle side="right" />
     </div>
-    <iframe
+    <div
       v-if="definition?.embed"
-      :key="definition.url"
-      :src="definition.url"
-      :title="definition.name"
-      class="min-h-0 w-full flex-1 border-0"
+      ref="frameArea"
+      class="min-h-0 flex-1"
     />
     <p
       v-else-if="definition"

@@ -5,6 +5,7 @@ import { useFavicon, useTitle } from "@vueuse/core";
 import AppSidebar from "@/components/AppSidebar.vue";
 import CommandDialog from "@/components/CommandDialog.vue";
 import CommandInputsDialog from "@/components/CommandInputsDialog.vue";
+import EmbedFrames from "@/components/EmbedFrames.vue";
 import McpRequestDialog from "@/components/mcp/McpRequestDialog.vue";
 import McpToasts from "@/components/mcp/McpToasts.vue";
 import commandRunsStore from "@/stores/command-runs";
@@ -63,6 +64,7 @@ onMounted(() => {
     <main class="min-w-0 flex-1 overflow-hidden">
       <RouterView />
     </main>
+    <EmbedFrames />
     <CommandDialog
       v-if="commandRunsStore.current.value"
       :key="commandRunsStore.current.value.tag"
