@@ -108,19 +108,12 @@ Each integration can offer buttons that start a coding agent, in the folder of t
 - `agentFix: true` on issues: fix the issue on a branch of its own.
 
 They are all off by default, because they start a program that can change your code. You also need at
-least one agent in `adt.agents`.
-
-### Declare your agents
-
-`adt.agents` lists the agents the buttons can start. An agent either runs `args` in a terminal of the
-project, or opens a `url` in your browser (a web page in a new tab, any other link with the application
-registered for it).
+least one agent in `adt.agents`:
 
 ```yaml [config.yml]
 adt:
   agents:
-    claude-code: { name: Claude Code, icon: simple-icons:claude, args: [ claude, "%{ADT:PROMPT}" ] }
-    claude-desktop: { name: Claude Desktop, icon: simple-icons:claude, url: "claude://code/new?folder=%{ADT:CWD}&q=%{ADT:PROMPT}" }
+    claude: { name: Claude Code, icon: simple-icons:claude, args: [ claude, "%{ADT:PROMPT}" ] }
 projects:
   web:
     integrations:
@@ -129,42 +122,8 @@ projects:
     lines: [ integration:pulls, integration:issues ]
 ```
 
-- `%{ADT:PROMPT}` stands for the prompt and `%{ADT:CWD}` for the folder of the project. In a `url`, both
-  are URL-encoded.
-- `args` run like a command: `env`, `opAccount` and value blocks work as in
-  [commands](/configuration/automation). The text of a pull request or an issue is never read as value
-  blocks.
-- A button starts the agent you used last in this browser, else it asks which one. Its arrow lists them
-  all.
-
-### Write your own prompts
-
-Each action has a built-in prompt. You can replace it at two levels, the most precise one winning:
-
-1. `agentPrompts` on the integration (`review`, or `analyze` and `fix`);
-2. `adt.agentPrompts.pullRequests.review`, `adt.agentPrompts.issues.analyze` and
-   `adt.agentPrompts.issues.fix`, for every integration;
-3. the built-in prompt.
-
-```yaml [config.yml]
-adt:
-  agentPrompts:
-    issues: { analyze: "Analyze %{ADT:ISSUE_URL} and list the files involved." }
-    pullRequests: { review: "Review %{ADT:PR_URL} (%{ADT:PR_BRANCH} into %{ADT:PR_BASE}) and comment on risky changes." }
-```
-
-| Variable | Stands for |
-|---|---|
-| `%{ADT:PR_URL}` | web address of the pull request |
-| `%{ADT:PR_NUMBER}` | its number |
-| `%{ADT:PR_TITLE}` | its title |
-| `%{ADT:PR_BRANCH}` | its branch |
-| `%{ADT:PR_BASE}` | the branch it merges into |
-| `%{ADT:PR_AUTHOR}` | its author |
-| `%{ADT:ISSUE_URL}` | web address of the issue |
-| `%{ADT:ISSUE_NUMBER}` | its number |
-| `%{ADT:ISSUE_TITLE}` | its title |
-| `%{ADT:ISSUE_AUTHOR}` | its author |
+[Coding agents](/agents/coding-agents) shows how to declare Claude Code, Codex, Gemini CLI, Copilot,
+Cursor and many other agents, and how to write your own prompts with `agentPrompts`.
 
 ## Reference
 
@@ -187,32 +146,13 @@ adt:
 | `agentReview` | boolean | `false` | Pull requests: Review button. |
 | `agentAnalyze` | boolean | `false` | Issues: analyze button. |
 | `agentFix` | boolean | `false` | Issues: fix button. |
-| `agentPrompts` | map | none | `review`, or `analyze` and `fix`: prompts of this integration. |
+| `agentPrompts` | map | none | `review`, or `analyze` and `fix`: prompts of this integration, see [Prompts](/agents/coding-agents#prompts). |
 
-### Agent
-
-`adt.agents.<slug>`, the slug made of letters, digits, `-`, `/`, `_` and `.`.
-
-| Key | Type | Default | Description |
-|---|---|---|---|
-| `name` | string | required | Name shown in the agent menu. |
-| `icon` | Iconify name | `lucide:bot` | Icon of the agent. |
-| `args` | list of strings | none | Run in a terminal of the project. Give `args` or `url`. |
-| `url` | string | none | Opened by the browser. Give `args` or `url`. |
-| `env` | map or list of maps | none | Environment of `args`. |
-| `opAccount`, `unless`, `answers` | | | As in [commands](/configuration/automation). |
-
-### Prompts
-
-| Key | Type | Description |
-|---|---|---|
-| `adt.agentPrompts.pullRequests.review` | string | Prompt of the Review button. |
-| `adt.agentPrompts.issues.analyze` | string | Prompt of the analyze button. |
-| `adt.agentPrompts.issues.fix` | string | Prompt of the fix button. |
+The agents and their prompts have their own [reference](/agents/coding-agents#reference).
 
 ### Warnings
 
-The Server page shows these warnings, and the integration or agent is left out:
+The Server page shows these warnings, and the integration is left out:
 
 - `must be a map of integrations`, `name: is not a string`
 - `type: must be web or pullRequests or issues`
@@ -223,6 +163,6 @@ The Server page shows these warnings, and the integration or agent is left out:
 - `refresh: must be a number of minutes, 0 to read on demand only`
 - `agentFix: is not an action of pullRequests, which offer review` (the flag is ignored, the integration
   kept)
-- `adt.agents: must be a map of agents`, `needs either args, run in a terminal, or url, opened by the
-  interface`
-- `adt.agentPrompts.<kind>: is not a kind of integration, expected pullRequests or issues`
+
+The warnings of `adt.agents` and `agentPrompts` are listed with the
+[coding agents](/agents/coding-agents#warnings).

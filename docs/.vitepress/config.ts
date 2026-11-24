@@ -40,7 +40,7 @@ export default defineConfig({
       { text: 'Guide', link: '/guide/introduction', activeMatch: '/guide/' },
       { text: 'Configuration', link: '/configuration/overview', activeMatch: '/configuration/' },
       { text: 'Configurator', link: '/configuration/configurator' },
-      { text: 'Agents', link: '/agents/mcp-server', activeMatch: '/agents/' },
+      { text: 'Agents', link: '/agents/coding-agents', activeMatch: '/agents/' },
       { text: 'CLI', link: '/reference/cli', activeMatch: '/reference/' }
     ],
     sidebar: [
@@ -79,6 +79,7 @@ export default defineConfig({
       {
         text: 'Agents',
         items: [
+          { text: 'Coding agents', link: '/agents/coding-agents' },
           { text: 'MCP server', link: '/agents/mcp-server' },
           { text: 'Agent skills', link: '/agents/skills' }
         ]

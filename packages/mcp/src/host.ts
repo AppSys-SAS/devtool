@@ -165,6 +165,8 @@ export type McpUiMessage
 /** What the MCP server needs from the devtool server, beyond what its tools use. */
 export interface McpServerHost extends McpHost {
   readonly version: string
+  /** The folder of the agent skills shipped with the devtool. */
+  readonly skillsFolder: string
   /**
    * Sends a payload to one interface, or to every interface.
    * @param type The type of the payload.

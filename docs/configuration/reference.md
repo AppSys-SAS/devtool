@@ -53,17 +53,18 @@ The schema is also published with the npm package, as `@appsys/devtool-config/sc
 | `adt.sidebar.login` | boolean | `false` | [The devtool](/configuration/devtool) |
 | `adt.sidebar.sort` | `config`, `name`, `manual` | `config` | [The devtool](/configuration/devtool) |
 | `adt.sidebar.order` | list of section slugs | none | [The devtool](/configuration/devtool) |
-| `adt.agents.<slug>.name` | string | required | [Integrations](/configuration/integrations#declare-your-agents) |
-| `adt.agents.<slug>.icon` | Iconify name | `lucide:bot` | [Integrations](/configuration/integrations#declare-your-agents) |
-| `adt.agents.<slug>.args` | list | none | [Integrations](/configuration/integrations#declare-your-agents) |
-| `adt.agents.<slug>.url` | string | none | [Integrations](/configuration/integrations#declare-your-agents) |
-| `adt.agents.<slug>.env` | map or list of maps | none | [Integrations](/configuration/integrations#declare-your-agents) |
+| `adt.agents.<slug>.name` | string | required | [Coding agents](/agents/coding-agents#declare-an-agent) |
+| `adt.agents.<slug>.icon` | Iconify name | `lucide:bot` | [Coding agents](/agents/coding-agents#declare-an-agent) |
+| `adt.agents.<slug>.args` | list | none | [Coding agents](/agents/coding-agents#agents-by-tool) |
+| `adt.agents.<slug>.url` | string | none | [Coding agents](/agents/coding-agents#open-an-application-instead) |
+| `adt.agents.<slug>.env` | map or list of maps | none | [Coding agents](/agents/coding-agents#api-keys-from-your-secrets) |
 | `adt.agents.<slug>.opAccount`, `.unless`, `.answers` | | | [Automation](/configuration/automation) |
-| `adt.agentPrompts.pullRequests.review` | string | built-in | [Integrations](/configuration/integrations#write-your-own-prompts) |
-| `adt.agentPrompts.issues.analyze` | string | built-in | [Integrations](/configuration/integrations#write-your-own-prompts) |
-| `adt.agentPrompts.issues.fix` | string | built-in | [Integrations](/configuration/integrations#write-your-own-prompts) |
+| `adt.agentPrompts.pullRequests.review` | string | built-in | [Coding agents](/agents/coding-agents#prompts) |
+| `adt.agentPrompts.issues.analyze` | string | built-in | [Coding agents](/agents/coding-agents#prompts) |
+| `adt.agentPrompts.issues.fix` | string | built-in | [Coding agents](/agents/coding-agents#prompts) |
 | `adt.mcp.enabled` | boolean | `false` | [Agent permissions](/configuration/mcp) |
 | `adt.mcp.notifications` | boolean | `adt.notifications` | [Agent permissions](/configuration/mcp) |
+| `adt.mcp.skills` | boolean | `true` | [Agent skills](/agents/skills#serve-them-over-mcp) |
 | `adt.mcp.timeout` | integer | `120` | [Agent permissions](/configuration/mcp) |
 | `adt.mcp.ownTerminals` | `allow`, `ask` | `allow` | [Agent permissions](/configuration/mcp#agents-and-shell-commands) |
 | `adt.mcp.default` | rules | read allow, others ask | [Agent permissions](/configuration/mcp#from-general-to-precise) |
@@ -133,6 +134,7 @@ The schema is also published with the npm package, as `@appsys/devtool-config/sc
 | `files.<slug>.restore` | command slug | none | [Files](/configuration/files) |
 | `files.<slug>.commands` | list of command slugs | none | [Files](/configuration/files) |
 | `files.<slug>.mcp` | rules | `adt.mcp.files` | [Agent permissions](/configuration/mcp) |
+| `files.<slug>.mcpSkills` | `true`, list of globs | `false` | [Agent skills](/agents/skills#serve-them-over-mcp) |
 | `integrations.<slug>` | map | | [Integrations](/configuration/integrations) |
 
 ## integrations.&lt;slug&gt;
@@ -151,7 +153,7 @@ Also under `sections.<slug>.integrations` and `projects.<slug>.integrations`.
 | `refresh` | number | `5` | [Integrations](/configuration/integrations#what-you-see) |
 | `badge` | boolean | `true` | [Integrations](/configuration/integrations#what-you-see) |
 | `agentReview`, `agentAnalyze`, `agentFix` | boolean | `false` | [Integrations](/configuration/integrations#coding-agents-on-pull-requests-and-issues) |
-| `agentPrompts.review`, `.analyze`, `.fix` | string | `adt.agentPrompts` | [Integrations](/configuration/integrations#write-your-own-prompts) |
+| `agentPrompts.review`, `.analyze`, `.fix` | string | `adt.agentPrompts` | [Coding agents](/agents/coding-agents#prompts) |
 
 ## loadBalancers.&lt;domain&gt;
 

@@ -34,8 +34,8 @@ The repository is a pnpm workspace:
 | `packages/git` | repositories, pull requests and issues of GitHub and GitLab |
 | `packages/mcp` | the MCP server for coding agents |
 | `packages/shared` | types and helpers shared by the apps |
+| `packages/skills` | agent skills teaching coding agents to use the devtool, in its `skills` folder |
 | `docs` | this documentation site (VitePress) |
-| `skills` | agent skills teaching coding agents to use the devtool |
 | `e2e` | end-to-end tests (Playwright) |
 
 ## Run it while you work

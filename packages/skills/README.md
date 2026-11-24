@@ -6,9 +6,13 @@ so the same folders work in Claude Code, Codex CLI, Gemini CLI, Cursor and the o
 
 | Skill | Use it to |
 |---|---|
-| [`devtool-mcp-setup`](devtool-mcp-setup/SKILL.md) | connect an agent to the devtool and configure what agents may do (`adt.mcp`) |
-| [`devtool-terminals`](devtool-terminals/SKILL.md) | run commands and scripts, follow and drive terminals, debug a failing service |
-| [`devtool-files-environment`](devtool-files-environment/SKILL.md) | read and change the files of the projects, configuration keys and the CDN environment |
+| [`devtool-mcp-setup`](skills/devtool-mcp-setup/SKILL.md) | connect an agent to the devtool and configure what agents may do (`adt.mcp`) |
+| [`devtool-terminals`](skills/devtool-terminals/SKILL.md) | run commands and scripts, follow and drive terminals, debug a failing service |
+| [`devtool-files-environment`](skills/devtool-files-environment/SKILL.md) | read and change the files of the projects, configuration keys and the shared environment |
+
+The skills sit in the `skills` folder of this package, published with it; `SKILLS_FOLDER` gives its
+absolute path to the devtool, which installs them (`devtool skills sync`) and serves them over MCP
+(`adt.mcp.skills`).
 
 ## Installation
 

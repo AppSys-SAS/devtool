@@ -7,7 +7,7 @@ description: Agent skills shipped with the devtool, and how to install them in C
 The [MCP server](/agents/mcp-server) gives an agent tools; skills teach it when and how to use them:
 wait for a dev server before testing, read only the new output of a terminal, never ask for a secret
 value. The repository ships three skills in its
-[`skills`](https://github.com/AppSys-SAS/devtool/tree/main/skills) folder. They follow the open Agent
+[`packages/skills`](https://github.com/AppSys-SAS/devtool/tree/main/packages/skills/skills) folder. They follow the open Agent
 Skills format (a folder per skill holding a `SKILL.md`), so the same folders work in Claude Code, Codex
 CLI, Gemini CLI, Cursor and the other agents that read it.
 
@@ -54,6 +54,45 @@ when a skill is not picked up.
 ::: tip Tool names
 The skills name the tools as the server declares them (`list_commands`, `read_terminal`...). Your agent
 may show them with a prefix, such as `mcp__appsys-devtool__list_commands` in Claude Code.
+:::
+
+## Serve them over MCP
+
+Instead of copying folders, the [MCP server](/agents/mcp-server) can serve skills to the agents connected
+to it, through the Skills extension of MCP (`io.modelcontextprotocol/skills`). Agents that support it
+load them from the devtool and always get the current version. The skills of the devtool are served as
+soon as the MCP server is on; the skills of your folders only when you ask:
+
+```yaml [config.yml]
+adt:
+  mcp:
+    enabled: true
+    skills: true          # the skills of the devtool, the default; false to keep them out
+projects:
+  agents:
+    path: ~/.agents
+    files:
+      skills:
+        name: Skills
+        path: skills
+        type: agentSkills
+        mcpSkills: [ review, "deploy-*" ]   # or true for every skill of the folder
+```
+
+- `adt.mcp.skills` serves the skills shipped with the devtool; it is `true` unless you set it to `false`.
+- `mcpSkills` on a folder of files of `type: agentSkills` serves its skills: `true` for all of them, or a
+  list of globs matching the names of their folders.
+- Skills of the devtool are served under `skill://devtool/<skill>/`, those of a folder under
+  `skill://files/<project>/<directory>/<files>/<skill>/`. Agents name a skill by the `name` of its
+  `SKILL.md`, such as `/appsys-devtool:review` in Claude Code.
+- A change to a served folder reaches the agents within a second, without restarting anything.
+- Served skills are readable by any agent connected to the MCP server, without asking you: serve only
+  what any of your agents may read.
+
+::: info Support in agents
+The Skills extension is recent. Claude Code reads skills from MCP servers from version 2.1.331, while the
+feature is in beta. An agent without support still uses the tools of the server; install the skills with
+`devtool skills sync` for it.
 :::
 
 ## Edit skills in the devtool

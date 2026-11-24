@@ -274,6 +274,7 @@
       "properties": {
         "enabled": { "type": "boolean", "default": false, "description": "Answer MCP clients of this machine at http://127.0.0.1:<adt.ports.server>/mcp." },
         "notifications": { "type": "boolean", "description": "Notify when an agent asks for permission. Default: adt.notifications." },
+        "skills": { "type": "boolean", "default": true, "description": "Serve the agent skills of the devtool over MCP (Skills extension)." },
         "timeout": { "type": "integer", "minimum": 1, "default": 120, "description": "Seconds before an unanswered request is refused." },
         "ownTerminals": { "type": "string", "enum": ["allow", "ask"], "default": "allow", "description": "Typing into and controlling the terminals an agent started itself." },
         "default": { "$ref": "#/$defs/mcpRules", "description": "Levels every other setting inherits. Default: read allow, everything else ask." },
@@ -550,6 +551,15 @@
         "name": { "type": "string" },
         "path": { "type": "string", "description": "Folder, relative to the project. It may not exist yet." },
         "type": { "type": "string", "enum": ["files", "agentSkills"], "default": "files", "description": "agentSkills edits one agent skill per folder." },
+        "mcpSkills": {
+          "description": "agentSkills: serve its skills over MCP (Skills extension), all of them with true or the skill folders matching globs.",
+          "oneOf": [
+            { "type": "boolean" },
+            { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1 }
+          ],
+          "default": false,
+          "examples": [true, ["review", "deploy-*"]]
+        },
         "restore": { "type": "string", "description": "Slug of a command of the project restoring the folder." },
         "commands": { "type": "array", "items": { "type": "string" }, "description": "Slugs of commands of the project shown with the files." },
         "mcp": { "$ref": "#/$defs/mcpRules" }

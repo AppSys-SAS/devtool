@@ -20,6 +20,9 @@
       "path": "./packages/mcp"
     },
     {
+      "path": "./packages/skills"
+    },
+    {
       "path": "./apps/server"
     },
     {

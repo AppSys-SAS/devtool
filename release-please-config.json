@@ -17,7 +17,8 @@
         { "type": "json", "path": "packages/environment/package.json", "jsonpath": "$.version" },
         { "type": "json", "path": "packages/git/package.json", "jsonpath": "$.version" },
         { "type": "json", "path": "packages/mcp/package.json", "jsonpath": "$.version" },
-        { "type": "json", "path": "packages/shared/package.json", "jsonpath": "$.version" }
+        { "type": "json", "path": "packages/shared/package.json", "jsonpath": "$.version" },
+        { "type": "json", "path": "packages/skills/package.json", "jsonpath": "$.version" }
       ]
     }
   }
