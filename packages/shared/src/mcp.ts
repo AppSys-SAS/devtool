@@ -109,11 +109,13 @@ export function mcpLevelsOf (value: unknown, files: boolean): { levels: Partial<
  * every action (`keys` for reading and writing, in a setting about files only), or levels by action.
  * @param value The raw setting, undefined when it is not declared.
  * @param inherited The rules of what holds it.
- * @param from Names the setting in the rules it declares, its path in the configuration.
+ * @param fromPath The keys leading to what holds the setting in the configuration, joined with dots to name
+ * the setting in the rules it declares.
  * @returns The rules, and the problems of the setting.
  */
-export function readMcpRules (value: unknown, inherited: McpRules, from: string): { rules: McpRules, problems: string[] } {
-  const { levels, problems } = mcpLevelsOf(value, isMcpFilesSetting(from.split('.')))
+export function readMcpRules (value: unknown, inherited: McpRules, fromPath: readonly string[]): { rules: McpRules, problems: string[] } {
+  const { levels, problems } = mcpLevelsOf(value, isMcpFilesSetting(fromPath))
+  const from = fromPath.join('.')
   const rules: McpRules = { ...inherited }
   for (const [action, level] of Object.entries(levels)) {
     rules[action as McpAction] = { level, from }

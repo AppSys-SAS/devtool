@@ -258,16 +258,27 @@ describe('mcpLevelsOf', () => {
 describe('readMcpRules', () => {
   const inherited = defaultMcpRules('adt.mcp.default')
 
+  /**
+   * Splits a dotted setting path into its keys.
+   * @param from - The dotted path.
+   * @returns The keys.
+   */
+  const keysOf = (from: string): string[] => from.split('.')
+
   it('keeps the inherited rules without a setting', () => {
-    expect(readMcpRules(undefined, inherited, 'adt.mcp.commands')).toEqual({ rules: inherited, problems: [] })
+    expect(readMcpRules(undefined, inherited, keysOf('adt.mcp.commands'))).toEqual({ rules: inherited, problems: [] })
   })
 
   it('gives a level to every action, naming the setting', () => {
-    expect(readMcpRules('deny', inherited, 'adt.mcp.commands')).toEqual({ rules: uniformRules('deny', 'adt.mcp.commands'), problems: [] })
+    expect(readMcpRules('deny', inherited, keysOf('adt.mcp.commands'))).toEqual({ rules: uniformRules('deny', 'adt.mcp.commands'), problems: [] })
+  })
+
+  it('reads the files of a project whose slug holds dots', () => {
+    expect(readMcpRules('keys', inherited, ['projects', 'my.app', 'files', 'docs']).rules.read).toEqual({ level: 'keys', from: 'projects.my.app.files.docs' })
   })
 
   it('overrides only the actions declared by action', () => {
-    expect(readMcpRules({ run: 'allow', write: 'deny' }, inherited, 'sections.web')).toEqual({
+    expect(readMcpRules({ run: 'allow', write: 'deny' }, inherited, keysOf('sections.web'))).toEqual({
       rules: {
         read: { level: 'allow', from: 'adt.mcp.default' },
         run: { level: 'allow', from: 'sections.web' },
@@ -280,18 +291,18 @@ describe('readMcpRules', () => {
   })
 
   it('names the setting even when its level matches the inherited one', () => {
-    expect(readMcpRules({ read: 'allow' }, inherited, 'adt.mcp.files').rules.read).toEqual({ level: 'allow', from: 'adt.mcp.files' })
+    expect(readMcpRules({ read: 'allow' }, inherited, keysOf('adt.mcp.files')).rules.read).toEqual({ level: 'allow', from: 'adt.mcp.files' })
   })
 
   it('does not change the inherited rules', () => {
     const before = structuredClone(inherited)
-    readMcpRules('deny', inherited, 'adt.mcp.commands')
-    readMcpRules({ read: 'deny' }, inherited, 'adt.mcp.commands')
+    readMcpRules('deny', inherited, keysOf('adt.mcp.commands'))
+    readMcpRules({ read: 'deny' }, inherited, keysOf('adt.mcp.commands'))
     expect(inherited).toEqual(before)
   })
 
   it.each(['adt.mcp.files', 'environment', 'environment.files.0', 'projects.web.files.docs'])('gives keys to reading and writing in %s', from => {
-    expect(readMcpRules('keys', inherited, from)).toEqual({
+    expect(readMcpRules('keys', inherited, keysOf(from))).toEqual({
       rules: {
         read: { level: 'keys', from },
         run: { level: 'ask', from: 'adt.mcp.default' },
@@ -304,36 +315,36 @@ describe('readMcpRules', () => {
   })
 
   it.each(['adt.mcp.default', 'adt.mcp.commands', 'environment.databases.0', 'projects.web', 'projects.web.commands.dev', 'sections.web', 'loadBalancers.main'])('refuses keys in %s and keeps the inherited rules', from => {
-    expect(readMcpRules('keys', inherited, from)).toEqual({ rules: inherited, problems: ['keys is for the settings of files only'] })
+    expect(readMcpRules('keys', inherited, keysOf(from))).toEqual({ rules: inherited, problems: ['keys is for the settings of files only'] })
   })
 
   it('refuses keys by action outside a setting about files', () => {
-    expect(readMcpRules({ read: 'keys', run: 'deny' }, inherited, 'projects.web')).toEqual({
+    expect(readMcpRules({ read: 'keys', run: 'deny' }, inherited, keysOf('projects.web'))).toEqual({
       rules: { ...inherited, run: { level: 'deny', from: 'projects.web' } },
       problems: ['read must be one of allow, ask, deny']
     })
   })
 
   it('accepts keys by action in a setting about files', () => {
-    expect(readMcpRules({ write: 'keys' }, inherited, 'projects.web.files.docs').rules.write).toEqual({ level: 'keys', from: 'projects.web.files.docs' })
+    expect(readMcpRules({ write: 'keys' }, inherited, keysOf('projects.web.files.docs')).rules.write).toEqual({ level: 'keys', from: 'projects.web.files.docs' })
   })
 
   it('keeps the inherited rules and reports an invalid setting', () => {
-    expect(readMcpRules('never', inherited, 'adt.mcp.commands')).toEqual({ rules: inherited, problems: [SHAPE_PROBLEM] })
-    expect(readMcpRules(['allow'], inherited, 'adt.mcp.commands')).toEqual({ rules: inherited, problems: [SHAPE_PROBLEM] })
+    expect(readMcpRules('never', inherited, keysOf('adt.mcp.commands'))).toEqual({ rules: inherited, problems: [SHAPE_PROBLEM] })
+    expect(readMcpRules(['allow'], inherited, keysOf('adt.mcp.commands'))).toEqual({ rules: inherited, problems: [SHAPE_PROBLEM] })
   })
 
   it('applies the valid levels and reports the others', () => {
-    expect(readMcpRules({ control: 'deny', kill: 'allow', input: 'yes' }, inherited, 'sections.web')).toEqual({
+    expect(readMcpRules({ control: 'deny', kill: 'allow', input: 'yes' }, inherited, keysOf('sections.web'))).toEqual({
       rules: { ...inherited, control: { level: 'deny', from: 'sections.web' } },
       problems: ['kill is not an action (read, run, input, control, write)', 'input must be one of allow, ask, deny']
     })
   })
 
   it('inherits through every level of the configuration', () => {
-    const category = readMcpRules({ run: 'allow' }, inherited, 'adt.mcp.commands').rules
-    const section = readMcpRules({ control: 'deny' }, category, 'sections.web').rules
-    const command = readMcpRules({ input: 'allow' }, section, 'projects.web.commands.dev').rules
+    const category = readMcpRules({ run: 'allow' }, inherited, keysOf('adt.mcp.commands')).rules
+    const section = readMcpRules({ control: 'deny' }, category, keysOf('sections.web')).rules
+    const command = readMcpRules({ input: 'allow' }, section, keysOf('projects.web.commands.dev')).rules
     expect(command).toEqual({
       read: { level: 'allow', from: 'adt.mcp.default' },
       run: { level: 'allow', from: 'adt.mcp.commands' },
@@ -344,8 +355,8 @@ describe('readMcpRules', () => {
   })
 
   it('lets a deeper setting override a level a parent declared', () => {
-    const category = readMcpRules('deny', inherited, 'adt.mcp.files').rules
-    const folder = readMcpRules({ read: 'keys' }, category, 'projects.web.files.docs').rules
+    const category = readMcpRules('deny', inherited, keysOf('adt.mcp.files')).rules
+    const folder = readMcpRules({ read: 'keys' }, category, keysOf('projects.web.files.docs')).rules
     expect(folder.read).toEqual({ level: 'keys', from: 'projects.web.files.docs' })
     expect(folder.write).toEqual({ level: 'deny', from: 'adt.mcp.files' })
   })

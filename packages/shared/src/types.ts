@@ -18,9 +18,7 @@ export interface AdtDefinition {
     server: number
     loadBalancer: number
   }
-  secure: boolean
   notifications: boolean
-  hosts: string[]
   /** Who reaches the interface of the devtool. */
   access: HostAccess
   sidebar: SidebarSettings
