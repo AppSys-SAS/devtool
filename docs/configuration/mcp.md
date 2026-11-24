@@ -115,7 +115,8 @@ adt:
 ## What no setting changes
 
 - `notify_user` is always allowed.
-- A push to the CDN and the pull of the shared configuration are always confirmed by you.
+- A push to a backend of the environment and the pull of the shared configuration are always confirmed
+  by you.
 - Agents never write the devtool configuration.
 - A `deny` of the configuration beats any grant you gave from a dialog.
 

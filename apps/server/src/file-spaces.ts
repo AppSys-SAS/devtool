@@ -1,7 +1,7 @@
 import { isUtf8 } from 'node:buffer'
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { defaultEnvironmentFolder, readEnvironmentOptions, readYaml, readYamlMap, SHARED_CONFIG_PATH, writeLocalFile } from '@appsys/devtool-cdn'
+import { defaultEnvironmentFolder, readEnvironmentOptions, readYaml, readYamlMap, SHARED_CONFIG_PATH, writeLocalFile } from '@appsys/devtool-environment'
 import type { RawConfig } from '@appsys/devtool-config'
 import { AGENT_SKILL_FILE, agentSkillFolderOf, type AgentSkillSummary, type FileEntryPayload, type FilePayload, type FileTreePayload, newAgentSkill, type ProjectDefinition, readAgentSkill } from '@appsys/devtool-shared'
 

@@ -1,4 +1,15 @@
-export { CdnClient, type CdnFile, CdnRequestError } from './client.js'
+export {
+  BACKEND_KINDS,
+  type BackendContext,
+  type BackendOptions,
+  type BackendProblem,
+  CdnRequestError,
+  createBackend,
+  createBackends,
+  type EnvironmentBackend,
+  readBackends,
+  type RemoteFile
+} from './backends/index.js'
 export { defaultEnvironmentFolder, localPathOf, writeLocalFile } from './directory.js'
 export {
   type CopyInfo,
@@ -10,13 +21,13 @@ export {
   type EnvironmentOptions,
   type EnvironmentSelection,
   listTables,
+  mediaTypeOf,
   overwritesLocalData,
   parseTargets,
   readEnvironmentOptions,
   SHARED_CONFIG_PATH,
   type TransferResult
 } from './environment.js'
-export { type CdnOptions, readCdnOptions } from './options.js'
 export { redisDatabaseName } from './redis.js'
 export type { SyncRecord } from './sync-journal.js'
-export { configFormatOf, type CopySide, diffConfig, type KeyChoice, type KeyDifference, mergeConfig, readMap as readYamlMap, readYaml } from './config-merge.js'
+export { configFormatOf, type CopySide, diffConfig, IgnoredKeys, type KeyChoice, type KeyDifference, mergeConfig, readMap as readYamlMap, readYaml } from './config-merge.js'

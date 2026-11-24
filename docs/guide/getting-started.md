@@ -117,16 +117,18 @@ and [Certificates](/configuration/certificates) to serve HTTPS.
 
 ## Share the environment with your team
 
-When a team shares configuration files and data through a CDN, a new developer adds the identity
-provider of the team and the CDN to their personal file:
+When a team shares configuration files and data, a new developer adds where the team stores them, its
+default [backend](/configuration/backends), to their personal file. With a CDN, the identity provider
+of the team comes along:
 
 ```yaml [config.local.yml]
 workspace: ~/Workspace
 auth:
   issuer: https://auth.example.dev
   clientId: devtool
-cdn:
-  url: https://cdn.example.dev
+environment:
+  backends:
+    team: { type: cdn, url: "https://files.example.dev", default: true }
 ```
 
 Then signs in with the identity provider, pulls everything and starts the server:
@@ -137,9 +139,11 @@ devtool env pull --yes
 devtool server
 ```
 
-`devtool env pull` downloads the shared `config.yml` too, so the team keeps one copy of it. Read
-[Environment](/configuration/environment), [Sign-in](/configuration/auth) and [CDN](/configuration/cdn) to
-set this up.
+`devtool env pull` downloads the shared `config.yml` first, from the default backend, so the team keeps
+one copy of it. The backend can also be an S3 bucket, an SFTP server, a git repository or your own
+scripts, with no sign-in needed. Read [Environment](/configuration/environment),
+[Backends](/configuration/backends), [Sign-in](/configuration/auth) and [CDN](/configuration/cdn) to set
+this up.
 
 ## Next steps
 

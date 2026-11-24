@@ -4,6 +4,7 @@ import { h } from 'vue'
 import 'virtual:group-icons.css'
 import AppSysMark from './components/AppSysMark.vue'
 import Configurator from './components/Configurator.vue'
+import SecretGenerator from './components/SecretGenerator.vue'
 import './style.css'
 
 export default {
@@ -18,5 +19,6 @@ export default {
    */
   enhanceApp ({ app }) {
     app.component('configurator', Configurator)
+    app.component('secret-generator', SecretGenerator)
   }
 } satisfies Theme

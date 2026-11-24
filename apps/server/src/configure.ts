@@ -1,9 +1,10 @@
 import path from 'node:path'
 import fs from 'node:fs/promises'
 import net from 'node:net'
-import type { AgentAction, AgentDefinition, CertificateAcme, ForgeKind, ClientConfigPayload, CommandArg, CommandChoice, CommandForm, CommandInput, DirectoryDefinition, DirectoryFiles, DirectoryFilesType, DirectoryScripts, ScriptSettings, AdtDefinition, DirectoryDefaultAction, DirectoryShortcut, DnsDefinition, DnsRecord, HostAccess, IntegrationDefinition, IntegrationType, LoadBalancerCertificate, McpCategory, McpEnvironmentItem, McpPatterns, McpRules, McpSettings, McpTarget, PassthroughRule, ProjectDefinition, ProjectRestore, RuntimeConfig, SidebarSettings, SortMode } from '@appsys/devtool-shared'
+import type { AgentAction, AgentDefinition, CertificateAcme, ForgeKind, ClientConfigPayload, CommandArg, CommandChoice, CommandForm, CommandInput, DirectoryDefinition, DirectoryFiles, DirectoryFilesType, DirectoryScripts, ScriptSettings, AdtDefinition, DirectoryDefaultAction, DirectoryShortcut, DnsDefinition, DnsRecord, DnsServerAddress, HostAccess, IntegrationDefinition, IntegrationType, LoadBalancerCertificate, McpCategory, McpEnvironmentItem, McpPatterns, McpRules, McpSettings, McpTarget, PassthroughRule, ProjectDefinition, ProjectRestore, RuntimeConfig, SidebarSettings, SortMode } from '@appsys/devtool-shared'
 import { AGENT_ACTIONS, DEFAULT_AGENT_PROMPTS, defaultMcpRules, integrationKey, isMcpLevel, logger, readMcpRules, shortcutKey, SORT_MODES, sortKeys } from '@appsys/devtool-shared'
 import { type AuthOptions, readAuthOptions } from '@appsys/devtool-auth'
+import { readBackends } from '@appsys/devtool-environment'
 import { type LegoOptionValue, legoRunArgs } from '@appsys/devtool-certs'
 import { configSourceKey, resolveAppIdentity, resolveCacheFolder } from '@appsys/devtool-config'
 import { FORGES, findForge, originUrl, repositoryOf } from '@appsys/devtool-git'
@@ -43,6 +44,7 @@ export function agentAutomationKey (slug: string): string {
   return `agents/${slug}`
 }
 const HOST_PATTERN_REGEXP = /^(\*\.)?[a-z0-9-]+(\.[a-z0-9-]+)*$/
+const DNS_SERVER_REGEXP = /^(?:\[([0-9a-f:.]+)\]|([a-z0-9-]+(?:\.[a-z0-9-]+)*))(?::(\d{1,5}))?$/i
 const DEFAULT_INTEGRATION_ICON = 'lucide:app-window'
 const DEFAULT_FORGE_ICONS: Record<ForgeKind, string> = { pullRequests: 'lucide:git-pull-request', issues: 'lucide:circle-dot' }
 /** The setting turning on each action of agents on the items of an integration. */
@@ -323,8 +325,15 @@ export class DevtoolConfigure {
     for (const problem of auth.problems) {
       this.addWarning(problem.setting, problem.message)
     }
-    if (this.initialConfig.cdn !== undefined && this.initialConfig.auth === undefined) {
-      this.addWarning('cdn', 'needs an auth section, signing the developers in')
+    if (this.initialConfig.cdn !== undefined) {
+      this.addWarning('cdn', 'is replaced by a backend of the environment: environment.backends.<name> { type: cdn, url }')
+    }
+    const { backends, problems: backendProblems } = readBackends(toRecord(this.initialConfig.environment).backends)
+    for (const problem of backendProblems) {
+      this.addWarning(problem.setting, problem.message)
+    }
+    for (const backend of backends.filter(candidate => candidate.type === 'cdn' && this.auth === null)) {
+      this.addWarning(`environment.backends.${backend.slug}`, 'a cdn backend needs an auth section, signing the developers in')
     }
 
     this.passthrough = this.readPassthrough('passthrough', this.initialConfig.passthrough)
@@ -1064,11 +1073,11 @@ export class DevtoolConfigure {
   }
 
   /**
-   * Reads the local DNS: `{ port, access, records: { <slug>: { names, address } } }`, the records being
-   * a map so personal configuration files add their own.
+   * Reads the local DNS: `{ enabled, port, access, upstream, records: { <slug>: { names, address } } }`,
+   * the records being a map so personal configuration files add their own.
    * @param slug Names the setting in warnings.
    * @param value The raw setting.
-   * @returns The DNS, null when it declares no valid record.
+   * @returns The DNS, null when it is disabled or declares no valid record.
    */
   private readDns (slug: string, value: unknown): DnsDefinition | null {
     if (value === undefined) {
@@ -1076,6 +1085,12 @@ export class DevtoolConfigure {
     }
 
     const dns = toRecord(value)
+    if (dns.enabled !== undefined && typeof dns.enabled !== 'boolean') {
+      this.addWarning(`${slug}.enabled`, 'must be true or false')
+    }
+    if (dns.enabled === false) {
+      return null
+    }
     const records: DnsRecord[] = []
     for (const [recordSlug, raw] of Object.entries(toRecord(dns.records))) {
       const record = toRecord(raw)
@@ -1096,7 +1111,34 @@ export class DevtoolConfigure {
       this.addWarning(`${slug}.port`, 'must be a port number')
       return null
     }
-    return records.length ? { port, access: this.readAccess(`${slug}.access`, dns.access), records } : null
+    return records.length ? { port, access: this.readAccess(`${slug}.access`, dns.access), records, upstream: this.readDnsUpstream(`${slug}.upstream`, dns.upstream, port) } : null
+  }
+
+  /**
+   * Reads the server the local DNS relays the other names to, `<host>[:<port>]` (`[<IPv6>]:<port>`),
+   * port 53 by default.
+   * @param slug Names the setting in warnings.
+   * @param value The raw setting.
+   * @param ownPort The port of the local DNS, which must not relay to itself.
+   * @returns The server, null when the setting is missing or invalid.
+   */
+  private readDnsUpstream (slug: string, value: unknown, ownPort: number): DnsServerAddress | null {
+    if (value === undefined) {
+      return null
+    }
+
+    const match = typeof value === 'string' ? DNS_SERVER_REGEXP.exec(value.trim()) : null
+    const host = match?.[1] ?? match?.[2]
+    const port = match?.[3] === undefined ? 53 : Number(match[3])
+    if (!host || (match?.[1] !== undefined && !net.isIPv6(host)) || port < 1 || port > 65535) {
+      this.addWarning(slug, 'must be <host>[:<port>], such as 127.0.0.1:5353')
+      return null
+    }
+    if (port === ownPort && (host === 'localhost' || host === '::1' || host.startsWith('127.'))) {
+      this.addWarning(slug, 'is this DNS itself: give the address of another DNS server')
+      return null
+    }
+    return { host, port }
   }
 
   /**

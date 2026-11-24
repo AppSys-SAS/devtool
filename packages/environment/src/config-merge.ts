@@ -43,6 +43,103 @@ function isMap (value: unknown): value is Record<string, unknown> {
 }
 
 /**
+ * Keys left out when two copies of a configuration file are compared, each copy keeping its own
+ * values for them when the other one is merged into it. A pattern is a dotted key path, where `*`
+ * stands for one key or list index and `**` for any number of them.
+ */
+export class IgnoredKeys {
+  private readonly _patterns: RegExp[]
+
+  /**
+   * @param patterns - The patterns of the ignored keys, such as `connections.*.lastUsedAt`.
+   */
+  constructor (patterns: readonly string[]) {
+    this._patterns = patterns.map(pattern => new RegExp(`^${pattern.split('**').map(part => part.split('*').map(text => text.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('[^.]*')).join('.*')}$`))
+  }
+
+  /**
+   * Tells whether a key is ignored.
+   *
+   * @param path - The path of the key.
+   * @returns True when a pattern matches it.
+   */
+  matches (path: readonly string[]): boolean {
+    const text = path.join('.')
+    return this._patterns.some(pattern => pattern.test(text))
+  }
+
+  /**
+   * Copies a value without its ignored keys, an ignored list entry becoming `undefined` so that the
+   * other entries keep their index.
+   *
+   * @param value - The value.
+   * @param path - The path of the value.
+   * @returns The value without the ignored keys.
+   */
+  strip (value: unknown, path: readonly string[]): unknown {
+    if (Array.isArray(value)) {
+      return value.map((entry, index) => this.matches([...path, String(index)]) ? undefined : this.strip(entry, [...path, String(index)]))
+    }
+    if (!isMap(value)) {
+      return value
+    }
+
+    return Object.fromEntries(Object.entries(value)
+      .filter(([key]) => !this.matches([...path, key]))
+      .map(([key, entry]) => [key, this.strip(entry, [...path, key])]))
+  }
+
+  /**
+   * Gives a value coming from the other copy the values of the ignored keys it replaces, wherever
+   * the replaced value has them; the other ignored keys keep the incoming values.
+   *
+   * @param value - The incoming value.
+   * @param replaced - The value it replaces, `undefined` when there is none.
+   * @param path - The path of the value.
+   * @returns The incoming value with the ignored values of the replaced one.
+   */
+  restore (value: unknown, replaced: unknown, path: readonly string[]): unknown {
+    if (this.matches(path)) {
+      return replaced === undefined ? value : replaced
+    }
+    if (Array.isArray(value)) {
+      return value.map((entry, index) => this.restore(entry, Array.isArray(replaced) ? replaced[index] : undefined, [...path, String(index)]))
+    }
+    if (!isMap(value)) {
+      return value
+    }
+
+    const restored = Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, this.restore(entry, isMap(replaced) ? replaced[key] : undefined, [...path, key])]))
+    for (const [key, entry] of Object.entries(isMap(replaced) ? replaced : {})) {
+      if (!Object.hasOwn(value, key) && this.matches([...path, key])) {
+        restored[key] = entry
+      }
+    }
+    return restored
+  }
+}
+
+const NO_IGNORED_KEYS = new IgnoredKeys([])
+
+/**
+ * Reads the value at a path of maps.
+ *
+ * @param root - The root map.
+ * @param path - The keys leading to the value.
+ * @returns The value, `undefined` when the path does not lead to one.
+ */
+function valueAt (root: Record<string, unknown>, path: readonly string[]): unknown {
+  let current: unknown = root
+  for (const key of path) {
+    if (!isMap(current) || !Object.hasOwn(current, key)) {
+      return undefined
+    }
+    current = current[key]
+  }
+  return current
+}
+
+/**
  * Reads a YAML file.
  *
  * @param text - The YAML text.
@@ -260,47 +357,57 @@ export function configFormatOf (filePath: string): ConfigFormat | null {
 
 /**
  * Lists the keys whose values differ between two copies of a configuration file, comparing maps
- * key by key and any other value (lists, scalars) as a whole.
+ * key by key and any other value (lists, scalars) as a whole, without the ignored keys.
  *
  * @param format - The format of the file.
  * @param localText - The local copy.
- * @param remoteText - The CDN copy.
- * @returns The differences, in the order of the keys.
+ * @param remoteText - The copy of the backend.
+ * @param ignored - The keys left out of the comparison.
+ * @returns The differences, in the order of the keys, with their whole values.
  */
-export function diffConfig (format: ConfigFormat, localText: string, remoteText: string): KeyDifference[] {
+export function diffConfig (format: ConfigFormat, localText: string, remoteText: string, ignored = NO_IGNORED_KEYS): KeyDifference[] {
   const differences: KeyDifference[] = []
   const walk = (local: Record<string, unknown>, remote: Record<string, unknown>, path: string[]): void => {
     for (const key of new Set([...Object.keys(local), ...Object.keys(remote)])) {
+      const keyPath = [...path, key]
       const localValue = Object.hasOwn(local, key) ? local[key] : undefined
       const remoteValue = Object.hasOwn(remote, key) ? remote[key] : undefined
+      if (ignored.matches(keyPath)) {
+        continue
+      }
       if (isMap(localValue) && isMap(remoteValue)) {
-        walk(localValue, remoteValue, [...path, key])
-      } else if (!isDeepStrictEqual(localValue, remoteValue)) {
-        differences.push({ path: [...path, key], local: localValue, remote: remoteValue })
+        walk(localValue, remoteValue, keyPath)
+      } else if (!isDeepStrictEqual(ignored.strip(localValue, keyPath), ignored.strip(remoteValue, keyPath))) {
+        differences.push({ path: keyPath, local: localValue, remote: remoteValue })
       }
     }
   }
 
-  walk(format.read(localText, 'the local copy'), format.read(remoteText, 'the CDN copy'), [])
+  walk(format.read(localText, 'the local copy'), format.read(remoteText, 'the backend copy'), [])
   return differences
 }
 
 /**
  * Applies the chosen values of the differing keys to one of the two copies, keeping its layout.
- * Keys without a choice keep the value of that copy.
+ * Keys without a choice keep the value of that copy, and so do its ignored keys.
  *
  * @param format - The format of the file.
  * @param baseText - The copy the result is built from.
  * @param baseSide - Which copy it is.
  * @param differences - The differing keys of the two copies.
  * @param choices - The value chosen for each key.
+ * @param ignored - The keys the copy keeps its values for.
  * @returns The merged text.
  */
-export function mergeConfig (format: ConfigFormat, baseText: string, baseSide: CopySide, differences: KeyDifference[], choices: KeyChoice[]): string {
+export function mergeConfig (format: ConfigFormat, baseText: string, baseSide: CopySide, differences: KeyDifference[], choices: KeyChoice[], ignored = NO_IGNORED_KEYS): string {
+  const base = format.read(baseText, 'the file')
   const chosen = new Map(choices.map(choice => [JSON.stringify(choice.path), choice.side]))
   const changes = differences
     .filter(difference => (chosen.get(JSON.stringify(difference.path)) ?? baseSide) !== baseSide)
-    .map(difference => ({ path: difference.path, value: baseSide === 'local' ? difference.remote : difference.local }))
+    .map(difference => ({
+      path: difference.path,
+      value: ignored.restore(baseSide === 'local' ? difference.remote : difference.local, valueAt(base, difference.path), difference.path)
+    }))
   return format.write(baseText, changes)
 }
 

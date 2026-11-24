@@ -5,7 +5,7 @@ description: Every command and option of the devtool CLI, and the environment va
 # CLI
 
 The `devtool` command starts the server and handles everything that happens outside the interface:
-signing in to the CDN, synchronizing the environment, renewing certificates.
+signing in, synchronizing the environment, renewing certificates.
 
 ```bash
 devtool --help
@@ -65,27 +65,10 @@ devtool logout
 `login` signs in with the [identity provider](/configuration/auth) of the configuration, in your browser:
 it needs an `auth` section. `logout` forgets the session of the identity provider.
 
-## devtool cdn
-
-Reads and changes the devtool files of the CDN directly. Like `devtool env`, it needs both the
-[`auth`](/configuration/auth) and the [`cdn`](/configuration/cdn) sections.
-
-```bash
-devtool cdn pull api/config.yml ./config.yml
-devtool cdn pull api/config.yml -
-devtool cdn push api/config.yml ./config.yml -t text/yaml
-devtool cdn rm api/old.yml
-```
-
-| Command | Description |
-|---|---|
-| `cdn pull <path> [destination]` | Download a file, to the file name of `path` by default; `-` writes it to the standard output. |
-| `cdn push <path> <file> [-t <mediaType>]` | Upload a file, replacing the stored one. `-t` defaults to `application/octet-stream`. Needs write rights. |
-| `cdn rm <path>` | Delete a file. Needs write rights. |
-
 ## devtool env
 
-Synchronizes the [environment](/configuration/environment) with the CDN.
+Synchronizes the [environment](/configuration/environment) with its [backends](/configuration/backends).
+It needs at least one backend in `environment.backends`.
 
 ```bash
 devtool env pull --yes
@@ -95,11 +78,36 @@ devtool env push -i
 
 | Command | Options | Description |
 |---|---|---|
-| `env pull [targets...]` | `-i`, `--interactive`: choose items, tables and key groups. `-y`, `--yes`: replace local data without asking. | Replace the local items, and the data they hold, by the CDN copies. |
-| `env push [targets...]` | `-i`, `--interactive` | Dump the local data of the items and send them to the CDN. Needs write rights. |
+| `env pull [targets...]` | `-i`, `--interactive`: choose items, tables and key groups. `-y`, `--yes`: replace local data without asking. | Replace the local items, and the data they hold, by the copies of their backends. |
+| `env push [targets...]` | `-i`, `--interactive` | Dump the local data of the items and send them to their backends. Needs write rights. |
 
 A target is a path (`api/config.yml`), tables of a database (`api/db.gz:public.user,public.session`) or
 key groups of a Redis database (`api/redis.gz:session:*`). Without target, every item is synchronized.
+
+When the configuration declares no item yet, `devtool env` first downloads the shared
+`devtool/config.yml` from the default backend. A file [encrypted](/configuration/encryption) with
+`prompt: true` has its password asked in the terminal; without a terminal, the command stops.
+
+## devtool env file
+
+Reads and changes any file of a backend directly, outside the items of the environment.
+
+```bash
+devtool env file pull api/config.yml ./config.yml
+devtool env file pull api/config.yml -
+devtool env file push api/config.yml ./config.yml
+devtool env file push api/dump.bin ./dump.bin -t application/octet-stream -b archive
+devtool env file rm api/old.yml -b archive
+```
+
+| Command | Description |
+|---|---|
+| `env file pull <path> [destination]` | Download a file, to the file name of `path` by default; `-` writes it to the standard output. |
+| `env file push <path> <file> [-t <mediaType>]` | Upload a file, replacing the stored one. The media type is guessed from the name unless `-t` gives it. Needs write rights. |
+| `env file rm <path>` | Delete a file. Needs write rights. |
+
+Every one takes `-b, --backend <name>`, a backend of `environment.backends`, the default one when
+omitted. The files come decrypted by the encryption of the backend, but not by that of an item.
 
 ## devtool cert renew
 

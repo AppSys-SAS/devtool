@@ -1,0 +1,278 @@
+import { createCipheriv, createDecipheriv, hkdfSync, randomBytes, scryptSync } from 'node:crypto'
+import { createReadStream, createWriteStream } from 'node:fs'
+import fs from 'node:fs/promises'
+import { Readable } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
+import type { BackendContext, BackendProblem, EnvironmentBackend, RemoteFile } from './backend.js'
+
+const MAGIC = Buffer.from('ADTE')
+const VERSION = 1
+const SALT_LENGTH = 32
+const HEADER_LENGTH = MAGIC.length + 1 + SALT_LENGTH
+const CHUNK_LENGTH = 64 * 1024
+const TAG_LENGTH = 16
+const SEALED_CHUNK_LENGTH = CHUNK_LENGTH + TAG_LENGTH
+const KEY_INFO = 'devtool-environment-v1'
+const SCRYPT_OPTIONS = { N: 2 ** 15, r: 8, p: 1, maxmem: 64 * 1024 * 1024 }
+
+/** Where the secret encrypting files comes from: a key, a password, or a password asked when needed. */
+export type EncryptionSettings
+  = | { key: string }
+    | { password: string }
+    | { prompt: true }
+
+/** Gives the key of one file from the salt of the file. */
+type FileKey = (salt: Buffer) => Buffer
+
+/**
+ * Reads an `encryption` setting: `{ key }` (32 bytes in base64), `{ password }` or `{ prompt: true }`,
+ * `key` and `password` reading value blocks.
+ * @param value The raw setting.
+ * @param setting Path of the setting, for the problems.
+ * @returns The settings, null when the setting is missing or invalid, and its problems.
+ */
+export function readEncryption (value: unknown, setting: string): { encryption: EncryptionSettings | null, problems: BackendProblem[] } {
+  if (value === undefined) {
+    return { encryption: null, problems: [] }
+  }
+  const record = typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {}
+  const sources = ['key', 'password', 'prompt'].filter(source => record[source] !== undefined)
+  if (sources.length === 1 && typeof record.key === 'string' && record.key.trim() !== '') {
+    return { encryption: { key: record.key }, problems: [] }
+  }
+  if (sources.length === 1 && typeof record.password === 'string' && record.password !== '') {
+    return { encryption: { password: record.password }, problems: [] }
+  }
+  if (sources.length === 1 && record.prompt === true) {
+    return { encryption: { prompt: true }, problems: [] }
+  }
+  return { encryption: null, problems: [{ setting, message: 'must be { key } (32 bytes in base64), { password } or { prompt: true }' }] }
+}
+
+/**
+ * Reads an encryption key given in base64.
+ * @param text The key, 32 bytes in base64.
+ * @returns The key.
+ */
+export function readEncryptionKey (text: string): Buffer {
+  const key = Buffer.from(text.trim(), 'base64')
+  if (key.length !== 32) {
+    throw new Error('the encryption key must be 32 bytes in base64, such as the output of `openssl rand -base64 32`')
+  }
+  return key
+}
+
+/**
+ * Gives the size of a file once decrypted, from its encrypted size.
+ * @param sealedSize The size of the encrypted file.
+ * @returns The size of its content, null when no encrypted file has this size.
+ */
+export function plainLengthOf (sealedSize: number): number | null {
+  const body = sealedSize - HEADER_LENGTH
+  if (body < TAG_LENGTH) {
+    return null
+  }
+  const chunks = Math.ceil(body / SEALED_CHUNK_LENGTH)
+  return body - (chunks - 1) * SEALED_CHUNK_LENGTH >= TAG_LENGTH ? body - chunks * TAG_LENGTH : null
+}
+
+/**
+ * Builds the nonce of a chunk: its index, and whether it is the last one, so chunks can be neither
+ * reordered nor dropped.
+ * @param index The index of the chunk.
+ * @param last Whether it ends the file.
+ * @returns The nonce.
+ */
+function nonceOf (index: number, last: boolean): Buffer {
+  const nonce = Buffer.alloc(12)
+  nonce.writeBigUInt64BE(BigInt(index), 0)
+  nonce[11] = last ? 1 : 0
+  return nonce
+}
+
+/**
+ * Gives the key of each file for a key of 32 bytes.
+ * @param key The key.
+ * @returns The key of a file, from its salt.
+ */
+export function keyFileKey (key: Buffer): FileKey {
+  return salt => Buffer.from(hkdfSync('sha256', key, salt, KEY_INFO, 32))
+}
+
+/**
+ * Gives the key of each file for a password, stretched with scrypt and the salt of the file.
+ * @param password The password.
+ * @returns The key of a file, from its salt.
+ */
+export function passwordFileKey (password: string): FileKey {
+  return salt => keyFileKey(scryptSync(password, salt, 32, SCRYPT_OPTIONS))(salt)
+}
+
+/**
+ * Encrypts a content chunk by chunk with AES-256-GCM, the path of the file authenticated with each chunk.
+ * @param source The content.
+ * @param fileKey Gives the key of the file from its salt.
+ * @param filePath The path of the file in the backend.
+ * @yields The encrypted file.
+ */
+export async function* encrypt (source: AsyncIterable<Buffer>, fileKey: FileKey, filePath: string): AsyncGenerator<Buffer> {
+  const salt = randomBytes(SALT_LENGTH)
+  const key = fileKey(salt)
+  yield Buffer.concat([MAGIC, Buffer.from([VERSION]), salt])
+
+  let pending = Buffer.alloc(0)
+  let index = 0
+  const seal = (chunk: Buffer, last: boolean): Buffer => {
+    const cipher = createCipheriv('aes-256-gcm', key, nonceOf(index++, last))
+    cipher.setAAD(Buffer.from(filePath))
+    return Buffer.concat([cipher.update(chunk), cipher.final(), cipher.getAuthTag()])
+  }
+  for await (const data of source) {
+    pending = Buffer.concat([pending, data])
+    while (pending.length > CHUNK_LENGTH) {
+      yield seal(pending.subarray(0, CHUNK_LENGTH), false)
+      pending = pending.subarray(CHUNK_LENGTH)
+    }
+  }
+  yield seal(pending, true)
+}
+
+/**
+ * Decrypts a file written by `encrypt`, failing when it was changed, cut, or encrypted with another
+ * secret or for another path.
+ * @param source The encrypted file.
+ * @param fileKey Gives the key of the file from its salt.
+ * @param filePath The path of the file in the backend.
+ * @yields The content.
+ */
+export async function* decrypt (source: AsyncIterable<Buffer>, fileKey: FileKey, filePath: string): AsyncGenerator<Buffer> {
+  let pending = Buffer.alloc(0)
+  let key: Buffer | null = null
+  let index = 0
+  const open = (sealed: Buffer, last: boolean, secret: Buffer): Buffer => {
+    const decipher = createDecipheriv('aes-256-gcm', secret, nonceOf(index++, last))
+    decipher.setAAD(Buffer.from(filePath))
+    decipher.setAuthTag(sealed.subarray(sealed.length - TAG_LENGTH))
+    try {
+      return Buffer.concat([decipher.update(sealed.subarray(0, sealed.length - TAG_LENGTH)), decipher.final()])
+    } catch {
+      throw new Error(`cannot decrypt ${filePath}: wrong encryption secret, or damaged file`)
+    }
+  }
+  for await (const data of source) {
+    pending = Buffer.concat([pending, data])
+    if (key === null) {
+      if (pending.length < HEADER_LENGTH) {
+        continue
+      }
+      if (!pending.subarray(0, MAGIC.length).equals(MAGIC) || pending[MAGIC.length] !== VERSION) {
+        throw new Error(`cannot decrypt ${filePath}: not a file encrypted by the devtool`)
+      }
+      key = fileKey(pending.subarray(MAGIC.length + 1, HEADER_LENGTH))
+      pending = pending.subarray(HEADER_LENGTH)
+    }
+    while (pending.length > SEALED_CHUNK_LENGTH) {
+      yield open(pending.subarray(0, SEALED_CHUNK_LENGTH), false, key)
+      pending = pending.subarray(SEALED_CHUNK_LENGTH)
+    }
+  }
+  if (key === null || pending.length < TAG_LENGTH) {
+    throw new Error(`cannot decrypt ${filePath}: the file is cut short`)
+  }
+  yield open(pending, true, key)
+}
+
+/**
+ * The secret of some encrypted files, read on first use: its key or password read with the value
+ * blocks, or a password asked to the developer and asked again after a wrong one.
+ */
+export class EncryptionSecret {
+  private _fileKey: Promise<FileKey> | null = null
+
+  /**
+   * @param _settings Where the secret comes from.
+   * @param _context Reads value blocks and asks the developer.
+   * @param _label What the secret unlocks, shown when it is asked.
+   */
+  constructor (private readonly _settings: EncryptionSettings, private readonly _context: BackendContext, private readonly _label: string) {}
+
+  /**
+   * Gives the key of each file, reading the secret on first use.
+   * @returns The key of a file, from its salt.
+   */
+  async fileKey (): Promise<FileKey> {
+    this._fileKey ??= this.read()
+    return this._fileKey.catch((error: unknown) => {
+      this._fileKey = null
+      throw error
+    })
+  }
+
+  /**
+   * Forgets a password asked to the developer, so it is asked again.
+   */
+  forget (): void {
+    if ('prompt' in this._settings) {
+      this._fileKey = null
+    }
+  }
+
+  /**
+   * Reads the secret.
+   * @returns The key of a file, from its salt.
+   */
+  private async read (): Promise<FileKey> {
+    if ('key' in this._settings) {
+      return keyFileKey(readEncryptionKey(await this._context.resolve(this._settings.key)))
+    }
+    if ('password' in this._settings) {
+      return passwordFileKey(await this._context.resolve(this._settings.password))
+    }
+    return passwordFileKey(await this._context.askSecret(this._label))
+  }
+}
+
+/**
+ * Wraps a backend so the files are encrypted before they reach it and decrypted when they come back.
+ * @param backend The backend storing the encrypted files.
+ * @param secret The secret of the files.
+ * @returns The backend handling the encryption.
+ */
+export function encrypted (backend: EnvironmentBackend, secret: EncryptionSecret): EnvironmentBackend {
+  return {
+    async list (): Promise<RemoteFile[] | null> {
+      const files = await backend.list()
+      return files?.map(file => ({ ...file, size: plainLengthOf(file.size) ?? file.size })) ?? null
+    },
+
+    async download (path: string): Promise<Readable | null> {
+      const fileKey = await secret.fileKey()
+      const content = await backend.download(path)
+      if (!content) {
+        return null
+      }
+      const plain = Readable.from(decrypt(content, fileKey, path))
+      plain.once('error', () => secret.forget())
+      return plain
+    },
+
+    async upload (path: string, localFile: string): Promise<void> {
+      const fileKey = await secret.fileKey()
+      const sealedFile = `${localFile}.sealed`
+      try {
+        await pipeline(Readable.from(encrypt(createReadStream(localFile), fileKey, path)), createWriteStream(sealedFile, { mode: 0o600 }))
+        await backend.upload(path, sealedFile, 'application/octet-stream')
+      } finally {
+        await fs.rm(sealedFile, { force: true })
+      }
+    },
+
+    async remove (path: string): Promise<void> {
+      await backend.remove(path)
+    },
+
+    async close (): Promise<void> {
+      await backend.close()
+    }
+  }
+}

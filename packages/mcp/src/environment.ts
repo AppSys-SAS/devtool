@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import net from 'node:net'
-import { SHARED_CONFIG_PATH } from '@appsys/devtool-cdn'
+import { SHARED_CONFIG_PATH } from '@appsys/devtool-environment'
 import { environmentRules, type ForgeKind, integrationKey, logger, MCP_LEVELS, type McpAction, type McpRule, type McpRules } from '@appsys/devtool-shared'
 import { z } from 'zod'
 import { maskValues } from './files.js'
@@ -181,7 +181,7 @@ export function environmentTools (host: McpHost): McpTool[] {
     defineTool({
       name: 'environment_status',
       title: 'Environment status',
-      description: 'Describes the environment synchronized with the CDN: its files, databases, buckets and Redis databases, their local and CDN copies, and the pull or push running.',
+      description: 'Describes the environment synchronized with its backends: its files, databases, buckets and Redis databases, the backend of each, their local copies and the copies of their backends, and the pull or push running.',
       input: {},
       readOnly: true,
       run: async (_input, call) => {
@@ -194,7 +194,7 @@ export function environmentTools (host: McpHost): McpTool[] {
     defineTool({
       name: 'environment_keys',
       title: 'Compare keys of an environment file',
-      description: 'Lists the keys whose values differ between the local and CDN copies of a configuration file of the environment; values are replaced by their type where only keys may be read.',
+      description: 'Lists the keys whose values differ between the local copy of a configuration file of the environment and the copy of its backend; values are replaced by their type where only keys may be read.',
       input: { path: z.string().describe('Path of the file in the environment') },
       readOnly: true,
       run: async ({ path }, call) => {
@@ -231,7 +231,7 @@ export function environmentTools (host: McpHost): McpTool[] {
       name: 'environment_sync',
       title: 'Pull or push the environment',
       description:
-        'Starts a pull (CDN copies replace the local ones) or a push (the reverse) of items of the environment, optionally restricted to tables. A push is always confirmed by the user. Follow it with environment_status.',
+        'Starts a pull (the copies of the backends replace the local ones) or a push (the reverse) of items of the environment, optionally restricted to tables. A push is always confirmed by the user. Follow it with environment_status.',
       input: {
         direction: z.enum(['pull', 'push']),
         targets: z
@@ -262,11 +262,11 @@ export function environmentTools (host: McpHost): McpTool[] {
     defineTool({
       name: 'pull_shared_config',
       title: 'Pull the shared configuration',
-      description: 'Replaces the shared configuration of the devtool by its CDN copy, then reloads it. Always confirmed by the user.',
+      description: 'Replaces the shared configuration of the devtool by the copy of the default backend, then reloads it. Always confirmed by the user.',
       input: {},
       run: async (_input, call) => {
         call.describe('shared configuration')
-        await call.authorize({ action: 'run', rule: environmentRule(host, 'run', [SHARED_CONFIG_PATH]), confirm: true, title: 'Pull the shared configuration of the devtool from the CDN' })
+        await call.authorize({ action: 'run', rule: environmentRule(host, 'run', [SHARED_CONFIG_PATH]), confirm: true, title: 'Pull the shared configuration of the devtool from the default backend' })
         const pulled = await host.environment.pullSharedConfig()
         if (!pulled) {
           throw new McpToolError(host.environment.state().error ?? 'The shared configuration was not pulled')

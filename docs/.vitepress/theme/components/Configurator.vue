@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, shallowRef } from 'vue'
+import BackendForm from './configurator/BackendForm.vue'
 import ConfigField from './configurator/ConfigField.vue'
 import ConfigGroup from './configurator/ConfigGroup.vue'
 import ConfigPreview from './configurator/ConfigPreview.vue'
@@ -10,7 +11,6 @@ import {
   AGENT_FIELDS,
   AUTH_FIELDS,
   BUCKET_FIELDS,
-  CDN_FIELDS,
   CERTIFICATE_FIELDS,
   DATABASE_FIELDS,
   DEVTOOL_FIELDS,
@@ -77,6 +77,14 @@ function newSection (): Record<string, unknown> {
  */
 function newProject (): Record<string, unknown> {
   return { name: 'New project', section: sections.value[0] }
+}
+
+/**
+ * Creates a backend entry, a CDN by default.
+ * @returns The new backend.
+ */
+function newBackend (): Record<string, unknown> {
+  return { type: 'cdn', url: 'https://files.example.dev' }
 }
 
 /**
@@ -165,7 +173,7 @@ function startFromExample (): void {
         </EntryList>
       </ConfigGroup>
 
-      <ConfigGroup title="Environment" description="Files, databases and buckets shared through the CDN.">
+      <ConfigGroup title="Environment" description="Files, databases and buckets shared through the backends.">
         <template v-for="list in ENVIRONMENT_LISTS" :key="list.title">
           <h4>{{ list.title }}</h4>
           <ItemList :path="list.path" :add-label="list.addLabel" :new-item="list.newItem">
@@ -182,12 +190,21 @@ function startFromExample (): void {
         <ConfigField v-for="field in S3_FIELDS" :key="field.label" v-bind="field" />
       </ConfigGroup>
 
-      <ConfigGroup title="Sign-in" description="The identity provider signing developers in, for the CDN and the auth:// value blocks.">
+      <ConfigGroup title="Sign-in" description="The identity provider signing developers in, for the cdn backends and the auth:// value blocks.">
         <ConfigField v-for="field in AUTH_FIELDS" :key="field.label" v-bind="field" />
       </ConfigGroup>
 
-      <ConfigGroup title="CDN" description="Where the environment is shared.">
-        <ConfigField v-for="field in CDN_FIELDS" :key="field.label" v-bind="field" />
+      <ConfigGroup title="Backends" description="Where the environment is stored: a CDN, S3, SFTP, git or your own scripts.">
+        <EntryList
+          :path="['environment', 'backends']"
+          base="team"
+          add-label="Add a backend"
+          :new-entry="newBackend"
+        >
+          <template #default="{ path }">
+            <BackendForm :path="path" />
+          </template>
+        </EntryList>
       </ConfigGroup>
 
       <ConfigGroup title="Agents" description="The MCP server coding agents connect to, and what they may do.">

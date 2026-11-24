@@ -1,22 +1,25 @@
+import { execFile } from 'node:child_process'
+import fs from 'node:fs/promises'
+import { promisify } from 'node:util'
+import { authReaderOf, readAuthOptions } from '@appsys/devtool-auth'
+import { readCertificate } from '@appsys/devtool-certs'
+import { type RawConfig, resolveCacheFolder, resolveConfigFolder } from '@appsys/devtool-config'
 import {
-  CdnClient,
-  type CdnOptions,
+  type BackendContext,
   configFormatOf,
   type CopyInfo,
+  createBackends,
   defaultEnvironmentFolder,
   Environment,
+  type EnvironmentBackend,
   type EnvironmentOptions,
   type EnvironmentSelection,
   listTables,
   localPathOf,
-  readCdnOptions,
   readEnvironmentOptions,
   redisDatabaseName,
   SHARED_CONFIG_PATH
-} from '@appsys/devtool-cdn'
-import { readCertificate } from '@appsys/devtool-certs'
-import fs from 'node:fs/promises'
-import type { RawConfig } from '@appsys/devtool-config'
+} from '@appsys/devtool-environment'
 import { logger } from '@appsys/devtool-shared'
 import { Cron } from 'croner'
 import type {
@@ -29,6 +32,29 @@ import type {
   EnvironmentRunPayload,
   EnvironmentTablesPayload
 } from '@appsys/devtool-shared'
+import { CommandSecrets } from './command-automation.js'
+
+const execFileAsync = promisify(execFile)
+
+/**
+ * Builds what the backends of the environment need: value blocks read from the configuration folder,
+ * the cache folder, the identity provider and a way to ask the developer for a secret.
+ *
+ * @param config - The raw configuration.
+ * @param askSecret - Asks the developer for a secret.
+ * @returns The context of the backends.
+ */
+export function createBackendContext (config: RawConfig, askSecret: (label: string) => Promise<string>): BackendContext {
+  const configFolder = resolveConfigFolder()
+  const auth = readAuthOptions(config.auth).options
+  const secrets = new CommandSecrets({
+    account: null,
+    folder: configFolder,
+    runShell: async command => (await execFileAsync('/bin/sh', ['-c', command], { cwd: configFolder })).stdout,
+    readAuth: authReaderOf(auth)
+  })
+  return { resolve: async text => secrets.resolve(text), askSecret, cacheDir: resolveCacheFolder(config), configFolder, auth }
+}
 
 /** An item asked for by the interface, whole or restricted to some tables of a database or keys of a configuration file. */
 export interface EnvironmentTarget {
@@ -84,10 +110,11 @@ function targetName (target: EnvironmentTarget): string {
 
 /**
  * Development environment of the developer as the interface shows it: the items with their local
- * and CDN copies, and the pulls and pushes it starts, one at a time.
+ * copies and the copies of their backends, and the pulls and pushes it starts, one at a time.
  */
 export class DevtoolEnvironment {
-  private _cdn: CdnOptions | null = null
+  private _backends = new Map<string, EnvironmentBackend>()
+  private _context: BackendContext | null = null
   private _options: EnvironmentOptions | null = null
   private _items: EnvironmentItemPayload[] = []
   private _error: string | null = null
@@ -99,17 +126,23 @@ export class DevtoolEnvironment {
 
   /**
    * @param _publish - Sends the state to every connected interface.
+   * @param _askSecret - Asks the developer for a secret in the interface, such as the password of encrypted files.
    */
-  constructor (private readonly _publish: (payload: EnvironmentPayload) => Promise<void>) {}
+  constructor (
+    private readonly _publish: (payload: EnvironmentPayload) => Promise<void>,
+    private readonly _askSecret: (label: string) => Promise<string>
+  ) {}
 
   /**
-   * Takes the `auth`, `cdn` and `environment` sections of the configuration and schedules the pulls they
-   * declare, replacing the previous schedule.
+   * Takes the `auth` and `environment` sections of the configuration, connects the backends it
+   * declares, replacing the previous ones, and schedules the pulls it declares.
    *
    * @param config - The raw configuration.
    */
   configure (config: RawConfig): void {
-    this._cdn = readCdnOptions(config.cdn, config.auth)
+    for (const backend of this._backends.values()) {
+      backend.close().catch((error: unknown) => logger.warn('Environment', 'Backend', `Not closed: ${error instanceof Error ? error.message : String(error)}`))
+    }
     try {
       this._options = readEnvironmentOptions(config.environment)
       this._error = null
@@ -117,6 +150,8 @@ export class DevtoolEnvironment {
       this._options = null
       this._error = error instanceof Error ? error.message : String(error)
     }
+    this._context = createBackendContext(config, this._askSecret)
+    this._backends = createBackends(this._options?.backends ?? [], this._context)
 
     for (const job of this._pullJobs) {
       job.stop()
@@ -144,11 +179,12 @@ export class DevtoolEnvironment {
    */
   state (): EnvironmentPayload {
     const error = [this._error, ...this._scheduleErrors].filter(Boolean).join('; ') || null
-    return { configured: this._cdn !== null && this._options !== null, items: this._items, error, run: this._run }
+    const backends = (this._options?.backends ?? []).map(backend => ({ name: backend.slug, type: backend.type, default: backend.slug === this._options?.defaultBackend, encrypted: backend.encryption !== null }))
+    return { configured: this._backends.size > 0, backends, items: this._items, error, run: this._run }
   }
 
   /**
-   * Gives the files of the environment synchronized with the CDN among some local files.
+   * Gives the files of the environment synchronized with a backend among some local files.
    *
    * @param files - Absolute paths of local files.
    * @returns The paths in the environment of those it synchronizes.
@@ -169,9 +205,9 @@ export class DevtoolEnvironment {
   }
 
   /**
-   * Pulls items on their own: an item whose CDN copy is missing or unchanged since the last sync is left
-   * alone, one whose local copy changed since the last sync (or was never synchronized) is skipped and
-   * reported, the others are pulled. Nothing happens while another run is in progress.
+   * Pulls items on their own: an item whose copy on its backend is missing or unchanged since the last
+   * sync is left alone, one whose local copy changed since the last sync (or was never synchronized) is
+   * skipped and reported, the others are pulled. Nothing happens while another run is in progress.
    *
    * @param paths - The paths of the items.
    */
@@ -185,7 +221,7 @@ export class DevtoolEnvironment {
     const skipped: { path: string, detail: string }[] = []
     const { items } = await environment.describe()
     for (const { item, local, remote, synced } of items.filter(described => paths.includes(described.item.path))) {
-      if (remote === null || remote === 'unknown' || remote.updatedAt.getTime() === synced?.remoteUpdatedAt.getTime()) {
+      if (remote === null || remote === 'unknown' || (synced && (synced.remoteVersion ?? synced.remoteUpdatedAt.toISOString()) === (remote.version ?? remote.updatedAt.toISOString()))) {
         continue
       }
       if (local && local.updatedAt.getTime() !== synced?.localUpdatedAt.getTime()) {
@@ -205,8 +241,8 @@ export class DevtoolEnvironment {
   async refresh (): Promise<void> {
     const environment = this.environment()
     if (environment) {
-      const { items, remoteError } = await environment.describe()
-      this._error = remoteError
+      const { items, errors } = await environment.describe()
+      this._error = Object.entries(errors).map(([backend, message]) => `${backend}: ${message}`).join('; ') || null
       const folder = this._options?.folder ?? defaultEnvironmentFolder()
       this._items = await Promise.all(
         items.map(async ({ item, local, remote, synced }) => {
@@ -214,6 +250,8 @@ export class DevtoolEnvironment {
           return {
             path: item.path,
             kind: item.kind,
+            backend: item.backend,
+            encrypted: item.encryption !== null,
             engine: item.kind === 'database' ? item.engine : null,
             container: item.kind === 'database' ? item.container : null,
             bucket: item.kind === 'bucket' ? item.bucket : null,
@@ -240,13 +278,15 @@ export class DevtoolEnvironment {
    * @returns True when the configuration was downloaded.
    */
   async pullSharedConfig (): Promise<boolean> {
-    if (!this._cdn) {
+    const environment = this.environment()
+    const backend = this._options?.defaultBackend ?? null
+    if (!environment || backend === null) {
       return false
     }
 
     try {
-      const result = await new Environment(new CdnClient(this._cdn), { folder: this._options?.folder ?? defaultEnvironmentFolder(), items: [], configFiles: [], autoPulls: [], s3: null }).pull({ item: { kind: 'file', path: SHARED_CONFIG_PATH }, tables: null })
-      this._error = result.done ? null : `${SHARED_CONFIG_PATH} is not on the CDN`
+      const result = await environment.pull({ item: { kind: 'file', path: SHARED_CONFIG_PATH, backend, encryption: null, ignore: null }, tables: null })
+      this._error = result.done ? null : `${SHARED_CONFIG_PATH} is not on ${backend}`
     } catch (error) {
       this._error = error instanceof Error ? error.message : String(error)
     }
@@ -275,7 +315,7 @@ export class DevtoolEnvironment {
   }
 
   /**
-   * Lists the keys whose values differ between the local and CDN copies of a configuration file.
+   * Lists the keys whose values differ between the local copy of a configuration file and the copy of its backend.
    *
    * @param path - The path of the item.
    * @returns The differing keys, or why they could not be listed.
@@ -319,7 +359,7 @@ export class DevtoolEnvironment {
    * Pulls or pushes items one after the other, publishing the progress of each, then describes the
    * items again. A request while a run is in progress does nothing.
    *
-   * @param direction - Whether the CDN copies replace the local ones, or the reverse.
+   * @param direction - Whether the copies of the backends replace the local ones, or the reverse.
    * @param targets - The items, with the tables of the databases and the keys of the configuration files.
    * @param skipped - Items reported as skipped in the run, with the reason.
    */
@@ -366,9 +406,9 @@ export class DevtoolEnvironment {
   /**
    * Builds the environment of the configuration.
    *
-   * @returns The environment, or null when the configuration declares none or no CDN.
+   * @returns The environment, or null when the configuration declares none or no backend.
    */
   private environment (): Environment | null {
-    return this._cdn && this._options ? new Environment(new CdnClient(this._cdn), this._options) : null
+    return this._options && this._context && this._backends.size > 0 ? new Environment(this._backends, this._options, this._context) : null
   }
 }

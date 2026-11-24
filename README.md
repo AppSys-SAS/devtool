@@ -50,7 +50,8 @@ in one local web interface.
 - **HTTPS hosts** - A built-in load balancer serves `https://api.example.dev` from your local ports,
   with HTTP/2, WebSockets, a local DNS and certificates renewed by lego.
 - **Shared environment** - Configuration files, databases (PostgreSQL, MariaDB, MongoDB), buckets and
-  Redis pulled and pushed through a CDN behind your OpenID Connect sign-in.
+  Redis pulled and pushed through the storage of your team (a CDN behind your OpenID Connect sign-in, S3,
+  SFTP, git or your own scripts), with optional encryption on your machine.
 - **Secrets on demand** - `{{ op://... }}`, `{{ file://... }}` and `{{ $(...) }}` value blocks read
   1Password, files and commands when a command starts, masked in its output.
 - **Pull requests and issues** - GitHub and GitLab pull requests and issues of every repository, with

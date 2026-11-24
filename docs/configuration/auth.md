@@ -1,12 +1,12 @@
 ---
-description: Sign developers in once with your identity provider, for the CDN and for the auth value blocks of commands.
+description: Sign developers in once with your identity provider, for the CDN backends and for the auth value blocks of commands.
 ---
 
 # Sign-in (auth)
 
 The `auth` section names the identity provider your team signs in with. You sign in once, and the
-devtool reuses that session everywhere it needs to know who you are: the [CDN](/configuration/cdn) gets
-your access token, and your commands can read your token, user name and groups with
+devtool reuses that session everywhere it needs to know who you are: the [CDN](/configuration/cdn)
+backends of the environment get your access token, and your commands can read your token, user name and groups with
 [value blocks](#values-of-the-signed-in-developer).
 
 ```yaml [config.yml]
@@ -138,4 +138,5 @@ If the identity provider gives no such value (an email without the `email` scope
 - `auth.clientId: must be the client of the devtool at the issuer`
 - `auth.callbackPort: must be a port between 1 and 65535, 6732 is used`
 - `auth.scopes: must be a list of scopes holding openid, openid offline_access groups profile is used`
-- `cdn: needs an auth section, signing the developers in`: a `cdn` section is declared without `auth`.
+- `environment.backends.<name>: a cdn backend needs an auth section, signing the developers in`: a
+  backend of type `cdn` is declared without `auth`.

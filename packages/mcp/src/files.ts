@@ -1,4 +1,4 @@
-import { configFormatOf } from '@appsys/devtool-cdn'
+import { configFormatOf } from '@appsys/devtool-environment'
 import { type DirectoryFilesType, environmentRules, type McpDetail, type McpRules } from '@appsys/devtool-shared'
 import { z } from 'zod'
 import { McpRefusal } from './approvals.js'

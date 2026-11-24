@@ -35,7 +35,6 @@
     },
     "dns": { "$ref": "#/$defs/dns" },
     "auth": { "$ref": "#/$defs/auth" },
-    "cdn": { "$ref": "#/$defs/cdn" },
     "integrations": {
       "type": "object",
       "description": "Web tools shown under Environment and Configs in the sidebar.",
@@ -222,7 +221,7 @@
           "properties": {
             "environment": { "type": "boolean", "default": false, "description": "Show the link to the Environment page." },
             "configs": { "type": "boolean", "default": false, "description": "Show the link to the Configs page." },
-            "login": { "type": "boolean", "default": false, "description": "Show the CDN sign-in state." },
+            "login": { "type": "boolean", "default": false, "description": "Show the sign-in state of the identity provider." },
             "sort": { "type": "string", "enum": ["config", "name", "manual"], "default": "config", "description": "Order of the sections, and default order of their content." },
             "order": { "type": "array", "items": { "type": "string" }, "description": "With sort: manual, the section slugs shown first." }
           }
@@ -336,10 +335,16 @@
     },
     "dns": {
       "type": "object",
-      "description": "Local DNS server answering your own names, every other name resolved by the system.",
+      "description": "Local DNS server answering your own names, every other name resolved by its upstream server or the system.",
       "additionalProperties": false,
       "properties": {
+        "enabled": { "type": "boolean", "default": true, "description": "Run the DNS; false in config.local.yml turns off a DNS of the shared configuration." },
         "port": { "type": ["integer", "string"], "default": 53 },
+        "upstream": {
+          "type": "string",
+          "description": "DNS server resolving the names without a record, <host>[:<port>] (port 53 by default), such as another devtool's DNS; the system's resolver when missing.",
+          "examples": ["127.0.0.1:5353"]
+        },
         "access": { "$ref": "#/$defs/access" },
         "records": {
           "type": "object",
@@ -355,18 +360,9 @@
         }
       }
     },
-    "cdn": {
-      "type": "object",
-      "description": "The CDN storing the shared files of the environment, reached with the access token of the auth section.",
-      "additionalProperties": false,
-      "required": ["url"],
-      "properties": {
-        "url": { "type": "string", "pattern": "^https?://", "description": "Base URL of the CDN; files live under <url>/devtool/." }
-      }
-    },
     "auth": {
       "type": "object",
-      "description": "The identity provider signing the developers in, for the CDN and the {{ auth://... }} value blocks.",
+      "description": "The identity provider signing the developers in, for the cdn backends and the {{ auth://... }} value blocks.",
       "additionalProperties": false,
       "required": ["issuer", "clientId"],
       "properties": {
@@ -568,12 +564,125 @@
         "startup": { "type": "boolean", "description": "Pull when the server starts." }
       }
     },
+    "encryption": {
+      "description": "Encrypts the files before they reach the backend: a key (32 bytes in base64), a password (stretched with scrypt), or a password asked when needed. key and password read value blocks.",
+      "oneOf": [
+        { "type": "object", "additionalProperties": false, "required": ["key"], "properties": { "key": { "type": "string", "description": "32 bytes in base64, such as the output of openssl rand -base64 32." } } },
+        { "type": "object", "additionalProperties": false, "required": ["password"], "properties": { "password": { "type": "string" } } },
+        { "type": "object", "additionalProperties": false, "required": ["prompt"], "properties": { "prompt": { "const": true, "description": "Ask the password when a file is unlocked: in the terminal for the CLI, in a dialog of the interface for the server." } } }
+      ]
+    },
+    "backendName": { "type": "string", "description": "Name of a backend of environment.backends; the default backend when omitted." },
+    "backendShared": {
+      "type": "object",
+      "properties": {
+        "default": { "type": "boolean", "default": false, "description": "Items naming no backend, and the shared configuration, use this one; the first backend when none is marked." },
+        "encryption": { "$ref": "#/$defs/encryption" }
+      }
+    },
+    "backend": {
+      "description": "Where files of the environment are stored.",
+      "oneOf": [
+        {
+          "type": "object",
+          "allOf": [{ "$ref": "#/$defs/backendShared" }],
+          "unevaluatedProperties": false,
+          "required": ["type", "url"],
+          "properties": {
+            "type": { "const": "cdn", "description": "A CDN serving the devtool files API, reached with the access token of the auth section." },
+            "url": { "type": "string", "pattern": "^https?://", "description": "Base URL of the CDN; files live under <url>/devtool/." }
+          }
+        },
+        {
+          "type": "object",
+          "allOf": [{ "$ref": "#/$defs/backendShared" }],
+          "unevaluatedProperties": false,
+          "required": ["type", "bucket"],
+          "properties": {
+            "type": { "const": "s3", "description": "An S3 bucket, on AWS or any S3 compatible service." },
+            "bucket": { "type": "string" },
+            "prefix": { "type": "string", "description": "Prefix of the keys of the files." },
+            "endpoint": { "type": "string", "description": "Address of an S3 compatible service; AWS when omitted." },
+            "region": { "type": "string", "default": "us-east-1" },
+            "accessKeyId": { "type": "string", "description": "Value blocks are read; the default AWS credentials when omitted." },
+            "secretAccessKey": { "type": "string", "description": "Value blocks are read." },
+            "pathStyle": { "type": "boolean", "default": false, "description": "Address the bucket in the path, as MinIO and others expect." }
+          }
+        },
+        {
+          "type": "object",
+          "allOf": [{ "$ref": "#/$defs/backendShared" }],
+          "unevaluatedProperties": false,
+          "required": ["type", "host", "username"],
+          "properties": {
+            "type": { "const": "sftp", "description": "An SFTP server." },
+            "host": { "type": "string" },
+            "port": { "type": "integer", "minimum": 1, "maximum": 65535, "default": 22 },
+            "username": { "type": "string" },
+            "path": { "type": "string", "default": ".", "description": "Folder of the files on the server." },
+            "privateKey": { "type": "string", "description": "Private key file, ~/ allowed; else the password, else the SSH agent." },
+            "passphrase": { "type": "string", "description": "Passphrase of the private key; value blocks are read." },
+            "password": { "type": "string", "description": "Value blocks are read." }
+          }
+        },
+        {
+          "type": "object",
+          "allOf": [{ "$ref": "#/$defs/backendShared" }],
+          "unevaluatedProperties": false,
+          "required": ["type", "url"],
+          "properties": {
+            "type": { "const": "git", "description": "A git repository, each push a commit, read and written with the git of the machine." },
+            "url": { "type": "string", "description": "Address of the repository, as git clone takes it." },
+            "branch": { "type": "string", "default": "main" },
+            "path": { "type": "string", "description": "Folder of the files in the repository; its root when omitted." }
+          }
+        },
+        {
+          "type": "object",
+          "allOf": [{ "$ref": "#/$defs/backendShared" }],
+          "unevaluatedProperties": false,
+          "required": ["type", "list", "download", "upload", "remove"],
+          "properties": {
+            "type": { "const": "scripts", "description": "Your own commands, for any storage the other backends do not reach." },
+            "cwd": { "type": "string", "default": ".", "description": "Folder the commands run in, relative to the configuration folder." },
+            "list": { "$ref": "#/$defs/plainArgs", "description": "Prints { \"files\": [ { \"path\", \"size\", \"updatedAt\", \"version\" } ] }." },
+            "download": { "$ref": "#/$defs/plainArgs", "description": "Writes %{ADT:PATH} to %{ADT:FILE}; exits 2 when the file does not exist." },
+            "upload": { "$ref": "#/$defs/plainArgs", "description": "Stores %{ADT:FILE} as %{ADT:PATH}." },
+            "remove": { "$ref": "#/$defs/plainArgs", "description": "Deletes %{ADT:PATH}." },
+            "env": { "$ref": "#/$defs/stringMap", "description": "Environment variables of the commands; value blocks are read." }
+          }
+        }
+      ]
+    },
+    "encryptionRule": {
+      "description": "Encrypts the items whose path matches one of the patterns; the first matching rule wins, the encryption of an item overrides the rules.",
+      "type": "object",
+      "required": ["paths"],
+      "properties": {
+        "paths": { "type": "array", "minItems": 1, "items": { "type": "string" }, "description": "Glob patterns of item paths, such as secrets/** or **/*.env.", "examples": [["secrets/**", "**/*.env"]] },
+        "key": { "type": "string" },
+        "password": { "type": "string" },
+        "prompt": { "const": true }
+      },
+      "oneOf": [{ "required": ["key"] }, { "required": ["password"] }, { "required": ["prompt"] }],
+      "additionalProperties": false
+    },
     "environment": {
       "type": "object",
-      "description": "The development environment shared through the CDN.",
+      "description": "The development environment shared through its backends.",
       "additionalProperties": false,
       "properties": {
-        "folder": { "type": "string", "description": "Local mirror of the CDN files. Default: the parent of the configuration folder." },
+        "backends": {
+          "type": "object",
+          "description": "Where the files are stored, by name; items choose theirs with backend.",
+          "additionalProperties": { "$ref": "#/$defs/backend" }
+        },
+        "encryption": {
+          "type": "array",
+          "description": "Encryption of the items by path pattern.",
+          "items": { "$ref": "#/$defs/encryptionRule" }
+        },
+        "folder": { "type": "string", "description": "Local mirror of the files of the backends. Default: the parent of the configuration folder." },
         "mcp": { "$ref": "#/$defs/mcpRules" },
         "files": {
           "type": "array",
@@ -587,7 +696,15 @@
                   "path": { "type": "string" },
                   "display": { "type": "boolean", "default": true, "description": "List it in the Configs tab." },
                   "local": { "type": "boolean", "default": true, "description": "Offer a personal .local.yml override." },
-                  "sync": { "type": "boolean", "default": true, "description": "Synchronize it with the CDN." },
+                  "sync": { "type": "boolean", "default": true, "description": "Synchronize it with its backend." },
+                  "backend": { "$ref": "#/$defs/backendName" },
+                  "encryption": { "$ref": "#/$defs/encryption" },
+                  "ignore": {
+                    "type": "array",
+                    "items": { "type": "string", "minLength": 1 },
+                    "description": "Keys of a YAML, JSON or .env file left out of its synchronization, each copy keeping its own values: dotted paths where * stands for one key or list index and ** for any depth.",
+                    "examples": [["connections.*.lastUsedAt"]]
+                  },
                   "pull": { "$ref": "#/$defs/pull" },
                   "mcp": { "$ref": "#/$defs/mcpRules" }
                 }
@@ -605,6 +722,8 @@
               "path": { "type": "string", "description": "Archive of the database in the environment folder." },
               "engine": { "type": "string", "enum": ["postgres", "mariadb", "mongodb"] },
               "container": { "type": "string", "description": "Docker container running the database." },
+              "backend": { "$ref": "#/$defs/backendName" },
+              "encryption": { "$ref": "#/$defs/encryption" },
               "pull": { "$ref": "#/$defs/pull" },
               "mcp": { "$ref": "#/$defs/mcpRules" }
             }
@@ -619,6 +738,8 @@
             "properties": {
               "path": { "type": "string", "description": "Snapshot of the bucket in the environment folder." },
               "bucket": { "type": "string" },
+              "backend": { "$ref": "#/$defs/backendName" },
+              "encryption": { "$ref": "#/$defs/encryption" },
               "pull": { "$ref": "#/$defs/pull" },
               "mcp": { "$ref": "#/$defs/mcpRules" }
             }
@@ -633,6 +754,8 @@
             "properties": {
               "path": { "type": "string", "description": "Dump of the Redis database in the environment folder." },
               "url": { "type": "string", "pattern": "^rediss?://", "examples": ["redis://localhost:6379/0"] },
+              "backend": { "$ref": "#/$defs/backendName" },
+              "encryption": { "$ref": "#/$defs/encryption" },
               "pull": { "$ref": "#/$defs/pull" },
               "mcp": { "$ref": "#/$defs/mcpRules" }
             }

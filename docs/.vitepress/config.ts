@@ -3,6 +3,7 @@ import { createRequire } from 'node:module'
 import path from 'node:path'
 import { defineConfig } from 'vitepress'
 import { groupIconMdPlugin, groupIconVitePlugin } from 'vitepress-plugin-group-icons'
+import { zipExamples } from './examples.js'
 
 const require = createRequire(import.meta.url)
 const schemaFile = require.resolve('@appsys/devtool-config/schema/config.schema.json')
@@ -15,6 +16,7 @@ export default defineConfig({
   lang: 'en-US',
   base: '/devtool/',
   cleanUrls: true,
+  srcExclude: ['examples/**'],
   lastUpdated: true,
   head: [
     ['link', { rel: 'icon', type: 'image/svg+xml', href: '/devtool/logo.svg' }],
@@ -66,6 +68,8 @@ export default defineConfig({
           { text: 'Integrations', link: '/configuration/integrations' },
           { text: 'Files', link: '/configuration/files' },
           { text: 'Environment', link: '/configuration/environment' },
+          { text: 'Backends', link: '/configuration/backends' },
+          { text: 'Encryption', link: '/configuration/encryption' },
           { text: 'Sign-in', link: '/configuration/auth' },
           { text: 'CDN', link: '/configuration/cdn' },
           { text: 'Agent permissions (MCP)', link: '/configuration/mcp' },
@@ -100,12 +104,13 @@ export default defineConfig({
     }
   },
   /**
-   * Publishes the configuration schema next to the built site.
+   * Publishes the configuration schema and a zip archive of each example next to the built site.
    * @param site The resolved site configuration.
    */
   async buildEnd (site) {
     const target = path.join(site.outDir, 'schema')
     await mkdir(target, { recursive: true })
     await copyFile(schemaFile, path.join(target, 'config.json'))
+    await zipExamples(path.join(site.srcDir, 'examples'), path.join(site.outDir, 'examples'))
   }
 })

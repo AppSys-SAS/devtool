@@ -26,7 +26,7 @@ export const DEVTOOL_FIELDS: FieldDefinition[] = [
   { path: ['adt', 'notifications'], label: 'Notifications', type: 'checkbox', defaultValue: true },
   { path: ['adt', 'sidebar', 'environment'], label: 'Environment link', type: 'checkbox' },
   { path: ['adt', 'sidebar', 'configs'], label: 'Configs link', type: 'checkbox' },
-  { path: ['adt', 'sidebar', 'login'], label: 'CDN sign-in state', type: 'checkbox' }
+  { path: ['adt', 'sidebar', 'login'], label: 'Sign-in state', type: 'checkbox' }
 ]
 
 export const SECTION_FIELDS: FieldDefinition[] = [
@@ -44,7 +44,8 @@ export const CERTIFICATE_FIELDS: FieldDefinition[] = [
 export const ENVIRONMENT_FILE_FIELDS: FieldDefinition[] = [
   { path: ['path'], label: 'Path' },
   { path: ['local'], label: 'Personal override', type: 'checkbox', defaultValue: true },
-  { path: ['sync'], label: 'Synchronized', type: 'checkbox', defaultValue: true }
+  { path: ['sync'], label: 'Synchronized', type: 'checkbox', defaultValue: true },
+  { path: ['ignore'], label: 'Ignored keys', type: 'list', placeholder: 'connections.*.lastUsedAt' }
 ]
 
 export const DATABASE_FIELDS: FieldDefinition[] = [
@@ -73,9 +74,45 @@ export const AUTH_FIELDS: FieldDefinition[] = [
   { path: ['auth', 'scopes'], label: 'Scopes', type: 'list', placeholder: 'openid, offline_access, groups, profile' }
 ]
 
-export const CDN_FIELDS: FieldDefinition[] = [
-  { path: ['cdn', 'url'], label: 'CDN URL', placeholder: 'https://cdn.example.dev' }
+export const BACKEND_SHARED_FIELDS: FieldDefinition[] = [
+  { path: ['type'], label: 'Type', type: 'select', options: ['cdn', 's3', 'sftp', 'git', 'scripts'] },
+  { path: ['default'], label: 'Default backend', type: 'checkbox' },
+  { path: ['encryption', 'password'], label: 'Encryption password', placeholder: '{{ op://dev/env/password }}', hint: 'Optional: encrypts every file it stores.' }
 ]
+
+export const BACKEND_FIELDS: Record<string, FieldDefinition[]> = {
+  cdn: [
+    { path: ['url'], label: 'CDN URL', placeholder: 'https://files.example.dev' }
+  ],
+  s3: [
+    { path: ['bucket'], label: 'Bucket', placeholder: 'acme-dev-environment' },
+    { path: ['prefix'], label: 'Prefix', placeholder: 'environment/' },
+    { path: ['endpoint'], label: 'Endpoint', placeholder: 'AWS when empty' },
+    { path: ['region'], label: 'Region', defaultValue: 'us-east-1' },
+    { path: ['accessKeyId'], label: 'Access key', placeholder: '{{ op://dev/s3/key }}' },
+    { path: ['secretAccessKey'], label: 'Secret key', placeholder: '{{ op://dev/s3/secret }}' },
+    { path: ['pathStyle'], label: 'Path style', type: 'checkbox' }
+  ],
+  sftp: [
+    { path: ['host'], label: 'Host', placeholder: 'nas.example.dev' },
+    { path: ['port'], label: 'Port', type: 'number', defaultValue: 22 },
+    { path: ['username'], label: 'User' },
+    { path: ['path'], label: 'Folder', placeholder: '/srv/environment' },
+    { path: ['privateKey'], label: 'Private key file', placeholder: 'the SSH agent when empty' }
+  ],
+  git: [
+    { path: ['url'], label: 'Repository', placeholder: 'git@example.dev:acme/environment.git' },
+    { path: ['branch'], label: 'Branch', defaultValue: 'main' },
+    { path: ['path'], label: 'Folder in the repository' }
+  ],
+  scripts: [
+    { path: ['cwd'], label: 'Folder of the scripts', placeholder: 'relative to the configuration folder' },
+    { path: ['list'], label: 'List command', type: 'list', placeholder: './folder.sh, list' },
+    { path: ['download'], label: 'Download command', type: 'list', placeholder: './folder.sh, download, %{ADT:PATH}, %{ADT:FILE}' },
+    { path: ['upload'], label: 'Upload command', type: 'list', placeholder: './folder.sh, upload, %{ADT:PATH}, %{ADT:FILE}' },
+    { path: ['remove'], label: 'Remove command', type: 'list', placeholder: './folder.sh, remove, %{ADT:PATH}' }
+  ]
+}
 
 export const AGENT_FIELDS: FieldDefinition[] = [
   { path: ['adt', 'mcp', 'enabled'], label: 'Enable the MCP server', type: 'checkbox' },

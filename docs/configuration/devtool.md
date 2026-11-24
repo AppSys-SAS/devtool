@@ -131,7 +131,7 @@ adt:
 
 - `environment` and `configs` add links to the Environment and Configs pages. The pages stay reachable
   by their address either way.
-- `login` shows whether you are signed in to the [CDN](/configuration/cdn).
+- `login` shows whether you are signed in with the [identity provider](/configuration/auth).
 - `sort` orders the sections: `config` (the order of your files), `name`, or `manual`. With `manual`,
   the slugs of `order` come first, then the others in the order of your files.
 - `sort` is also the default order of the content of every [section](/configuration/sections#ordering-the-content).
@@ -167,7 +167,7 @@ drag the items, then save.
 |---|---|---|---|
 | `environment` | boolean | `false` | Link to the Environment page. |
 | `configs` | boolean | `false` | Link to the Configs page. |
-| `login` | boolean | `false` | CDN sign-in state. |
+| `login` | boolean | `false` | Sign-in state. |
 | `sort` | `config`, `name` or `manual` | `config` | Order of the sections, and default order of their content. |
 | `order` | list of section slugs | `[]` | With `manual`, the sections shown first. |
 

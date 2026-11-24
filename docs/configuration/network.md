@@ -60,7 +60,7 @@ Passthrough rules are usually personal: keep them in `config.local.yml`.
 ## The local DNS
 
 The local DNS answers the names you declare with an IPv4 address, and resolves every other name through
-the system as usual. It saves every developer from editing `/etc/hosts`, and it is the only way to give
+the system as usual, or through the `upstream` server you give it. It saves every developer from editing `/etc/hosts`, and it is the only way to give
 your names to a phone.
 
 ```yaml [config.yml]
@@ -84,6 +84,42 @@ resolver file for your domain on macOS (`/etc/resolver/example.dev` holding `nam
 `dns.port` must be a port number. Otherwise the devtool warns `dns.port: must be a port number` and
 does not start the DNS at all. The DNS is also off when no record is valid.
 :::
+
+### Turn it off or move it
+
+The shared configuration declares the DNS for the whole team. On your machine, `config.local.yml` can turn
+it off, or move it to another port:
+
+```yaml [config.local.yml]
+dns:
+  enabled: false
+```
+
+### Chain several devtools
+
+Only one program can listen on port 53. When two devtools run on the same machine, each with its own
+names, give the second one another port, and make the first one send it every name it does not know:
+
+```yaml [config.yml]
+# The first devtool, the DNS of the system
+dns:
+  upstream: 127.0.0.1:5353
+  records:
+    acme: { names: [ acme.dev, "*.acme.dev" ], address: auto }
+```
+
+```yaml [config.yml]
+# The second devtool
+dns:
+  port: 5353
+  records:
+    globex: { names: [ globex.dev, "*.globex.dev" ], address: auto }
+```
+
+The first DNS answers `*.acme.dev`, relays everything else to the second one, which answers
+`*.globex.dev` and resolves the rest through the system. `upstream` is `<host>[:<port>]`, port 53 by
+default (`[<IPv6>]:<port>` for an IPv6 address), and may be any DNS server, such as the one of your
+company.
 
 ## Reach your services from a phone
 
@@ -132,8 +168,10 @@ authority, such as one renewed with ACME, works out of the box.
 
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
+| `enabled` | boolean | `true` | Run the DNS. |
 | `port` | number | `53` | Port of the DNS, UDP and TCP. |
 | `access` | `local` or `network` | `local` | Who may query it. |
+| `upstream` | `<host>[:<port>]` | the system | Server resolving the names without a record. |
 | `records.<slug>.names` | list | required | Host names or `*.<domain>`. |
 | `records.<slug>.address` | IPv4 or `auto` | required | Address answered. |
 
@@ -145,4 +183,8 @@ authority, such as one renewed with ACME, works out of the box.
 - `dns.records[<slug>].names: must be host names or *.<domain>`.
 - `dns.records[<slug>].address: must be an IPv4 address or auto`.
 - `dns.port: must be a port number`: the DNS is off.
+- `dns.enabled: must be true or false`.
+- `dns.upstream: must be <host>[:<port>], such as 127.0.0.1:5353`: the system resolves the other names.
+- `dns.upstream: is this DNS itself: give the address of another DNS server`: the system resolves the
+  other names.
 - `access: must be local or network, local is used`.

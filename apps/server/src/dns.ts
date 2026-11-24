@@ -4,7 +4,7 @@ import fs from 'node:fs/promises'
 import net from 'node:net'
 import os from 'node:os'
 import packet, { type Answer, type DecodedPacket, type Question } from 'dns-packet'
-import { logger, type DnsDefinition } from '@appsys/devtool-shared'
+import { logger, type DnsDefinition, type DnsServerAddress } from '@appsys/devtool-shared'
 import { allows, matchesHost } from './access.js'
 
 /** The DNS listens on every interface, who may query it being decided by its configuration. */
@@ -34,37 +34,33 @@ function networkAddress (): string | null {
  * Gives the DNS server the system uses, the first of `/etc/resolv.conf` that is not this machine.
  * @returns Its address, null when there is none.
  */
-async function upstreamServer (): Promise<string | null> {
+async function systemServer (): Promise<DnsServerAddress | null> {
   const resolvConf = await fs.readFile('/etc/resolv.conf', 'utf-8').catch(() => '')
   for (const [, server] of resolvConf.matchAll(/^nameserver\s+(\S+)/gm)) {
     if (!server.startsWith('127.') && server !== '::1') {
-      return server
+      return { host: server, port: 53 }
     }
   }
   return null
 }
 
 /**
- * Sends a query as is to the DNS server of the system.
+ * Sends a query as is to a DNS server.
  * @param query The query.
+ * @param server The server.
  * @returns The answer of that server.
  */
-async function relay (query: Buffer): Promise<Buffer> {
-  const server = await upstreamServer()
-  if (!server) {
-    throw new Error('no DNS server configured on the system')
-  }
-
-  const socket = dgram.createSocket(net.isIPv6(server) ? 'udp6' : 'udp4')
+async function relay (query: Buffer, server: DnsServerAddress): Promise<Buffer> {
+  const socket = dgram.createSocket(net.isIPv6(server.host) ? 'udp6' : 'udp4')
   try {
     return await new Promise<Buffer>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error(`${server} did not answer`)), UPSTREAM_TIMEOUT_MS)
+      const timer = setTimeout(() => reject(new Error(`${server.host}:${server.port} did not answer`)), UPSTREAM_TIMEOUT_MS)
       socket.once('message', message => {
         clearTimeout(timer)
         resolve(message)
       })
       socket.once('error', reject)
-      socket.send(query, 53, server)
+      socket.send(query, server.port, server.host)
     })
   } finally {
     socket.close()
@@ -91,7 +87,7 @@ function response (query: DecodedPacket, answers: Answer[], code = 0, authoritat
 
 /**
  * A local DNS answering its own names with an address of this machine and resolving every other name
- * through the system, so the devices using it reach the development hosts.
+ * through its upstream server or the system, so the devices using it reach the development hosts.
  */
 export class DevtoolDns {
   private _config: DnsDefinition | null = null
@@ -147,11 +143,18 @@ export class DevtoolDns {
     }
 
     try {
+      if (this._config.upstream) {
+        return await relay(data, this._config.upstream)
+      }
       if (question.type === 'A' || question.type === 'AAAA') {
         const results = await lookup(name, { family: question.type === 'A' ? 4 : 6, all: true })
         return response(query, results.map(({ address }) => ({ name: question.name, type: question.type, ttl: RECORD_TTL_SECONDS, data: address }) as Answer))
       }
-      return await relay(data)
+      const server = await systemServer()
+      if (!server) {
+        throw new Error('no DNS server configured on the system')
+      }
+      return await relay(data, server)
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code
       return response(query, [], code === 'ENOTFOUND' ? NAME_ERROR : code === 'ENODATA' ? 0 : SERVER_FAILURE)

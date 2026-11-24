@@ -1,16 +1,19 @@
 ---
-description: Share configuration files, database copies, buckets and Redis data with your team through the CDN.
+description: Share configuration files, database copies, buckets and Redis data with your team through the backends of the environment.
 ---
 
 # Environment
 
 The environment is everything a project needs locally besides its code: configuration files, a copy of
 its database, the files of its bucket, its Redis data. The devtool keeps it in one folder on your machine
-and mirrors that folder on a [CDN](/configuration/cdn), so a new developer gets a working setup with one
-command, and anyone can share a fresh database copy with a push.
+and mirrors that folder on one or more [backends](/configuration/backends): a CDN, a bucket, an SFTP
+server, a git repository or your own scripts. A new developer gets a working setup with one command,
+and anyone can share a fresh database copy with a push.
 
 ```yaml [config.yml]
 environment:
+  backends:
+    team: { type: s3, bucket: acme-dev-environment }
   files: [ devtool/config.yml, api/config.yml ]
   databases:
     - { path: api/db.gz, engine: postgres, container: postgres }
@@ -25,7 +28,7 @@ devtool env pull --yes
 ## The environment folder
 
 `environment.folder` is the local mirror, by default the parent of the configuration folder
-(`~/.config/appsys`). A path `<path>` on the CDN is `<environment folder>/<path>` on your machine. A
+(`~/.config/appsys`). A path `<path>` on a backend is `<environment folder>/<path>` on your machine. A
 typical folder looks like this:
 
 | Path | Content |
@@ -39,6 +42,29 @@ typical folder looks like this:
 
 Only what `environment` declares is synchronized, the shared configuration itself included: list
 `devtool/config.yml` in `files` to share it.
+
+## Where the files go
+
+Each item is stored by a backend: the one its `backend` names, else the default backend. Each item can
+also be encrypted on your machine before it leaves it, with its own `encryption` or with the rules of
+`environment.encryption`:
+
+```yaml [config.yml]
+environment:
+  backends:
+    team: { type: cdn, url: "https://files.example.dev", default: true }
+    archive: { type: s3, bucket: acme-dev-environment }
+  encryption:
+    - { paths: [ "**/.env" ], prompt: true }
+  files:
+    - devtool/config.yml
+    - web/.env
+  databases:
+    - { path: api/db.gz, engine: postgres, container: postgres, backend: archive }
+```
+
+[Backends](/configuration/backends) describes each kind of storage and how to choose one, and
+[Encryption](/configuration/encryption) the secrets and the rules.
 
 ## Files
 
@@ -55,12 +81,30 @@ environment:
 
 - `display: false` keeps it out of the Configs page.
 - `local: false` lists it without its personal `.local.yml` override.
-- `sync: false` lists it but never synchronizes it with the CDN.
+- `sync: false` lists it but never synchronizes it with its backend.
 
 ::: tip Personal overrides
 The Configs page lets you write a `.local.yml` next to a YAML file of the environment (`api/config.local.yml`
 for `api/config.yml`). It stays on your machine, so you can change a value without touching the shared copy.
 :::
+
+### Ignored keys
+
+Some tools write values of their own into a shared file: the last time a connection was used, a window
+size. `ignore` leaves these keys out of the synchronization of a YAML, JSON or `.env` file:
+
+```yaml [config.yml]
+environment:
+  files:
+    - { path: db-studio/connections.json, ignore: [ connections.*.lastUsedAt ] }
+```
+
+- A key is a dotted path. `*` stands for one key or one list index, `**` for any depth
+  (`**.updatedAt`).
+- Two copies that differ only by ignored keys are up to date: neither the Environment page nor the
+  agents show a change.
+- A pull keeps your values of the ignored keys, and a push keeps the ones of the backend. A new entry of a
+  list arrives with its own values.
 
 ## Databases
 
@@ -123,7 +167,7 @@ environment:
 To keep your work safe, a scheduled pull skips an item in two cases, and reports it on the Environment
 page:
 
-- its CDN copy did not change since the last sync (nothing to do);
+- its copy on its backend did not change since the last sync (nothing to do);
 - its local copy changed since the last sync, or was never synchronized.
 
 ::: warning
@@ -140,26 +184,36 @@ devtool env pull api/db.gz:public.user,public.session
 devtool env push -i                       # choose items and tables
 ```
 
-- `devtool env pull [targets...]` replaces the local copies by the CDN ones, then restores the databases,
-  buckets and Redis data they hold. It asks before replacing local data, unless you pass `--yes`.
+- `devtool env pull [targets...]` replaces the local copies by those of their backends, then restores
+  the databases, buckets and Redis data they hold. It asks before replacing local data, unless you pass
+  `--yes`.
 - `devtool env push [targets...]` dumps the local databases, buckets and Redis data, then sends the local
-  copies. You need write rights on the CDN.
+  copies to their backends. You need write rights on them.
 - A target is a path, tables of a database (`api/db.gz:public.user,public.session`) or key groups of a
   Redis database (`api/redis.gz:session:*`). A table is emptied and reloaded on pull; its rows are
   replaced in the stored archive on push. Without target, the whole environment is synchronized.
 - `-i` chooses items, tables and key groups interactively.
 
-The Environment page shows the same actions, with the state of each item. `devtool server` never
+The Environment page shows the same actions, with the state of each item, its backend and whether it is
+encrypted. `devtool server` never
 downloads anything on its own: pulls are manual, or scheduled with `pull`. When the devtool configuration
 itself is missing, the Environment page offers to pull it.
 
+When a file is [encrypted](/configuration/encryption) with `prompt: true`, `devtool env` asks its password
+in the terminal, and the server in a dialog of the interface.
+
+To read or change a single file of a backend, outside the items, use
+[`devtool env file`](/reference/cli#devtool-env-file).
+
 ## First start of a developer
 
-1. Write `config.local.yml` in `~/.config/appsys/devtool` with your `workspace`, the
-   [`auth`](/configuration/auth) section of your identity provider and the [`cdn`](/configuration/cdn)
-   section.
-2. `devtool login`, to sign in with the identity provider
-3. `devtool env pull --yes`
+1. Write `config.local.yml` in `~/.config/appsys/devtool` with your `workspace` and the default
+   [backend](/configuration/backends) of the team in `environment.backends`, plus the
+   [`auth`](/configuration/auth) section of your identity provider when that backend is a
+   [CDN](/configuration/cdn).
+2. `devtool login`, to sign in with the identity provider, when there is one
+3. `devtool env pull --yes`: it downloads the shared `devtool/config.yml` from the default backend
+   first, then everything it declares
 4. `devtool server`
 
 ## Reference
@@ -168,7 +222,9 @@ itself is missing, the Environment page offers to pull it.
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `folder` | string | parent of the configuration folder | Local mirror of the CDN files, relative to the configuration folder. |
+| `backends` | map | none | Where the files are stored, by name. See [Backends](/configuration/backends). |
+| `encryption` | list | none | Encryption rules by path pattern. See [Encryption](/configuration/encryption). |
+| `folder` | string | parent of the configuration folder | Local mirror of the files of the backends, relative to the configuration folder. |
 | `files` | list | none | Files synchronized and shown in Configs. |
 | `databases` | list | none | Databases saved as archives. |
 | `buckets` | list | none | S3 buckets saved as snapshots. |
@@ -185,7 +241,10 @@ A path, or:
 | `path` | string | required | Path in the environment folder. |
 | `display` | boolean | `true` | List it in the Configs page. |
 | `local` | boolean | `true` | Offer a personal `.local.yml` override. |
-| `sync` | boolean | `true` | Synchronize it with the CDN. |
+| `sync` | boolean | `true` | Synchronize it with its backend. |
+| `backend` | string | the default backend | Name of the backend storing it. |
+| `encryption` | map | `environment.encryption` | `{ key }`, `{ password }` or `{ prompt: true }`. |
+| `ignore` | list | none | [Keys](#ignored-keys) left out of the synchronization, each copy keeping its values. |
 | `pull` | map | none | Scheduled pull. |
 | `mcp` | rules | `environment.mcp` | Agent permissions; `keys` allowed. |
 
@@ -196,6 +255,8 @@ A path, or:
 | `path` | string | required | Archive in the environment folder. |
 | `engine` | `postgres`, `mariadb`, `mongodb` | required | Database engine. |
 | `container` | string | required | Docker container running it. |
+| `backend` | string | the default backend | Name of the backend storing it. |
+| `encryption` | map | `environment.encryption` | `{ key }`, `{ password }` or `{ prompt: true }`. |
 | `pull` | map | none | Scheduled pull. |
 | `mcp` | rules | `environment.mcp` | Agent permissions. |
 
@@ -205,6 +266,8 @@ A path, or:
 |---|---|---|---|
 | `path` | string | required | Snapshot in the environment folder. |
 | `bucket` | string | required | Name of the bucket. |
+| `backend` | string | the default backend | Name of the backend storing it. |
+| `encryption` | map | `environment.encryption` | `{ key }`, `{ password }` or `{ prompt: true }`. |
 | `pull` | map | none | Scheduled pull. |
 | `mcp` | rules | `environment.mcp` | Agent permissions. |
 
@@ -214,6 +277,8 @@ A path, or:
 |---|---|---|---|
 | `path` | string | required | Dump in the environment folder. |
 | `url` | string | required | `redis://host:port/<db>`. |
+| `backend` | string | the default backend | Name of the backend storing it. |
+| `encryption` | map | `environment.encryption` | `{ key }`, `{ password }` or `{ prompt: true }`. |
 | `pull` | map | none | Scheduled pull. |
 | `mcp` | rules | `environment.mcp` | Agent permissions. |
 
@@ -243,3 +308,9 @@ Environment page shows the error and `devtool env` stops.
 - `invalid pull of <path> in the environment: <value>`, `<path>: invalid pull cron "<cron>"`
 - "the environment declares buckets without `s3` server": `s3` is missing, or lacks `endpoint`,
   `accessKeyId` or `secretAccessKey`.
+- `invalid backend in the environment: ...`, `<path>: backend "<name>" is not declared in
+  environment.backends`: see [Backends](/configuration/backends#errors).
+- `invalid encryption rule in the environment: ...`, `invalid encryption of <path> in the environment:
+  ...`: see [Encryption](/configuration/encryption#warnings-and-errors).
+- `invalid ignore of <path> in the environment: must be a list of key paths, such as
+  connections.*.lastUsedAt`, `... needs a YAML, JSON or .env file`: see [Ignored keys](#ignored-keys).
