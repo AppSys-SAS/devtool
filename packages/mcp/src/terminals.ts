@@ -634,7 +634,7 @@ export function terminalTools(host: McpHost): McpTool[] {
             target.command.startWithSection &&
             !host.streams.some((stream) => stream.running && stream.projectSlug === section && stream.directorySlug === target.project.slug && (target.main ? stream.primary : !stream.primary && stream.command === target.command.slug)),
         );
-        return runGroup(call, `Start section ${section}`, "run", targets.map((target) => ({ name: target.id, rule: target.command.mcp.run })), async (index) => {
+        return runGroup(call, `Start section ${section}`, "run", `run:section:${section}`, targets.map((target) => ({ name: target.id, rule: target.command.mcp.run })), async (index) => {
           const target = targets[index];
           const inputs = defaultCommandInputs(target.command.args);
           if (missingCommandInputs(target.command.args, inputs).length) {
@@ -651,7 +651,7 @@ export function terminalTools(host: McpHost): McpTool[] {
       input: { section: z.string().describe("Slug of the section") },
       run: async ({ section }, call) => {
         const streams = host.streams.filter((stream) => stream.projectSlug === section && stream.running);
-        return runGroup(call, `Stop section ${section}`, "control", streams.map((stream) => ({ name: stream.name, rule: terminalRule(host.config, stream, "control", call.client) })), async (index) => {
+        return runGroup(call, `Stop section ${section}`, "control", `control:section:${section}`, streams.map((stream) => ({ name: stream.name, rule: terminalRule(host.config, stream, "control", call.client) })), async (index) => {
           await streams[index].update({ action: "stop" });
           return "stopped";
         });
@@ -699,13 +699,21 @@ export function terminalTools(host: McpHost): McpTool[] {
  * Acts on several things at once: those the configuration refuses are skipped, those it asks for are
  * asked together in one request, then every other one is acted on.
  * @param call The call.
- * @param title Describes the call to a person.
+ * @param title Describes the call to a person, and what an answer for the session or always grants.
  * @param action The action.
+ * @param grantKey Names what an answer for the session or always grants.
  * @param items What is acted on, by name, with its rule.
  * @param act Acts on one of them, by its index.
  * @returns What happened to each.
  */
-async function runGroup(call: McpCall, title: string, action: McpAction, items: { name: string; rule: McpRule }[], act: (index: number) => Promise<string>): Promise<Record<string, string>> {
+async function runGroup(
+  call: McpCall,
+  title: string,
+  action: McpAction,
+  grantKey: string,
+  items: { name: string; rule: McpRule }[],
+  act: (index: number) => Promise<string>,
+): Promise<Record<string, string>> {
   call.describe(title);
   const asked = items.filter((item) => item.rule.level === "ask");
   if (asked.length) {
@@ -714,6 +722,8 @@ async function runGroup(call: McpCall, title: string, action: McpAction, items: 
       rule: { level: "ask", from: asked.map((item) => item.rule.from).join(", ") },
       title,
       details: asked.map((item) => ({ label: action, value: item.name })),
+      grantKey,
+      grantLabel: title,
     });
   }
   const results: Record<string, string> = {};
