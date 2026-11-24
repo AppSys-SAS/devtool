@@ -66,9 +66,7 @@ function defaultAdt (): AdtDefinition {
       server: 6730,
       loadBalancer: 6731
     },
-    secure: false,
     notifications: true,
-    hosts: [],
     access: 'local',
     sidebar: { environment: false, configs: false, login: false, sort: 'config', order: [], sections: [] },
     mcp: defaultMcpSettings(true),
@@ -124,7 +122,7 @@ interface IntegrationOwner {
 /** An `mcp` setting declared by something holding others, applied over the rules of what it holds. */
 interface McpLayer {
   value: unknown
-  from: string
+  fromPath: string[]
 }
 const SIGNAL_REGEXP = /^SIG[A-Z0-9]+$/
 
@@ -365,14 +363,6 @@ export class DevtoolConfigure {
       this.adt.shell = adtShell
     }
 
-    if (adt.secure === true || adt.secure === false) {
-      if (adt.secure && !this.adt.host) {
-        this.addWarning('adt.secure', 'needs adt.host to make connections secure')
-      } else {
-        this.adt.secure = adt.secure
-      }
-    }
-
     if (isObject(adt.ports)) {
       if (Number.isInteger(adt.ports.server) && (adt.ports.server as number) > 0) {
         this.adt.ports.server = adt.ports.server as number
@@ -387,11 +377,6 @@ export class DevtoolConfigure {
     }
 
     this.adt.access = this.readAccess('adt.access', adt.access)
-
-    const hosts = toStringArray(adt.hosts)
-    if (hosts) {
-      this.adt.hosts = hosts
-    }
 
     const sidebar = toRecord(adt.sidebar)
     for (const key of SIDEBAR_PARTS) {
@@ -444,13 +429,13 @@ export class DevtoolConfigure {
     } else if (mcp.ownTerminals !== undefined) {
       this.addWarning('adt.mcp.ownTerminals', 'must be allow or ask')
     }
-    settings.default = this.readMcpRules('adt.mcp.default', mcp.default, settings.default, 'adt.mcp.default')
+    settings.default = this.readMcpRules('adt.mcp.default', mcp.default, settings.default, ['adt', 'mcp', 'default'])
     for (const category of MCP_CATEGORIES) {
-      settings[category] = this.readMcpRules(`adt.mcp.${category}`, mcp[category], settings.default, `adt.mcp.${category}`)
+      settings[category] = this.readMcpRules(`adt.mcp.${category}`, mcp[category], settings.default, ['adt', 'mcp', category])
     }
     settings.clients = this.readMcpPatterns('adt.mcp.clients', mcp.clients, settings.clients)
     settings.shell = this.readMcpPatterns('adt.mcp.shell', mcp.shell, settings.shell)
-    settings.environment = this.readMcpRules('environment.mcp', toRecord(this.initialConfig.environment).mcp, settings.default, 'environment')
+    settings.environment = this.readMcpRules('environment.mcp', toRecord(this.initialConfig.environment).mcp, settings.default, ['environment'])
     settings.environmentItems = this.readEnvironmentItems(settings.environment)
     return settings
   }
@@ -468,8 +453,8 @@ export class DevtoolConfigure {
         if (typeof item.path !== 'string') {
           return []
         }
-        const from = `environment.${list}.${index}`
-        return [{ path: item.path, kind, rules: this.readMcpRules(`${from}.mcp`, item.mcp, inherited, from), target: this.settingTarget(['environment', list, String(index), 'mcp']) }]
+        const fromPath = ['environment', list, String(index)]
+        return [{ path: item.path, kind, rules: this.readMcpRules(`${fromPath.join('.')}.mcp`, item.mcp, inherited, fromPath), target: this.settingTarget([...fromPath, 'mcp']) }]
       })
     )
   }
@@ -479,11 +464,11 @@ export class DevtoolConfigure {
    * @param slug Names the setting in warnings.
    * @param value The raw setting.
    * @param inherited The rules of what holds it.
-   * @param from Names the setting in the rules it declares.
+   * @param fromPath The keys leading to what holds the setting in the configuration.
    * @returns The rules.
    */
-  private readMcpRules (slug: string, value: unknown, inherited: McpRules, from: string): McpRules {
-    const { rules, problems } = readMcpRules(value, inherited, from)
+  private readMcpRules (slug: string, value: unknown, inherited: McpRules, fromPath: string[]): McpRules {
+    const { rules, problems } = readMcpRules(value, inherited, fromPath)
     for (const problem of problems) {
       this.addWarning(slug, problem)
     }
@@ -498,7 +483,7 @@ export class DevtoolConfigure {
    * @returns The rules.
    */
   private layeredRules (category: McpRules, layers: McpLayer[]): McpRules {
-    return layers.reduce((rules, layer) => readMcpRules(layer.value, rules, layer.from).rules, category)
+    return layers.reduce((rules, layer) => readMcpRules(layer.value, rules, layer.fromPath).rules, category)
   }
 
   /**
@@ -566,7 +551,7 @@ export class DevtoolConfigure {
         key: options.key as string,
         warn: Number.isInteger(warn) && (warn as number) > 0 ? (warn as number) : 30,
         acme: options.acme === undefined ? null : this.readAcme(`loadBalancers[${key}].acme`, domain.slice(1), options),
-        mcp: this.readMcpRules(`loadBalancers[${key}].mcp`, options.mcp, this.adt.mcp.certificates, `loadBalancers.${key}`),
+        mcp: this.readMcpRules(`loadBalancers[${key}].mcp`, options.mcp, this.adt.mcp.certificates, ['loadBalancers', key]),
         mcpTarget: this.settingTarget(['loadBalancers', key, 'mcp'])
       }
 
@@ -673,7 +658,7 @@ export class DevtoolConfigure {
     }
 
     const projectPath = this.pathFrom(project.path as string)
-    const layers: McpLayer[] = [{ value: project.mcp, from: `sections.${projectSlug}` }]
+    const layers: McpLayer[] = [{ value: project.mcp, fromPath: ['sections', projectSlug] }]
     const projectDefinition: ProjectDefinition = {
       slug: projectSlug,
       name: projectName,
@@ -683,7 +668,7 @@ export class DevtoolConfigure {
       notifications: project.notifications === false ? false : this.adt.notifications,
       missing: false,
       restore: this.readRestore(`${slug}.restore`, project.restore),
-      mcp: this.readMcpRules(`${slug}.mcp`, project.mcp, this.adt.mcp.default, `sections.${projectSlug}`),
+      mcp: this.readMcpRules(`${slug}.mcp`, project.mcp, this.adt.mcp.default, ['sections', projectSlug]),
       mcpTarget: this.settingTarget(['sections', projectSlug, 'mcp']),
       restoreRule: this.layeredRules(this.adt.mcp.commands, layers).run,
       integrations: [],
@@ -776,8 +761,8 @@ export class DevtoolConfigure {
   }
 
   /**
-   * Reads a directory of a project: its commands, services, scripts, files and integrations, its main
-   * command being the command its default action names, else its own `args`.
+   * Reads a directory of a project: its commands, which inherit its environment, services, scripts, files
+   * and integrations, its main command being the command its default action names, else its own `args`.
    * @param slug Names the directory in warnings.
    * @param projectDefinition The project receiving the directory.
    * @param directorySlug The slug of the directory.
@@ -791,9 +776,12 @@ export class DevtoolConfigure {
     directory: Record<string, unknown>,
     sectionLayers: McpLayer[]
   ): Promise<void> {
-    const layers: McpLayer[] = [...sectionLayers, { value: directory.mcp, from: `projects.${directorySlug}` }]
+    const layers: McpLayer[] = [...sectionLayers, { value: directory.mcp, fromPath: ['projects', directorySlug] }]
     if (!this.checkSlug(slug, directorySlug)) {
       return
+    }
+    if (typeof directory.section === 'string' && directory.section !== projectDefinition.slug) {
+      this.addWarning(`${slug}.section`, `names no section, the project is under ${projectDefinition.slug}`)
     }
 
     const directoryName = this.readOptionalString(`${slug}.name`, directory.name, directorySlug)
@@ -827,7 +815,7 @@ export class DevtoolConfigure {
       killSignal: null,
       missing: false,
       restore: this.readRestore(`${slug}.restore`, directory.restore),
-      mcp: this.readMcpRules(`${slug}.mcp`, directory.mcp, projectDefinition.mcp, `projects.${directorySlug}`),
+      mcp: this.readMcpRules(`${slug}.mcp`, directory.mcp, projectDefinition.mcp, ['projects', directorySlug]),
       mcpTarget: this.settingTarget(['projects', directorySlug, 'mcp']),
       restoreRule: this.layeredRules(this.adt.mcp.commands, layers).run,
       meta: directory.meta
@@ -934,7 +922,7 @@ export class DevtoolConfigure {
       }
 
       const extraName = this.readOptionalString(`${slug}.extras[${extraSlug}].name`, extra.name, extraSlug)
-      const extraEnv = toStringRecord(extra.env) ?? {}
+      const extraEnv = { ...directoryDefinition.env, ...toStringRecord(extra.env) }
       const automation = this.readAutomation(`${slug}.extras[${extraSlug}]`, extra, extraArgs, extraEnv)
       if (automation) {
         this.automations[`${projectDefinition.slug}/${directorySlug}/${extraSlug}`] = automation
@@ -960,7 +948,7 @@ export class DevtoolConfigure {
           extra.killSignal ?? extra.killsignal
         ),
         script: null,
-        mcp: this.readMcpRules(`${slug}.extras[${extraSlug}].mcp`, extra.mcp, this.layeredRules(this.adt.mcp.commands, layers), `projects.${directorySlug}.commands.${extraSlug}`),
+        mcp: this.readMcpRules(`${slug}.extras[${extraSlug}].mcp`, extra.mcp, this.layeredRules(this.adt.mcp.commands, layers), ['projects', directorySlug, 'commands', extraSlug]),
         mcpTarget: this.settingTarget(['projects', directorySlug, 'commands', extraSlug, 'mcp']),
         meta: extra.meta
       }
@@ -1423,7 +1411,6 @@ export class DevtoolConfigure {
    * @returns The existing folders.
    */
   private async readScripts (slug: string, directoryPath: string, value: unknown, inherited: McpRules, settingPath: string[]): Promise<DirectoryScripts[]> {
-    const from = settingPath.join('.')
     if (value === undefined) {
       return []
     }
@@ -1444,8 +1431,8 @@ export class DevtoolConfigure {
         continue
       }
 
-      const mcp = this.readMcpRules(`${slug}[${index}].mcp`, folder.mcp, inherited, `${from}[${index}]`)
       const folderSetting = [...settingPath, String(index)]
+      const mcp = this.readMcpRules(`${slug}[${index}].mcp`, folder.mcp, inherited, folderSetting)
       const scripts: Record<string, ScriptSettings> = {}
       for (const [name, settingsRaw] of Object.entries(toRecord(folder.scripts))) {
         const settings = toRecord(settingsRaw)
@@ -1453,7 +1440,7 @@ export class DevtoolConfigure {
           prompt: typeof settings.prompt === 'boolean' ? settings.prompt : null,
           args: settings.args === undefined ? null : this.readCommandArgs(`${slug}[${index}].scripts[${name}].args`, settings.args),
           form: this.readForm(`${slug}[${index}].scripts[${name}].form`, settings.form),
-          mcp: this.readMcpRules(`${slug}[${index}].scripts[${name}].mcp`, settings.mcp, mcp, `${from}[${index}].scripts.${name}`),
+          mcp: this.readMcpRules(`${slug}[${index}].scripts[${name}].mcp`, settings.mcp, mcp, [...folderSetting, 'scripts', name]),
           mcpTarget: this.settingTarget([...folderSetting, 'scripts', name, 'mcp'])
         }
       }
@@ -1670,7 +1657,7 @@ export class DevtoolConfigure {
         path: this.pathFrom(directory.path, entry.path as string),
         restore,
         commands: commands.filter(command => command in directory.extras),
-        mcp: this.readMcpRules(`${slug}[${filesSlug}].mcp`, entry.mcp, inherited, `projects.${directory.slug}.files.${filesSlug}`),
+        mcp: this.readMcpRules(`${slug}[${filesSlug}].mcp`, entry.mcp, inherited, ['projects', directory.slug, 'files', filesSlug]),
         mcpTarget: this.settingTarget(['projects', directory.slug, 'files', filesSlug, 'mcp'])
       }
     }

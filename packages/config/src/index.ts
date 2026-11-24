@@ -100,7 +100,7 @@ function resolveFolderPaths (config: RawConfig, cwd: string): void {
  * @param config The merged configuration.
  * @param workspace The workspace, null when none is declared.
  */
-function resolveSectionPaths (config: RawConfig, workspace: string | null): void {
+export function resolveSectionPaths (config: RawConfig, workspace: string | null): void {
   if (typeof config.sections !== 'object' || config.sections === null) {
     return
   }

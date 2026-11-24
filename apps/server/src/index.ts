@@ -2,7 +2,7 @@ import { execFile, spawn } from 'node:child_process'
 import { existsSync, watch } from 'node:fs'
 import path from 'node:path'
 import { promisify } from 'node:util'
-import { loadMergedConfig, type RawConfig, resolveDefaultConfigPaths } from '@appsys/devtool-config'
+import { loadMergedConfig, type RawConfig, resolveDefaultConfigPaths, resolveSectionPaths } from '@appsys/devtool-config'
 import { logger, type RuntimeConfig } from '@appsys/devtool-shared'
 import pkg from '../package.json' with { type: 'json' }
 import { prepareRenewal } from './certificates.js'
@@ -10,12 +10,13 @@ import { CommandSecrets } from './command-automation.js'
 import { certificateAutomationKey, DevtoolConfigure } from './configure.js'
 import { DevtoolLB } from './lb.js'
 import { DevtoolServer } from './server.js'
-import { mergeDeep, toRecord, toStringArray } from './utils.js'
+import { mergeDeep, toRecord } from './utils.js'
 import type { ConfigProvider, LoadBalancerContext, ServerBootstrapOptions } from './types.js'
 
 export { relaunchUnderApp } from './app-launcher.js'
 
 const CONFIG_CHANGE_DELAY_MS = 200
+const UNCATEGORIZED_SECTION = 'uncategorized'
 const execFileAsync = promisify(execFile)
 
 function readKillSignal (record: Record<string, unknown>): unknown {
@@ -29,7 +30,8 @@ function readShell (record: Record<string, unknown>): unknown {
 /**
  * Turns the sections and projects of the shared configuration into projects of directories, each
  * project becoming a directory of its section with its commands, the one its default action names
- * becoming its main command.
+ * becoming its main command. A project naming no known section goes to the `uncategorized` section,
+ * placed like any section without a path.
  * @param config The raw configuration.
  * @returns The configuration with projects of directories.
  */
@@ -46,25 +48,17 @@ function normalizeProjectsShape (config: RawConfig): RawConfig {
     return config
   }
 
-  if (!toRecord(sections.uncategorized).name) {
-    sections.uncategorized = { name: 'Uncategorized', path: '.' }
-  }
-
   for (const [projectSlug, rawProject] of Object.entries(projects)) {
     const project = toRecord(rawProject)
-    const sectionSlug = typeof project.section === 'string' ? project.section : 'uncategorized'
+    const sectionSlug = typeof project.section === 'string' && project.section in sections ? project.section : UNCATEGORIZED_SECTION
+    sections[sectionSlug] ??= { name: 'Uncategorized' }
     const section = toRecord(sections[sectionSlug])
     const sectionProjects = Array.isArray(section.projects) ? section.projects.filter((item): item is string => typeof item === 'string') : []
     const sectionDirectories = toRecord(section.directories)
     const commands = toRecord(project.commands)
     const services = toRecord(project.services)
 
-    if (typeof section.path !== 'string') {
-      section.path = '.'
-    }
-
     let args: unknown = null
-    let env: unknown = project.env
     let shell: unknown = readShell(project)
     let killSignal: unknown = readKillSignal(project)
     const action = toRecord(project.default).action
@@ -72,9 +66,6 @@ function normalizeProjectsShape (config: RawConfig): RawConfig {
     if (defaultCommandSlug && defaultCommandSlug in commands) {
       const defaultCommand = toRecord(commands[defaultCommandSlug])
       args = defaultCommand.args
-      if ('env' in defaultCommand) {
-        env = defaultCommand.env
-      }
       if ('shell' in defaultCommand) {
         shell = readShell(defaultCommand)
       }
@@ -87,7 +78,6 @@ function normalizeProjectsShape (config: RawConfig): RawConfig {
     sectionDirectories[projectSlug] = {
       ...project,
       args,
-      env,
       shell,
       killSignal,
       extras: commands,
@@ -98,6 +88,8 @@ function normalizeProjectsShape (config: RawConfig): RawConfig {
     section.directories = sectionDirectories
     sections[sectionSlug] = section
   }
+  config.sections = sections
+  resolveSectionPaths(config, typeof config.workspace === 'string' ? config.workspace : null)
 
   const normalizedSections: Record<string, unknown> = {}
   for (const [sectionSlug, sectionRaw] of Object.entries(sections)) {
@@ -136,7 +128,6 @@ export function createRuntimeConfig (raw: RawConfig, options: Pick<ServerBootstr
 
   if (typeof options.ssl === 'string' && options.ssl.length > 0) {
     adtRuntimeOverrides.host = options.ssl
-    adtRuntimeOverrides.secure = true
   }
 
   const base = mergeDeep(
@@ -153,9 +144,7 @@ export function createRuntimeConfig (raw: RawConfig, options: Pick<ServerBootstr
   ) as RawConfig
 
   const serverConfig = toRecord(base.server)
-  const serverHosts = toStringArray(serverConfig.hosts)
   const adtConfig = toRecord(base.adt)
-  adtConfig.hosts = serverHosts ?? []
   delete adtConfig.uiPath
   if (options.uiPath) {
     adtConfig.uiPath = options.uiPath

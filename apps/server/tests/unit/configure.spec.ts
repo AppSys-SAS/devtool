@@ -163,9 +163,7 @@ describe('defaults', () => {
       host: null,
       shell: null,
       ports: { server: 6730, loadBalancer: 6731 },
-      secure: false,
       notifications: true,
-      hosts: [],
       access: 'local',
       sidebar: { environment: false, configs: false, login: false, sort: 'config', order: [], sections: [] },
       agents: []
@@ -218,17 +216,15 @@ describe('defaults', () => {
 })
 
 describe('adt', () => {
-  it('reads the host, interface, cache, ports, access, hosts, notifications and shell', async () => {
+  it('reads the host, interface, cache, ports, access, notifications and shell', async () => {
     const { adt, warnings } = await load({
       adt: {
         host: 'devtool.example.dev',
         uiPath: '/opt/ui',
         cacheDir: '/opt/cache',
-        secure: true,
         ports: { server: 7000, loadBalancer: 7001 },
         notifications: false,
         access: 'network',
-        hosts: ['web.example.dev'],
         shell: '  /bin/zsh  '
       }
     })
@@ -237,19 +233,11 @@ describe('adt', () => {
       host: 'devtool.example.dev',
       uiPath: '/opt/ui',
       cacheDir: '/opt/cache',
-      secure: true,
       ports: { server: 7000, loadBalancer: 7001 },
       notifications: false,
       access: 'network',
-      hosts: ['web.example.dev'],
       shell: '/bin/zsh'
     })
-  })
-
-  it('refuses secure connections without a host', async () => {
-    const configure = await load({ adt: { secure: true } })
-    expect(configure.adt.secure).toBe(false)
-    expect(configure.warnings).toEqual(['adt.secure: needs adt.host to make connections secure.'])
   })
 
   it('keeps the default ports when the declared ones are not positive integers', async () => {
@@ -1062,6 +1050,19 @@ describe('directories', () => {
     })
   })
 
+  it('warns about a project naming no section', async () => {
+    const configure = await loadApi({ section: 'missing' })
+    expect(configure.warnings).toEqual([`${API}.section: names no section, the project is under main.`])
+    expect(apiOf(configure).slug).toBe('api')
+  })
+
+  it('gives keys to the files of a project whose slug holds dots', async () => {
+    await fs.mkdir(path.join(workspace, 'my.app'))
+    const configure = await load(sectionConfig({ 'my.app': directory('my.app', { files: { docs: { path: 'docs', mcp: { read: 'keys' } } } }) }))
+    expect(configure.warnings).toEqual([])
+    expect(configure.projects.main.directories['my.app'].files.docs.mcp.read).toEqual({ level: 'keys', from: 'projects.my.app.files.docs' })
+  })
+
   it('reads its description, absolute path, arguments, environment, shell and kill signal', async () => {
     const web = path.join(workspace, 'web')
     const configure = await loadApi({ description: 'The API', path: web, args: ['pnpm', 'dev', 3000], env: { PORT: '3000' }, shell: '/bin/bash', killSignal: 'sigint' })
@@ -1162,6 +1163,20 @@ describe('commands', () => {
       meta: { tag: 'dev' }
     })
     expect(extras.build).toMatchObject({ detached: false, prompt: false, form: 'dialog', startWithSection: false, notifications: true, env: {}, shell: '/bin/zsh', killSignal: null })
+  })
+
+  it('gives a command the environment of its project under its own', async () => {
+    const configure = await loadApi({
+      env: [{ STAGE: 'dev' }, { PORT: '3000' }],
+      extras: {
+        dev: { args: ['pnpm', 'dev'], env: { PORT: '4000', DEBUG: '1' } },
+        build: { args: ['pnpm', 'build'] }
+      }
+    })
+    expect(configure.warnings).toEqual([])
+    const { extras } = apiOf(configure)
+    expect(extras.dev.env).toEqual({ STAGE: 'dev', PORT: '4000', DEBUG: '1' })
+    expect(extras.build.env).toEqual({ STAGE: 'dev', PORT: '3000' })
   })
 
   it('names a command after its slug', async () => {
@@ -1477,12 +1492,12 @@ describe('scripts', () => {
     })
     expect(configure.warnings).toEqual([])
     const api = apiOf(configure)
-    expect(api.scripts[0]).toMatchObject({ prompt: true, form: 'dialog', only: ['*.sh'], mcp: rulesOf('deny', 'projects.api.scripts[0]') })
+    expect(api.scripts[0]).toMatchObject({ prompt: true, form: 'dialog', only: ['*.sh'], mcp: rulesOf('deny', 'projects.api.scripts.0') })
     expect(api.extras['scripts/deploy.sh']).toMatchObject({
       prompt: false,
       form: 'inline',
       args: ['./scripts/deploy.sh', { name: 'env', kind: 'choice', choices: [{ label: 'prd', value: 'prd' }, { label: 'pre', value: 'pre' }], display: 'buttons', optional: false, default: null }],
-      mcp: { ...rulesOf('deny', 'projects.api.scripts[0]'), run: { level: 'allow', from: 'projects.api.scripts[0].scripts.deploy.sh' } },
+      mcp: { ...rulesOf('deny', 'projects.api.scripts.0'), run: { level: 'allow', from: 'projects.api.scripts.0.scripts.deploy.sh' } },
       mcpTarget: { path: ['projects', 'api', 'scripts', '0', 'scripts', 'deploy.sh', 'mcp'], declaredIn: null }
     })
   })
