@@ -2,6 +2,8 @@ const TLS_HANDSHAKE_RECORD = 0x16
 const CLIENT_HELLO = 0x01
 const SERVER_NAME_EXTENSION = 0x0000
 const HOST_NAME = 0x00
+const FIRST_VISIBLE_ASCII = 0x21
+const LAST_VISIBLE_ASCII = 0x7e
 
 /**
  * Reads the server name of a TLS ClientHello.
@@ -34,8 +36,12 @@ function serverNameOf (hello: Buffer): string | null {
     if (hello.readUInt8(start + 2) !== HOST_NAME) {
       return null
     }
-    const nameLength = hello.readUInt16BE(start + 3)
-    return start + 5 + nameLength <= offset ? hello.subarray(start + 5, start + 5 + nameLength).toString('ascii').toLowerCase() : null
+    const nameEnd = start + 5 + hello.readUInt16BE(start + 3)
+    if (nameEnd === start + 5 || nameEnd > offset) {
+      return null
+    }
+    const name = hello.subarray(start + 5, nameEnd)
+    return name.every(byte => byte >= FIRST_VISIBLE_ASCII && byte <= LAST_VISIBLE_ASCII) ? name.toString('ascii').toLowerCase() : null
   }
   return null
 }

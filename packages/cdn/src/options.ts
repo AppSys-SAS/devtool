@@ -13,6 +13,28 @@ export interface CdnOptions {
 }
 
 const DEFAULT_CALLBACK_PORT = 6732
+const MAX_PORT = 65535
+
+/**
+ * Reads a setting that must hold a non-blank text.
+ *
+ * @param value - The raw setting.
+ * @returns The text, null when the setting is not a string or is blank.
+ */
+function readText (value: unknown): string | null {
+  return typeof value === 'string' && value.trim() !== '' ? value : null
+}
+
+/**
+ * Reads a port given as an integer or as a string of decimal digits.
+ *
+ * @param value - The raw setting.
+ * @returns The port, null when the setting is not a port between 1 and 65535.
+ */
+function readPort (value: unknown): number | null {
+  const port = typeof value === 'number' ? value : typeof value === 'string' && /^\s*\d+\s*$/.test(value) ? Number(value) : Number.NaN
+  return Number.isInteger(port) && port >= 1 && port <= MAX_PORT ? port : null
+}
 
 /**
  * Reads the `cdn` section of the devtool configuration, `{ url, openid: { issuer, name, clientId, callbackPort } }`.
@@ -27,17 +49,18 @@ export function readCdnOptions (section: unknown): CdnOptions | null {
 
   const record = section as Record<string, unknown>
   const auth = typeof record.openid === 'object' && record.openid !== null ? (record.openid as Record<string, unknown>) : {}
-  if (typeof record.url !== 'string' || typeof auth.issuer !== 'string' || typeof auth.clientId !== 'string') {
+  const url = readText(record.url)
+  const issuer = readText(auth.issuer)
+  const clientId = readText(auth.clientId)
+  if (url === null || issuer === null || clientId === null) {
     return null
   }
 
-  const callbackPort = Number(auth.callbackPort ?? DEFAULT_CALLBACK_PORT)
-
   return {
-    url: record.url.replace(/\/+$/, ''),
-    issuer: auth.issuer.replace(/\/+$/, ''),
-    issuerName: typeof auth.name === 'string' && auth.name.trim() ? auth.name.trim() : null,
-    clientId: auth.clientId,
-    callbackPort: Number.isInteger(callbackPort) && callbackPort > 0 ? callbackPort : DEFAULT_CALLBACK_PORT
+    url: url.replace(/\/+$/, ''),
+    issuer: issuer.replace(/\/+$/, ''),
+    issuerName: readText(auth.name)?.trim() ?? null,
+    clientId,
+    callbackPort: readPort(auth.callbackPort) ?? DEFAULT_CALLBACK_PORT
   }
 }

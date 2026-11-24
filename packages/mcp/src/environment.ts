@@ -281,7 +281,7 @@ export function environmentTools (host: McpHost): McpTool[] {
       description: 'Lists the certificates of the load balancer: expiry, issuer, error, how they renew and whether a renewal runs.',
       input: {},
       readOnly: true,
-      run: async () => host.certificates.state().filter(certificate => certificateRules(host, certificate.name).read.level !== 'deny')
+      run: () => host.certificates.state().filter(certificate => certificateRules(host, certificate.name).read.level !== 'deny')
     }),
     defineTool({
       name: 'renew_certificate',
@@ -306,7 +306,7 @@ export function environmentTools (host: McpHost): McpTool[] {
         'Lists the open pull requests of the repositories of the sections (project null) and projects, as last read from their forge: number, title, link, author, description, labels, branches, draft, checks, review, whether a review of the user is requested and whether the user wrote it.',
       input: {},
       readOnly: true,
-      run: async () => listForgeItems(host, 'pullRequests')
+      run: () => listForgeItems(host, 'pullRequests')
     }),
     defineTool({
       name: 'list_issues',
@@ -315,7 +315,7 @@ export function environmentTools (host: McpHost): McpTool[] {
         'Lists the open issues of the repositories of the sections (project null) and projects, as last read from their forge: number, title, link, author, description, labels, assignees, number of comments, whether it is assigned to the user and whether the user wrote it.',
       input: {},
       readOnly: true,
-      run: async () => listForgeItems(host, 'issues')
+      run: () => listForgeItems(host, 'issues')
     }),
     defineTool({
       name: 'notify_user',

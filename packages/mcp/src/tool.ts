@@ -33,7 +33,7 @@ export interface McpTool {
 }
 
 /**
- * Declares a tool, its input typed from its schema.
+ * Declares a tool, its input typed from its schema and its result given directly or as a promise.
  * @param tool The tool.
  * @returns The tool as the MCP server registers it.
  */
@@ -44,9 +44,9 @@ export function defineTool<Shape extends z.ZodRawShape> (tool: {
   input: Shape
   readOnly?: boolean
   privateInput?: (keyof Shape & string)[]
-  run(input: z.infer<z.ZodObject<Shape>>, call: McpCall): Promise<unknown>
+  run(input: z.infer<z.ZodObject<Shape>>, call: McpCall): unknown
 }): McpTool {
-  return { ...tool, readOnly: tool.readOnly ?? false, privateInput: tool.privateInput ?? [], run: (input, call) => tool.run(input as z.infer<z.ZodObject<Shape>>, call) }
+  return { ...tool, readOnly: tool.readOnly ?? false, privateInput: tool.privateInput ?? [], run: (input, call) => Promise.resolve(tool.run(input as z.infer<z.ZodObject<Shape>>, call)) }
 }
 
 /** An error an agent can fix: a missing terminal, command or file, an invalid value. */

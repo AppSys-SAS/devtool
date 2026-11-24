@@ -275,8 +275,8 @@ export class ListedFileSpace extends FileSpace {
    *
    * @returns The files, existing or not.
    */
-  protected async entries (): Promise<FileEntryPayload[]> {
-    return this._paths.map(filePath => ({ path: filePath, kind: 'file' }))
+  protected entries (): Promise<FileEntryPayload[]> {
+    return Promise.resolve(this._paths.map(filePath => ({ path: filePath, kind: 'file' })))
   }
 
   /**
@@ -380,7 +380,7 @@ export class AgentSkillsFileSpace extends TreeFileSpace {
       folders.map(async (folder): Promise<AgentSkillSummary> => {
         const skillFile = skillFiles.get(folder)
         const file = skillFile ? await this.read(skillFile) : null
-        if (file === null || file.content === null) {
+        if (file?.content == null) {
           return { folder, name: null, description: null, problems: [file?.error ?? `${AGENT_SKILL_FILE} is missing`] }
         }
         const { name, description, problems } = readAgentSkill(file.content, folder)

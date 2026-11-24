@@ -106,7 +106,9 @@ export class DevtoolLB {
     const wasListening = this.server.listening
     const port = this.serverContext.config.adt.ports.loadBalancer
     if (wasListening) {
-      await new Promise<void>(resolve => this.server?.close(() => resolve()))
+      await new Promise<void>(resolve => {
+        this.server?.close(() => resolve())
+      })
     }
     this.secureServer?.close()
     this.secureServer = null
@@ -165,7 +167,9 @@ export class DevtoolLB {
 
     const secureServer = http2.createSecureServer({ ...this.defaultCertificate, allowHTTP1: true, SNICallback: this.sniCallback.bind(this) }, (req, res) => this.onRequest(req, res))
     secureServer.on('upgrade', (req: IncomingMessage, socket: Socket, head: Buffer) => this.onUpgrade(req, socket, head))
-    await new Promise<void>(resolve => secureServer.listen(0, LOOPBACK_ADDRESS, resolve))
+    await new Promise<void>(resolve => {
+      secureServer.listen(0, LOOPBACK_ADDRESS, resolve)
+    })
     this.secureServer = secureServer
     this.server = net.createServer(this.onConnection.bind(this))
   }
@@ -257,7 +261,7 @@ export class DevtoolLB {
     try {
       const stat = await fs.stat(input)
       if (stat.isFile()) {
-        return fs.readFile(input, 'utf-8')
+        return await fs.readFile(input, 'utf-8')
       }
       return input
     } catch {

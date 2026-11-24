@@ -137,69 +137,69 @@ export type ConnectionMessage
     data: Record<string, never>
   }
   | {
-      type: 'envTables'
-      data: { path: string }
-    }
+    type: 'envTables'
+    data: { path: string }
+  }
   | {
-      type: 'envKeys'
-      data: { path: string }
-    }
+    type: 'envKeys'
+    data: { path: string }
+  }
   | {
-      type: 'envRun'
-      data: { direction: 'pull' | 'push', targets: EnvironmentTarget[] }
-    }
+    type: 'envRun'
+    data: { direction: 'pull' | 'push', targets: EnvironmentTarget[] }
+  }
   | {
-      type: 'envDismissRun'
-      data: Record<string, never>
-    }
+    type: 'envDismissRun'
+    data: Record<string, never>
+  }
   | {
-      type: 'filesList'
-      data: { space: string }
-    }
+    type: 'filesList'
+    data: { space: string }
+  }
   | {
-      type: 'fileRead'
-      data: { space: string, path: string }
-    }
+    type: 'fileRead'
+    data: { space: string, path: string }
+  }
   | {
-      type: 'fileWrite'
-      data: { space: string, path: string, content: string, baseUpdatedAt: string | null }
-    }
+    type: 'fileWrite'
+    data: { space: string, path: string, content: string, baseUpdatedAt: string | null }
+  }
   | {
-      type: 'fileCreate'
-      data: { space: string, path: string, kind: FileEntryPayload['kind'] }
-    }
+    type: 'fileCreate'
+    data: { space: string, path: string, kind: FileEntryPayload['kind'] }
+  }
   | {
-      type: 'fileRemove'
-      data: { space: string, path: string }
-    }
+    type: 'fileRemove'
+    data: { space: string, path: string }
+  }
   | {
-      type: 'fileRename'
-      data: { space: string, from: string, to: string }
-    }
+    type: 'fileRename'
+    data: { space: string, from: string, to: string }
+  }
   | {
-      type: 'newCommandStream'
-      data: CommandStreamCreatePayload
-    }
+    type: 'newCommandStream'
+    data: CommandStreamCreatePayload
+  }
   | {
-      type: 'updateCommandStream'
-      data: CommandStreamUpdatePayload
-    }
+    type: 'updateCommandStream'
+    data: CommandStreamUpdatePayload
+  }
   | {
-      type: 'newCommandDetached'
-      data: CommandStreamCreatePayload
-    }
+    type: 'newCommandDetached'
+    data: CommandStreamCreatePayload
+  }
   | {
-      type: 'streamInput'
-      data: CommandStreamInputPayload
-    }
+    type: 'streamInput'
+    data: CommandStreamInputPayload
+  }
   | {
-      type: 'streamResize'
-      data: CommandStreamResizePayload
-    }
+    type: 'streamResize'
+    data: CommandStreamResizePayload
+  }
   | {
-      type: 'portConflict'
-      data: CommandStreamPortConflictPayload
-    }
+    type: 'portConflict'
+    data: CommandStreamPortConflictPayload
+  }
   | McpUiMessage
 
 export interface ServerContextLike {

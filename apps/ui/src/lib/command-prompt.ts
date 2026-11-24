@@ -1,3 +1,5 @@
+import { stripAnsi } from '@appsys/devtool-shared'
+
 /** The answers to a yes/no question, as the question spells them. */
 export interface CommandPromptChoice {
   yes: string
@@ -15,9 +17,8 @@ export interface CommandPrompt {
   choice: CommandPromptChoice | null
 }
 
-const ANSI_SEQUENCE = /\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]/g
-const YES_NO = /[[(]\s*(y(?:es)?)\s*\/\s*(n(?:o)?)\s*[\])]/i
-const SECRET = /pass(?:word|phrase)|secret|token|\bpin\b/i
+const YES_NO = /[[(]\s*(y(?:es)?)\s*\/\s*(n(?:o)?)\s*(?:\/\s*\[[^\]]*\]\s*)?(?:\[\s*(y(?:es)?|n(?:o)?)\s*\]\s*)?[\])]/i
+const SECRET = /pass(?:word|phrase)|secret|(?<![a-z])tokens?(?![a-z])|\bpin\b/i
 const QUESTION_END = /[:?\])>]$/
 
 /**
@@ -27,9 +28,7 @@ const QUESTION_END = /[:?\])>]$/
  * @returns The text.
  */
 export function terminalText (output: string[]): string {
-  return output
-    .join('')
-    .replace(ANSI_SEQUENCE, '')
+  return stripAnsi(output.join(''))
     .replace(/\r+\n/g, '\n')
     .split('\n')
     .map(line => line.slice(line.lastIndexOf('\r') + 1))
@@ -37,8 +36,8 @@ export function terminalText (output: string[]): string {
 }
 
 /**
- * Reads the answers of a yes/no question, such as `[Y/n]`, `[y/N]` or `(yes/no)`, the capital
- * letter marking the default answer.
+ * Reads the answers of a yes/no question, such as `[Y/n]`, `[y/N]`, `(yes/no/[fingerprint])` or
+ * `(y/n [n])`, the default answer given by a capital letter or by the bracketed answer.
  * @param question The question.
  * @returns The answers, or null when the question is not a yes/no one.
  */
@@ -48,9 +47,11 @@ function choiceOf (question: string): CommandPromptChoice | null {
     return null
   }
 
-  const [, yes, no] = match
+  const [, yes, no, bracketedDefault] = match
   let defaultAnswer: CommandPromptChoice['defaultAnswer'] = null
-  if (yes.startsWith('Y') && no.startsWith('n')) {
+  if (bracketedDefault) {
+    defaultAnswer = /^y/i.test(bracketedDefault) ? 'yes' : 'no'
+  } else if (yes.startsWith('Y') && no.startsWith('n')) {
     defaultAnswer = 'yes'
   } else if (yes.startsWith('y') && no.startsWith('N')) {
     defaultAnswer = 'no'

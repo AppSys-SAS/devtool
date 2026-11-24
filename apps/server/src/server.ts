@@ -227,7 +227,7 @@ export class DevtoolServer implements McpServerHost {
   static async run (configProvider: ConfigProvider, version: string, loadBalancer: boolean): Promise<DevtoolServer> {
     const instance = new DevtoolServer(configProvider, version)
     await instance.loadConfig()
-    await instance.createHttp()
+    instance.createHttp()
     if (loadBalancer) {
       await instance.createLB()
     }
@@ -398,12 +398,12 @@ export class DevtoolServer implements McpServerHost {
     }
 
     if (message.type === 'streamInput') {
-      await this.streamInput(message.data)
+      this.streamInput(message.data)
       return
     }
 
     if (message.type === 'streamResize') {
-      await this.streamResize(message.data)
+      this.streamResize(message.data)
       return
     }
 
@@ -540,7 +540,7 @@ export class DevtoolServer implements McpServerHost {
    * Forgets a closed terminal.
    * @param streamSlug The slug of the terminal.
    */
-  async removeCommandStream (streamSlug: string): Promise<void> {
+  removeCommandStream (streamSlug: string): void {
     this.commandStreams = this.commandStreams.filter(stream => stream.slug !== streamSlug)
     this.mcp.streamsChanged()
   }
@@ -627,7 +627,11 @@ export class DevtoolServer implements McpServerHost {
     await this.commandStreams.find(item => item.slug === data.streamSlug)?.resolvePortConflict(data.action)
   }
 
-  private async streamInput (data: CommandStreamInputPayload): Promise<void> {
+  /**
+   * Types what an interface sent into a terminal.
+   * @param data The terminal and the typed text.
+   */
+  private streamInput (data: CommandStreamInputPayload): void {
     const stream = this.commandStreams.find(item => item.slug === data.streamSlug)
     if (!stream) {
       return
@@ -635,7 +639,11 @@ export class DevtoolServer implements McpServerHost {
     stream.writeInput(data.data)
   }
 
-  private async streamResize (data: CommandStreamResizePayload): Promise<void> {
+  /**
+   * Resizes a terminal to the size of its view in an interface.
+   * @param data The terminal and its new columns and rows.
+   */
+  private streamResize (data: CommandStreamResizePayload): void {
     const stream = this.commandStreams.find(item => item.slug === data.streamSlug)
     if (!stream) {
       return
@@ -667,8 +675,11 @@ export class DevtoolServer implements McpServerHost {
     }
   }
 
-  private async createHttp (): Promise<void> {
-    this.http = await DevtoolHttp.create(this)
+  /**
+   * Creates the HTTP server of the interfaces.
+   */
+  private createHttp (): void {
+    this.http = DevtoolHttp.create(this)
   }
 
   private async createLB (): Promise<void> {

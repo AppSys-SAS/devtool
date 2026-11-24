@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { RouterLink, useRoute, useRouter } from 'vue-router'
+import { RouterLink, useRoute } from 'vue-router'
 import { useColorMode } from '@vueuse/core'
 import { Icon } from '@iconify/vue'
-import { ArrowDownUp, Bookmark, Bot, Circle, Download, FileCog, FolderTree, FolderX, Monitor, Moon, Play, RefreshCw, RotateCcw, Square, Sun } from '@lucide/vue'
+import { ArrowDownUp, Bookmark, Bot, Download, FileCog, FolderTree, FolderX, Monitor, Moon, Play, RefreshCw, RotateCcw, Square, Sun } from '@lucide/vue'
 import CdnSession from '@/components/CdnSession.vue'
 import SidebarStreamItem from '@/components/SidebarStreamItem.vue'
 import { Button } from '@/components/ui/button'
@@ -64,7 +64,6 @@ interface SidebarProject {
   meta?: unknown
 }
 
-const router = useRouter()
 const route = useRoute()
 const mcpWaiting = computed(() => mcpStore.state.value?.pending.length ?? 0)
 const bookmarkedOnly = ref(false)

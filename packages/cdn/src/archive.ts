@@ -136,10 +136,11 @@ class BufferedReader {
    * @returns False at the end of the source.
    */
   private async fill (): Promise<boolean> {
-    const { done, value } = await this._source.next()
-    if (done) {
+    const chunk = await this._source.next()
+    if (chunk.done) {
       return false
     }
+    const value = chunk.value
 
     this._buffer = this._buffer.length > 0 ? Buffer.concat([this._buffer, value]) : value
     return true
@@ -172,7 +173,7 @@ function bodyOf (reader: BufferedReader): { body: AsyncIterable<Buffer>, skip: (
 
     return { done: false, value: await reader.read(size) }
   }
-  const iterator: AsyncIterator<Buffer> = { next, return: async () => ({ done: true, value: undefined }) }
+  const iterator: AsyncIterator<Buffer> = { next, return: () => Promise.resolve({ done: true, value: undefined }) }
 
   return {
     body: { [Symbol.asyncIterator]: () => iterator },

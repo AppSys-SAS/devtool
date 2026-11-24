@@ -50,23 +50,24 @@ const installations = new Map<string, Promise<string>>()
 /**
  * Gives the lego executable of the devtool, downloading, checking and extracting the release of its
  * version for this platform the first time, then removing the other versions kept in the folder; calls
- * made while an installation runs share it.
- * @param folder - The folder holding one subfolder per version of lego.
+ * made while an installation of the same folder runs share it.
+ * @param folder - The folder holding one subfolder per version of lego, absolute or relative to the working directory.
  * @param log - Receives the progress.
  * @returns The absolute path of the executable.
  */
 export function installLego (folder: string, log: (line: string) => void = () => {}): Promise<string> {
-  let installation = installations.get(folder)
+  const absoluteFolder = path.resolve(folder)
+  let installation = installations.get(absoluteFolder)
   if (!installation) {
-    installation = install(folder, log).finally(() => installations.delete(folder))
-    installations.set(folder, installation)
+    installation = install(absoluteFolder, log).finally(() => installations.delete(absoluteFolder))
+    installations.set(absoluteFolder, installation)
   }
   return installation
 }
 
 /**
  * Installs the lego executable of the devtool when missing, then removes the other versions.
- * @param folder - The folder holding one subfolder per version of lego.
+ * @param folder - The absolute folder holding one subfolder per version of lego.
  * @param log - Receives the progress.
  * @returns The absolute path of the executable.
  */

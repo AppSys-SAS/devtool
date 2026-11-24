@@ -1,7 +1,7 @@
 import path from 'node:path'
 import fs from 'node:fs/promises'
 import net from 'node:net'
-import type { AgentAction, AgentDefinition, CertificateAcme, ForgeKind, ClientConfigPayload, CommandArg, CommandChoice, CommandForm, CommandInput, CommandInputValue, DirectoryDefinition, DirectoryFiles, DirectoryFilesType, DirectoryScripts, ScriptSettings, AdtDefinition, DirectoryDefaultAction, DirectoryShortcut, DnsDefinition, DnsRecord, HostAccess, IntegrationDefinition, IntegrationType, LoadBalancerCertificate, McpCategory, McpEnvironmentItem, McpPatterns, McpRules, McpSettings, McpTarget, PassthroughRule, ProjectDefinition, ProjectRestore, RuntimeConfig, SidebarSettings, SortMode } from '@appsys/devtool-shared'
+import type { AgentAction, AgentDefinition, CertificateAcme, ForgeKind, ClientConfigPayload, CommandArg, CommandChoice, CommandForm, CommandInput, DirectoryDefinition, DirectoryFiles, DirectoryFilesType, DirectoryScripts, ScriptSettings, AdtDefinition, DirectoryDefaultAction, DirectoryShortcut, DnsDefinition, DnsRecord, HostAccess, IntegrationDefinition, IntegrationType, LoadBalancerCertificate, McpCategory, McpEnvironmentItem, McpPatterns, McpRules, McpSettings, McpTarget, PassthroughRule, ProjectDefinition, ProjectRestore, RuntimeConfig, SidebarSettings, SortMode } from '@appsys/devtool-shared'
 import { AGENT_ACTIONS, DEFAULT_AGENT_PROMPTS, defaultMcpRules, integrationKey, isMcpLevel, logger, readMcpRules, shortcutKey, SORT_MODES, sortKeys } from '@appsys/devtool-shared'
 import { type LegoOptionValue, legoRunArgs } from '@appsys/devtool-certs'
 import { configSourceKey, resolveAppIdentity, resolveCacheFolder } from '@appsys/devtool-config'
@@ -11,7 +11,7 @@ import { listScripts } from './scripts.js'
 import type { ConfigOrigin } from './types.js'
 import { isObject, toCommandArgsArray, toRecord, toStringArray, toStringRecord } from './utils.js'
 
-const SLUG_REGEXP = /^[a-zA-Z0-9\-\/_.]+$/i
+const SLUG_REGEXP = /^[a-zA-Z0-9\-/_.]+$/i
 /** Options of `lego run` the devtool sets itself. */
 const LEGO_OWNED_OPTIONS = ['path', 'cert.name', 'accept-tos', 'renew-force', 'renew-days', 'no-random-sleep']
 
@@ -310,7 +310,7 @@ export class DevtoolConfigure {
     this.adt.mcp = this.readMcp(toRecord(this.initialConfig.adt).mcp)
 
     try {
-      await this.reconfigureLoadBalancers()
+      this.reconfigureLoadBalancers()
     } catch (error) {
       this.addWarning('loadBalancers', error instanceof Error ? error.message : 'Unknown load balancer error')
     }
@@ -367,7 +367,7 @@ export class DevtoolConfigure {
 
     if (adt.secure === true || adt.secure === false) {
       if (adt.secure && !this.adt.host) {
-        this.addWarning('adt.secure', 'You have to define adt.host if you want secure connections.')
+        this.addWarning('adt.secure', 'needs adt.host to make connections secure')
       } else {
         this.adt.secure = adt.secure
       }
@@ -535,7 +535,10 @@ export class DevtoolConfigure {
     return patterns
   }
 
-  private async reconfigureLoadBalancers (): Promise<void> {
+  /**
+   * Reads the load balancers of the configuration, their certificates and their hosts.
+   */
+  private reconfigureLoadBalancers (): void {
     const loadBalancers = toRecord(this.initialConfig.loadBalancers)
     for (const [key, value] of Object.entries(loadBalancers)) {
       const options = toRecord(value)
@@ -649,12 +652,18 @@ export class DevtoolConfigure {
     }
   }
 
+  /**
+   * Reads a section of the sidebar: its folder, settings, directories, integrations and shortcuts.
+   * @param slug Names the section in warnings.
+   * @param projectSlug The slug of the section.
+   * @param project The raw section.
+   */
   private async reconfigureProject (slug: string, projectSlug: string, project: Record<string, unknown>): Promise<void> {
     if (!this.checkSlug(slug, projectSlug)) {
       return
     }
 
-    const projectName = this.checkString(`${slug}.name`, project.name) ? (project.name as string) : projectSlug
+    const projectName = this.readOptionalString(`${slug}.name`, project.name, projectSlug)
     if (!this.checkString(`${slug}.path`, project.path)) {
       return
     }
@@ -787,8 +796,8 @@ export class DevtoolConfigure {
       return
     }
 
-    const directoryName = this.checkString(`${slug}.name`, directory.name) ? (directory.name as string) : directorySlug
-    const relativePath = this.checkString(`${slug}.path`, directory.path) ? (directory.path as string) : directorySlug
+    const directoryName = this.readOptionalString(`${slug}.name`, directory.name, directorySlug)
+    const relativePath = this.readOptionalString(`${slug}.path`, directory.path, directorySlug)
     const directoryPath = this.pathFrom(projectDefinition.path, relativePath)
 
     const action = toRecord(directory.default).action
@@ -924,7 +933,7 @@ export class DevtoolConfigure {
         continue
       }
 
-      const extraName = this.checkString(`${slug}.extras[${extraSlug}].name`, extra.name) ? (extra.name as string) : extraSlug
+      const extraName = this.readOptionalString(`${slug}.extras[${extraSlug}].name`, extra.name, extraSlug)
       const extraEnv = toStringRecord(extra.env) ?? {}
       const automation = this.readAutomation(`${slug}.extras[${extraSlug}]`, extra, extraArgs, extraEnv)
       if (automation) {
@@ -1041,12 +1050,13 @@ export class DevtoolConfigure {
         this.addWarning(`${slug}[${index}].hosts`, 'must be host names or *.<domain>')
         continue
       }
-      if (!target) {
-        this.addWarning(`${slug}[${index}].target`, 'must be <host>:<port>')
+      const port = Number(target?.[2])
+      if (!target || port < 1 || port > 65535) {
+        this.addWarning(`${slug}[${index}].target`, 'must be <host>:<port>, the port between 1 and 65535')
         continue
       }
 
-      rules.push({ hosts, host: target[1], port: Number(target[2]), access: this.readAccess(`${slug}[${index}].access`, rule.access) })
+      rules.push({ hosts, host: target[1], port, access: this.readAccess(`${slug}[${index}].access`, rule.access) })
     }
     return rules
   }
@@ -1112,8 +1122,8 @@ export class DevtoolConfigure {
       if (!this.checkSlug(setting, integrationSlug) || !this.checkString(`${setting}.name`, integration.name)) {
         continue
       }
-      const type = integration.type ?? 'web'
-      if (!INTEGRATION_TYPES.includes(type as IntegrationType)) {
+      const type = (integration.type ?? 'web') as IntegrationType
+      if (!INTEGRATION_TYPES.includes(type)) {
         this.addWarning(`${setting}.type`, `must be ${INTEGRATION_TYPES.join(' or ')}`)
         continue
       }
@@ -1121,7 +1131,7 @@ export class DevtoolConfigure {
         continue
       }
       if (type !== 'web') {
-        const forgeIntegration = owner ? this.readForgeIntegration(setting, integrationSlug, type as ForgeKind, integration, owner) : null
+        const forgeIntegration = owner ? this.readForgeIntegration(setting, integrationSlug, type, integration, owner) : null
         if (!owner) {
           this.addWarning(`${setting}.type`, `${type} needs a section or a project, whose folder the agents work in`)
         }
@@ -1367,7 +1377,7 @@ export class DevtoolConfigure {
     const values = [
       ...args.flatMap((arg, index) => (typeof arg === 'string' ? [{ slug: `${slug}.args[${index}]`, text: arg }] : [])),
       ...Object.entries(env).map(([key, value]) => ({ slug: `${slug}.env.${key}`, text: value })),
-      ...(Array.isArray(command.answers) ? command.answers : []).map((raw, index) => ({ slug: `${slug}.answers[${index}].value`, text: String(toRecord(raw).value ?? '') }))
+      ...(Array.isArray(command.answers) ? command.answers : []).map((raw, index) => ({ slug: `${slug}.answers[${index}].value`, text: typeof toRecord(raw).value === 'string' ? toRecord(raw).value as string : '' }))
     ]
     for (const value of values) {
       for (const block of findInvalidValueBlocks(value.text)) {
@@ -1589,7 +1599,8 @@ export class DevtoolConfigure {
 
   /**
    * Reads where a service sends its requests: a port of this machine, `<host>:<port>` or an http(s)
-   * URL, or a list of them shared in turn.
+   * URL, or a list of them shared in turn. A port, given as a number or as decimal digits, lies
+   * between 1 and 65535.
    * @param slug Names the setting in warnings.
    * @param value The raw setting.
    * @returns The targets as URLs, null when one of them is invalid or none is given.
@@ -1603,10 +1614,11 @@ export class DevtoolConfigure {
 
     const targets: string[] = []
     for (const entry of entries) {
-      const text = typeof entry === 'number' ? `127.0.0.1:${entry}` : typeof entry === 'string' ? entry.trim() : ''
+      const written = typeof entry === 'number' ? String(entry) : typeof entry === 'string' ? entry.trim() : ''
+      const text = /^\d+$/.test(written) ? `127.0.0.1:${written}` : written
       const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(text)
       const url = URL.parse(withScheme ? text : `http://${text}`)
-      if (!url || (url.protocol !== 'http:' && url.protocol !== 'https:') || !url.hostname || (!withScheme && !/:\d+$/.test(text))) {
+      if (!url || (url.protocol !== 'http:' && url.protocol !== 'https:') || !url.hostname || url.port === '0' || (!withScheme && !/:\d+$/.test(text))) {
         this.addWarning(slug, `${String(entry)} is not a port, <host>:<port> or http(s) URL`)
         return null
       }
@@ -1711,6 +1723,20 @@ export class DevtoolConfigure {
     }
 
     return true
+  }
+
+  /**
+   * Reads an optional text setting, warning when it is given but is not a text.
+   * @param slug Names the setting in warnings.
+   * @param value The raw setting.
+   * @param fallback The value used when the setting is absent or invalid.
+   * @returns The text of the setting, else the fallback.
+   */
+  private readOptionalString (slug: string, value: unknown, fallback: string): string {
+    if (value === undefined) {
+      return fallback
+    }
+    return this.checkString(slug, value) ? (value as string) : fallback
   }
 
   private readKillSignal (slug: string, value: unknown): string | null {

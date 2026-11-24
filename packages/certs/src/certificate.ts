@@ -3,6 +3,17 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 
 const CERTIFICATE_BLOCK = /-----BEGIN CERTIFICATE-----[\s\S]+?-----END CERTIFICATE-----/
+const COMMON_NAME = /(?:^|\n| \+ )CN=((?:\\.|[^\\\n+])+?)(?= \+ |\n|$)/
+const ESCAPED_CHARACTER = /\\([0-9A-Fa-f]{2}|.)/g
+
+/**
+ * Decodes an attribute value of a distinguished name escaped as RFC 2253 does.
+ * @param value - The escaped value, special characters behind a backslash and control characters as `\XX` hexadecimal.
+ * @returns The value as it is in the certificate.
+ */
+function unescapeNameValue (value: string): string {
+  return value.replace(ESCAPED_CHARACTER, (_, character: string) => character.length === 2 ? String.fromCharCode(Number.parseInt(character, 16)) : character)
+}
 
 /** What the first certificate of a PEM text tells. */
 export interface CertificateInfo {
@@ -24,7 +35,8 @@ export function readCertificate (content: string): CertificateInfo | null {
   }
   try {
     const certificate = new X509Certificate(block)
-    const issuer = /(?:^|\n)CN=(.+)/.exec(certificate.issuer)?.[1] ?? certificate.issuer.replace(/\n/g, ', ')
+    const commonName = COMMON_NAME.exec(certificate.issuer)?.[1]
+    const issuer = commonName ? unescapeNameValue(commonName) : certificate.issuer.replace(/\n/g, ', ')
     return { expiresAt: new Date(certificate.validTo).toISOString(), issuer }
   } catch {
     return null

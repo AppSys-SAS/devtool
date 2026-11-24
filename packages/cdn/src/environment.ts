@@ -110,7 +110,8 @@ function recordsOf (value: unknown): Record<string, unknown>[] {
 }
 
 /**
- * Reads when an item of the environment is pulled on its own, `pull: { cron, startup }`.
+ * Reads when an item of the environment is pulled on its own, `pull: { cron, startup }`, an empty
+ * or blank cron standing for none.
  *
  * @param path - The path of the item.
  * @param value - The raw `pull` setting.
@@ -124,7 +125,9 @@ function readAutoPull (path: string, value: unknown): EnvironmentAutoPull | null
   if (pull !== value || (pull.cron !== undefined && typeof pull.cron !== 'string') || (pull.startup !== undefined && typeof pull.startup !== 'boolean')) {
     throw new Error(`invalid pull of ${path} in the environment: ${JSON.stringify(value)}`)
   }
-  return pull.cron || pull.startup ? { path, cron: typeof pull.cron === 'string' ? pull.cron : null, startup: pull.startup === true } : null
+  const cron = typeof pull.cron === 'string' && pull.cron.trim() !== '' ? pull.cron : null
+  const startup = pull.startup === true
+  return cron !== null || startup ? { path, cron, startup } : null
 }
 
 /**
@@ -241,7 +244,7 @@ export async function listTables (item: Extract<EnvironmentItem, { kind: 'databa
  * Tells whether pulling a selection overwrites local data.
  *
  * @param selection - The selection.
- * @returns True for databases and buckets.
+ * @returns True for databases, buckets and Redis databases.
  */
 export function overwritesLocalData (selection: EnvironmentSelection): boolean {
   return selection.item.kind !== 'file'

@@ -44,7 +44,7 @@ export async function prepareRenewal (
   const cwd = path.dirname(certificate.crt)
   if (acme.command) {
     const args = acme.command.map(arg => arg.replaceAll('%{ADT:CRT}', certificate.crt).replaceAll('%{ADT:KEY}', certificate.key))
-    return { args, cwd, finish: async () => {} }
+    return { args, cwd, finish: () => Promise.resolve() }
   }
 
   const executable = await installLego(path.join(cacheFolder, 'lego'), log)

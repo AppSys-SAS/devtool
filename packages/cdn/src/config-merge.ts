@@ -29,7 +29,7 @@ export interface ConfigFormat {
   write(baseText: string, changes: KeyChange[]): string
 }
 
-const DOTENV_LINE = /^(\s*(?:export\s+)?)([A-Za-z_][A-Za-z0-9_.-]*)\s*=\s*(.*)$/
+const DOTENV_LINE = /^(\s*(?:export\s+)?)([A-Za-z_][A-Za-z0-9_.-]*)\s*=(.*)$/
 const DOTENV_PLAIN_VALUE = /^[\w./:@,+=-]*$/
 
 /**
@@ -107,9 +107,9 @@ function applyChange (root: Record<string, unknown>, change: KeyChange): void {
 
 /**
  * Reads the value of a line of a dotenv file: quoted with escapes, single-quoted as is, or bare
- * without its trailing comment.
+ * without its trailing comment, a hash preceded by a blank.
  *
- * @param raw - The text after the equal sign.
+ * @param raw - The text after the equal sign, with its surrounding blanks.
  * @returns The value.
  */
 function readDotenvValue (raw: string): string {
@@ -119,7 +119,7 @@ function readDotenvValue (raw: string): string {
     return text.slice(1, end === -1 ? undefined : end)
   }
   if (!text.startsWith('"')) {
-    return text.replace(/\s+#.*$/, '')
+    return raw.replace(/\s#.*$/, '').trim()
   }
 
   let value = ''
@@ -147,6 +147,13 @@ function formatDotenvValue (value: unknown): string {
 
 const YAML_FORMAT: ConfigFormat = {
   read: readMap,
+  /**
+   * Changes the keys of a YAML file in place, keeping its comments and the layout of its collections.
+   *
+   * @param baseText - The YAML text.
+   * @param changes - The new value of each key, `undefined` to remove it.
+   * @returns The new text.
+   */
   write (baseText, changes) {
     const document = parseDocument(baseText)
     for (const change of changes) {
@@ -156,7 +163,7 @@ const YAML_FORMAT: ConfigFormat = {
         document.setIn(change.path, change.value)
       }
     }
-    return document.toString({ lineWidth: 0 })
+    return document.toString({ lineWidth: 0, flowCollectionPadding: false })
   }
 }
 
@@ -166,7 +173,7 @@ const JSON_FORMAT: ConfigFormat = {
     try {
       value = text.trim() ? JSON.parse(text) : {}
     } catch (error) {
-      throw new Error(`${label} is not valid JSON: ${error instanceof Error ? error.message : String(error)}`)
+      throw new Error(`${label} is not valid JSON: ${error instanceof Error ? error.message : String(error)}`, { cause: error })
     }
     if (!isMap(value)) {
       throw new Error(`${label} is not a JSON object`)
@@ -194,27 +201,44 @@ const DOTENV_FORMAT: ConfigFormat = {
     }
     return values
   },
+  /**
+   * Changes the keys of a dotenv file in place, keeping its other lines and its line ending. A key
+   * declared several times takes its new value on its last line, the one read, and is removed
+   * from every line; new keys are added at the end.
+   *
+   * @param baseText - The dotenv text.
+   * @param changes - The new value of each key, `undefined` to remove it.
+   * @returns The new text.
+   */
   write (baseText, changes) {
     const pending = new Map(changes.map(change => [change.path[0], change.value]))
+    const baseLines = baseText.split(/\r?\n/)
+    const matches = baseLines.map(line => DOTENV_LINE.exec(line))
+    const lastLines = new Map<string, number>()
+    for (const [index, match] of matches.entries()) {
+      if (match) {
+        lastLines.set(match[2], index)
+      }
+    }
+
     const lines: string[] = []
-    for (const line of baseText.split(/\r?\n/)) {
-      const match = DOTENV_LINE.exec(line)
+    for (const [index, line] of baseLines.entries()) {
+      const match = matches[index]
       if (!match || !pending.has(match[2])) {
         lines.push(line)
         continue
       }
 
       const value = pending.get(match[2])
-      pending.delete(match[2])
       if (value !== undefined) {
-        lines.push(`${match[1]}${match[2]}=${formatDotenvValue(value)}`)
+        lines.push(lastLines.get(match[2]) === index ? `${match[1]}${match[2]}=${formatDotenvValue(value)}` : line)
       }
     }
 
-    const added = [...pending].filter(([, value]) => value !== undefined).map(([key, value]) => `${key}=${formatDotenvValue(value)}`)
+    const added = [...pending].filter(([key, value]) => value !== undefined && !lastLines.has(key)).map(([key, value]) => `${key}=${formatDotenvValue(value)}`)
     const end = lines.length > 0 && lines[lines.length - 1] === '' ? lines.length - 1 : lines.length
     lines.splice(end, 0, ...added)
-    return lines.join('\n')
+    return lines.join(/\r?\n/.exec(baseText)?.[0] ?? '\n')
   }
 }
 

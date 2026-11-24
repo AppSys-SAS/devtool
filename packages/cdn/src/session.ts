@@ -107,7 +107,7 @@ export async function withSessionLock<T> (task: () => Promise<T>): Promise<T> {
       }
 
       if (Date.now() > deadline) {
-        throw new Error(`the devtool session stays locked (${lockPath()})`)
+        throw new Error(`the devtool session stays locked (${lockPath()})`, { cause: error })
       }
 
       await sleep(LOCK_RETRY_MS)

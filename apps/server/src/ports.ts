@@ -1,7 +1,6 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import type { PortConflict, PortOwner } from '@appsys/devtool-shared'
-import { stripAnsi } from './utils.js'
+import { stripAnsi, type PortConflict, type PortOwner } from '@appsys/devtool-shared'
 
 const execFileAsync = promisify(execFile)
 
@@ -95,7 +94,9 @@ export async function killPortOwners (owners: PortOwner[]): Promise<string[]> {
 
   const deadline = Date.now() + KILL_TIMEOUT_MS
   while (Date.now() < deadline && pending.some(owner => isAlive(owner.pid))) {
-    await new Promise(resolve => setTimeout(resolve, KILL_POLL_MS))
+    await new Promise(resolve => {
+      setTimeout(resolve, KILL_POLL_MS)
+    })
   }
   for (const owner of pending.filter(candidate => isAlive(candidate.pid))) {
     try {

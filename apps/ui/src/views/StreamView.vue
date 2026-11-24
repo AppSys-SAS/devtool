@@ -59,7 +59,7 @@ const stoppedDate = computed(() =>
   stream.value?.stoppedDate ? formatDate(stream.value.stoppedDate, stream.value.runningDate ?? undefined) : null
 )
 
-const args = computed(() => Object.entries(stream.value?.args ?? {}).map(([key, value]) => `${value}`))
+const args = computed(() => Object.values(stream.value?.args ?? {}).map(value => `${value}`))
 const exitCode = computed(() => stream.value?.exitCode ?? null)
 const env = computed(() => Object.entries(stream.value?.env ?? {}).map(([key, value]) => `${key}=${value}`))
 const fullName = computed(() => stream.value?.name ?? 'N/A')
