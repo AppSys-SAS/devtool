@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { type Component, computed, ref } from "vue";
 import { Icon } from "@iconify/vue";
 import { useLocalStorage } from "@vueuse/core";
 import { ChevronDown, Sparkles } from "@lucide/vue";
@@ -11,8 +11,10 @@ import { Button } from "@/components/ui/button";
 import configStore from "@/stores/config";
 
 defineProps<{
-  /** The text of the button. */
+  /** What the button does, its text or, with an icon, its title. */
   label: string;
+  /** The icon shown alone in place of the text and of the icon of the agent. */
+  icon?: Component;
 }>();
 
 const emit = defineEmits<{
@@ -57,16 +59,23 @@ function startLast(): void {
       :title="last ? `${label} with ${last.name}` : `${label} with an agent`"
       @click="startLast"
     >
-      <Icon
-        v-if="last"
-        :icon="last.icon"
+      <component
+        :is="icon"
+        v-if="icon"
         class="size-3.5"
       />
-      <Sparkles
-        v-else
-        class="size-3.5"
-      />
-      {{ label }}
+      <template v-else>
+        <Icon
+          v-if="last"
+          :icon="last.icon"
+          class="size-3.5"
+        />
+        <Sparkles
+          v-else
+          class="size-3.5"
+        />
+        {{ label }}
+      </template>
     </Button>
     <DropdownMenuRoot>
       <DropdownMenuTrigger

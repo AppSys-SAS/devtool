@@ -2,7 +2,7 @@ import type { EventEmitter } from "node:events";
 import type {
   CertificatePayload,
   CommandInputValue,
-  PullRequestsPayload,
+  ForgeItemsPayload,
   EnvironmentKeysPayload,
   EnvironmentPayload,
   EnvironmentTablesPayload,
@@ -120,9 +120,9 @@ export interface McpCertificates {
   renew(name: string, tag: string | null): Promise<void>;
 }
 
-/** The open pull requests of the integrations of the projects. */
-export interface McpPullRequests {
-  state(): PullRequestsPayload[];
+/** The open pull requests and issues of the integrations of the sections and projects. */
+export interface McpForgeItems {
+  state(): ForgeItemsPayload[];
 }
 
 /** What the tools of agents use from the devtool server. */
@@ -132,7 +132,7 @@ export interface McpHost {
   readonly fileSpaces: McpFileSpaces;
   readonly environment: McpEnvironment;
   readonly certificates: McpCertificates;
-  readonly pullRequests: McpPullRequests;
+  readonly forgeItems: McpForgeItems;
   newCommandStream(data: McpCommandStart, hooks?: { onExit?: (exitCode: number) => void }): Promise<McpTerminal>;
   newCommandDetached(data: McpCommandStart): Promise<void>;
   changeFiles(spaceId: string, change: (space: McpFileSpace) => Promise<void>): Promise<string | null>;

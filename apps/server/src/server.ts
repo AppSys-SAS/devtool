@@ -16,7 +16,7 @@ import { DevtoolHttp } from "./http.js";
 import { DevtoolLB } from "./lb.js";
 import { DevtoolMcp, type McpLevelChange, type McpServerHost, type McpUiMessage } from "@appsys/devtool-mcp";
 import { listPortOwners } from "./ports.js";
-import { DevtoolPullRequests } from "./pull-requests.js";
+import { DevtoolForgeItems } from "./forge-items.js";
 import type {
   AgentStartPayload,
   CommandStreamCreatePayload,
@@ -61,7 +61,7 @@ export class DevtoolServer implements McpServerHost {
 
   readonly certificates: DevtoolCertificates;
 
-  readonly pullRequests: DevtoolPullRequests;
+  readonly forgeItems: DevtoolForgeItems;
 
   readonly fileSpaces = new DevtoolFileSpaces();
 
@@ -98,9 +98,9 @@ export class DevtoolServer implements McpServerHost {
       reload: () => this.reconfigure(),
       synchronizedPaths: (files) => this.environment.synchronizedPaths(files),
     });
-    this.pullRequests = new DevtoolPullRequests({
+    this.forgeItems = new DevtoolForgeItems({
       publish: async (payload) => {
-        await this.http?.sendToWsConnections("pullRequests", payload);
+        await this.http?.sendToWsConnections("forgeItems", payload);
       },
     });
     this.mcp = new DevtoolMcp(this);
@@ -244,8 +244,8 @@ export class DevtoolServer implements McpServerHost {
 
   /**
    * Sends a new interface the configuration, the CDN sign-in state, the development environment, the
-   * certificates, the pull requests, the command streams and the agents; the pull requests are read
-   * from the first interface on.
+   * certificates, the pull requests and issues, the command streams and the agents; the pull requests
+   * and issues are read from the first interface on.
    * @param ws The connection of the interface.
    */
   async onNewConnection(ws: WebSocket): Promise<void> {
@@ -253,8 +253,8 @@ export class DevtoolServer implements McpServerHost {
     await this.http.sendToWsConnections("cdnSession", await this.cdnSession.status(), ws);
     await this.http.sendToWsConnections("environment", this.environment.state(), ws);
     await this.http.sendToWsConnections("certificates", this.certificates.state(), ws);
-    await this.http.sendToWsConnections("pullRequests", this.pullRequests.state(), ws);
-    this.pullRequests.start();
+    await this.http.sendToWsConnections("forgeItems", this.forgeItems.state(), ws);
+    this.forgeItems.start();
     for (const stream of this.commandStreams) {
       await stream.sendUpdate(ws);
       await stream.sendOutput(null, ws);
@@ -296,8 +296,13 @@ export class DevtoolServer implements McpServerHost {
       return;
     }
 
-    if (message.type === "pullRequestsRefresh") {
-      await this.pullRequests.refresh(message.data.key);
+    if (message.type === "forgeItemsRefresh") {
+      await this.forgeItems.refresh(message.data.key);
+      return;
+    }
+
+    if (message.type === "forgeTimelineRead") {
+      await this.http.sendToWsConnections("forgeTimeline", await this.forgeItems.timeline(message.data.key, message.data.number, message.data.before ?? null), ws);
       return;
     }
 
@@ -640,7 +645,7 @@ export class DevtoolServer implements McpServerHost {
 
   /**
    * Loads the configuration and hands it to the CDN session, the environment, the certificates, the
-   * pull requests, the file spaces and the MCP server, then watches its folders of scripts.
+   * pull requests and issues, the file spaces and the MCP server, then watches its folders of scripts.
    */
   private async loadConfig(): Promise<void> {
     const nextConfig = await this.configProvider();
@@ -650,7 +655,7 @@ export class DevtoolServer implements McpServerHost {
     this.cdnSession.configure(nextConfig.raw.cdn);
     this.environment.configure(nextConfig.raw);
     await this.certificates.configure(this.config, this.configWrapper.automations);
-    this.pullRequests.configure(this.config, this.configWrapper.automations, this.configWrapper.integrationTokens);
+    this.forgeItems.configure(this.config, this.configWrapper.automations, this.configWrapper.integrationTokens);
     this.fileSpaces.configure(nextConfig.raw, this.config.projects, (filePath) => this.afterConfigWrite(filePath));
     await this.mcp.configure();
     this.watchScriptFolders();

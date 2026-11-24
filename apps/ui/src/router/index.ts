@@ -60,6 +60,12 @@ const router = createRouter({
           props: true,
         },
         {
+          name: "project-integration-item",
+          path: "i/:integration/:number",
+          component: () => import("@/views/IntegrationView.vue"),
+          props: true,
+        },
+        {
           path: "d/:directorySlug",
           component: () => import("@/views/DirectoryIndexView.vue"),
           props: true,
@@ -85,6 +91,12 @@ const router = createRouter({
             {
               name: "directory-integration",
               path: "i/:integration",
+              component: () => import("@/views/IntegrationView.vue"),
+              props: true,
+            },
+            {
+              name: "directory-integration-item",
+              path: "i/:integration/:number",
               component: () => import("@/views/IntegrationView.vue"),
               props: true,
             },

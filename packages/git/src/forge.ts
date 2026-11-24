@@ -1,16 +1,16 @@
-import type { PullRequestPayload } from "@appsys/devtool-shared";
+import type { ForgeKind, ForgeTimelinePage, ForgeTimelinePart, IssuePayload, PullRequestPayload } from "@appsys/devtool-shared";
 import type { ForgeRepository } from "./repository.js";
 
 const REQUEST_TIMEOUT = 15_000;
 
-/** The open pull requests of a repository, as the owner of a token sees them. */
-export interface ForgePullRequests {
+/** Open items of a repository, as the owner of a token sees them. */
+export interface ForgeItems<T> {
   /** The username the token belongs to, null without token. */
   viewer: string | null;
-  items: PullRequestPayload[];
+  items: T[];
 }
 
-/** A service hosting git repositories and their pull requests. */
+/** A service hosting git repositories, their pull requests and their issues. */
 export interface GitForge {
   /** Its name in the configuration. */
   name: string;
@@ -31,7 +31,26 @@ export interface GitForge {
    * @returns The pull requests, the last changed first.
    * @throws {ForgeError} When the forge refuses or fails.
    */
-  pullRequests(repository: ForgeRepository, token: string | null): Promise<ForgePullRequests>;
+  pullRequests(repository: ForgeRepository, token: string | null): Promise<ForgeItems<PullRequestPayload>>;
+  /**
+   * Reads the open issues of a repository.
+   * @param repository The repository.
+   * @param token The access token, null to read as an anonymous person.
+   * @returns The issues, the last changed first.
+   * @throws {ForgeError} When the forge refuses or fails.
+   */
+  issues(repository: ForgeRepository, token: string | null): Promise<ForgeItems<IssuePayload>>;
+  /**
+   * Reads a part of the timeline of a pull request or of an issue: comments, reviews, commits and changes.
+   * @param repository The repository.
+   * @param token The access token, null to read as an anonymous person.
+   * @param kind Whether the item is a pull request or an issue.
+   * @param number The number of the item.
+   * @param page The last events, or every event before a place a previous part gave.
+   * @returns What happened, the oldest first, and what comes before.
+   * @throws {ForgeError} When the forge refuses or fails.
+   */
+  timeline(repository: ForgeRepository, token: string | null, kind: ForgeKind, number: number, page: ForgeTimelinePage): Promise<ForgeTimelinePart>;
 }
 
 /** A refusal or a failure of a forge. */

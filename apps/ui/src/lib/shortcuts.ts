@@ -1,9 +1,9 @@
 import type { RouteLocationRaw } from "vue-router";
-import type { DirectoryDefinition, DirectoryShortcut, IntegrationDefinition, ProjectDefinition } from "@appsys/devtool-shared";
+import type { DirectoryDefinition, DirectoryShortcut, ForgeItemsPayload, IntegrationDefinition, ProjectDefinition } from "@appsys/devtool-shared";
 import { integrationKey } from "@appsys/devtool-shared";
 import router from "@/router";
 import { commandName, iconFromMeta, runDirectoryCommand, startDefaultCommand } from "@/lib/directory-commands";
-import pullRequestsStore from "@/stores/pull-requests";
+import forgeItemsStore from "@/stores/forge-items";
 
 const GENERIC_INTEGRATION_ICON = "lucide:app-window";
 
@@ -40,15 +40,28 @@ export function integrationRoute(integration: IntegrationDefinition, projectSlug
 /**
  * Tells whether an integration is shown in a page of the devtool rather than opened in a new tab.
  * @param integration The integration.
- * @returns Whether it has a page: embedded, or listing pull requests.
+ * @returns Whether it has a page: embedded, or listing pull requests or issues.
  */
 export function hasIntegrationPage(integration: IntegrationDefinition): boolean {
-  return integration.embed || integration.type === "pullRequests";
+  return integration.embed || integration.type !== "web";
 }
 
 /**
- * Gives the shortcut opening an integration: its page when embedded or listing pull requests, else its
- * URL in a new tab; pull requests count those waiting for a review of the person, unless `badge` is off.
+ * Counts the items of an integration waiting for the person: the pull requests whose review is
+ * requested, the issues assigned.
+ * @param state The items of the integration.
+ * @returns Their number, 0 before they are read.
+ */
+function waitingCount(state: ForgeItemsPayload | null): number {
+  if (!state) {
+    return 0;
+  }
+  return state.kind === "pullRequests" ? state.items.filter((item) => item.reviewRequested).length : state.items.filter((item) => item.assigned).length;
+}
+
+/**
+ * Gives the shortcut opening an integration: its page when embedded or listing pull requests or issues,
+ * else its URL in a new tab; pull requests and issues count those waiting for the person, unless `badge` is off.
  * @param integration The integration.
  * @param projectSlug The project declaring it, or holding the directory declaring it, if any.
  * @param directorySlug The directory declaring it, if any.
@@ -56,8 +69,7 @@ export function hasIntegrationPage(integration: IntegrationDefinition): boolean 
  */
 export function integrationShortcut(integration: IntegrationDefinition, projectSlug?: string, directorySlug?: string): SidebarShortcut {
   const route = hasIntegrationPage(integration) ? integrationRoute(integration, projectSlug, directorySlug) : null;
-  const state = integration.badge && projectSlug ? pullRequestsStore.get(integrationKey(projectSlug, directorySlug ?? null, integration.slug)) : null;
-  const waiting = state?.items.filter((item) => item.reviewRequested).length ?? 0;
+  const waiting = integration.badge && projectSlug ? waitingCount(forgeItemsStore.get(integrationKey(projectSlug, directorySlug ?? null, integration.slug))) : 0;
   return {
     key: `integration:${integration.slug}`,
     name: integration.name,

@@ -1,8 +1,8 @@
 import path from "node:path";
 import fs from "node:fs/promises";
 import net from "node:net";
-import type { AgentDefinition, CertificateAcme, ClientConfigPayload, CommandArg, CommandChoice, CommandForm, CommandInput, CommandInputValue, DirectoryDefinition, DirectoryFiles, DirectoryFilesType, DirectoryScripts, ScriptSettings, AdtDefinition, DirectoryDefaultAction, DirectoryShortcut, DnsDefinition, DnsRecord, HostAccess, IntegrationDefinition, IntegrationType, LoadBalancerCertificate, McpCategory, McpEnvironmentItem, McpPatterns, McpRules, McpSettings, McpTarget, PassthroughRule, ProjectDefinition, ProjectRestore, RuntimeConfig, SidebarSettings, SortMode } from "@appsys/devtool-shared";
-import { DEFAULT_REVIEW_PROMPT, defaultMcpRules, integrationKey, isMcpLevel, logger, readMcpRules, shortcutKey, SORT_MODES, sortKeys } from "@appsys/devtool-shared";
+import type { AgentAction, AgentDefinition, CertificateAcme, ForgeKind, ClientConfigPayload, CommandArg, CommandChoice, CommandForm, CommandInput, CommandInputValue, DirectoryDefinition, DirectoryFiles, DirectoryFilesType, DirectoryScripts, ScriptSettings, AdtDefinition, DirectoryDefaultAction, DirectoryShortcut, DnsDefinition, DnsRecord, HostAccess, IntegrationDefinition, IntegrationType, LoadBalancerCertificate, McpCategory, McpEnvironmentItem, McpPatterns, McpRules, McpSettings, McpTarget, PassthroughRule, ProjectDefinition, ProjectRestore, RuntimeConfig, SidebarSettings, SortMode } from "@appsys/devtool-shared";
+import { AGENT_ACTIONS, DEFAULT_AGENT_PROMPTS, defaultMcpRules, integrationKey, isMcpLevel, logger, readMcpRules, shortcutKey, SORT_MODES, sortKeys } from "@appsys/devtool-shared";
 import { type LegoOptionValue, legoRunArgs } from "@appsys/devtool-certs";
 import { configSourceKey, resolveAppIdentity, resolveCacheFolder } from "@appsys/devtool-config";
 import { FORGES, findForge, originUrl, repositoryOf } from "@appsys/devtool-git";
@@ -43,9 +43,12 @@ export function agentAutomationKey(slug: string): string {
 }
 const HOST_PATTERN_REGEXP = /^(\*\.)?[a-z0-9-]+(\.[a-z0-9-]+)*$/;
 const DEFAULT_INTEGRATION_ICON = "lucide:app-window";
-const DEFAULT_PULL_REQUESTS_ICON = "lucide:git-pull-request";
+const DEFAULT_FORGE_ICONS: Record<ForgeKind, string> = { pullRequests: "lucide:git-pull-request", issues: "lucide:circle-dot" };
+/** The setting turning on each action of agents on the items of an integration. */
+const AGENT_ACTION_SETTINGS: Record<AgentAction, string> = { review: "agentReview", analyze: "agentAnalyze", fix: "agentFix" };
+const FORGE_KINDS: readonly ForgeKind[] = ["pullRequests", "issues"];
 const DEFAULT_AGENT_ICON = "lucide:bot";
-const INTEGRATION_TYPES: readonly IntegrationType[] = ["web", "pullRequests"];
+const INTEGRATION_TYPES: readonly IntegrationType[] = ["web", ...FORGE_KINDS];
 /** The optional parts of the sidebar, each shown or hidden. */
 const SIDEBAR_PARTS = ["environment", "configs", "login"] as const satisfies readonly (keyof SidebarSettings)[];
 
@@ -149,6 +152,9 @@ export class DevtoolConfigure {
   /** The tokens of the integrations, value blocks not read yet, by `<section>[/<project>]/<slug>`, never sent to the interfaces. */
   public integrationTokens: Record<string, string>;
 
+  /** The prompts of the actions of agents by kind of items, `adt.agentPrompts`, over those of the devtool. */
+  private agentPrompts: Partial<Record<ForgeKind, Partial<Record<AgentAction, string>>>>;
+
   /** Where the settings of the configuration come from. */
   private readonly origin: ConfigOrigin;
 
@@ -165,6 +171,7 @@ export class DevtoolConfigure {
     this.dns = null;
     this.integrations = [];
     this.integrationTokens = {};
+    this.agentPrompts = {};
     this.projects = {};
     this.automations = {};
     this.warnings = [];
@@ -290,6 +297,7 @@ export class DevtoolConfigure {
     this.dns = null;
     this.integrations = [];
     this.integrationTokens = {};
+    this.agentPrompts = {};
     this.projects = {};
     this.automations = {};
     this.warnings = [];
@@ -396,6 +404,17 @@ export class DevtoolConfigure {
     Object.assign(this.adt.sidebar, this.readSort("adt.sidebar", sidebar, "config"));
 
     this.adt.agents = this.readAgents(adt.agents);
+    const agentPrompts = adt.agentPrompts === undefined || isObject(adt.agentPrompts) ? toRecord(adt.agentPrompts) : null;
+    if (!agentPrompts) {
+      this.addWarning("adt.agentPrompts", "must be a map of prompts by kind of integration");
+    }
+    for (const [kind, prompts] of Object.entries(agentPrompts ?? {})) {
+      if (FORGE_KINDS.includes(kind as ForgeKind)) {
+        this.agentPrompts[kind as ForgeKind] = this.readAgentPrompts(`adt.agentPrompts.${kind}`, kind as ForgeKind, prompts);
+      } else {
+        this.addWarning(`adt.agentPrompts.${kind}`, `is not a kind of integration, expected ${FORGE_KINDS.join(" or ")}`);
+      }
+    }
   }
 
   /**
@@ -1070,8 +1089,8 @@ export class DevtoolConfigure {
 
   /**
    * Reads the integrations, `{ <slug>: { name, type, url, icon, embed } }`, in the order they are
-   * declared; those of `type: pullRequests` also read `provider`, `token`, `opAccount`, `refresh`,
-   * `badge`, `agentReview` and `prompt`, their token kept in {@link integrationTokens}.
+   * declared; those listing pull requests or issues are read by {@link readForgeIntegration}, their
+   * token kept in {@link integrationTokens}.
    * @param slug Names the setting in warnings.
    * @param value The raw setting.
    * @param owner The section or the project declaring them, null at the root.
@@ -1101,13 +1120,13 @@ export class DevtoolConfigure {
       if (integration.icon !== undefined && !this.checkString(`${setting}.icon`, integration.icon)) {
         continue;
       }
-      if (type === "pullRequests") {
-        const pullRequests = owner ? this.readPullRequests(setting, integrationSlug, integration, owner) : null;
+      if (type !== "web") {
+        const forgeIntegration = owner ? this.readForgeIntegration(setting, integrationSlug, type as ForgeKind, integration, owner) : null;
         if (!owner) {
-          this.addWarning(`${setting}.type`, "pullRequests needs a section or a project, whose folder the agents work in");
+          this.addWarning(`${setting}.type`, `${type} needs a section or a project, whose folder the agents work in`);
         }
-        if (pullRequests) {
-          integrations.push(pullRequests);
+        if (forgeIntegration) {
+          integrations.push(forgeIntegration);
         }
         continue;
       }
@@ -1128,8 +1147,8 @@ export class DevtoolConfigure {
         url: integration.url,
         embed: integration.embed ?? true,
         provider: null,
-        agentReview: false,
-        prompt: null,
+        agentActions: [],
+        agentPrompts: {},
         badge: false,
         refresh: 0,
       });
@@ -1138,16 +1157,19 @@ export class DevtoolConfigure {
   }
 
   /**
-   * Reads an integration listing the pull requests of a repository: `url`, the `origin` remote of the
-   * folder of its owner by default, `provider`, guessed from the host by default, `token`, read with
-   * value blocks, `opAccount`, `refresh` in minutes, `badge`, `agentReview`, off by default, and `prompt`.
+   * Reads an integration listing the pull requests or the issues of a repository: `url`, the `origin`
+   * remote of the folder of its owner by default, `provider`, guessed from the host by default, `token`,
+   * read with value blocks, `opAccount`, `refresh` in minutes, `badge`, the actions of agents its kind
+   * offers (`agentReview`, `agentAnalyze`, `agentFix`), each off by default, and their `agentPrompts`,
+   * over those of `adt.agentPrompts` and of the devtool.
    * @param setting Names the integration in warnings.
    * @param slug The slug of the integration.
+   * @param kind What it lists.
    * @param integration The raw integration.
    * @param owner The section or the project declaring it.
    * @returns The integration, null when invalid.
    */
-  private readPullRequests(setting: string, slug: string, integration: Record<string, unknown>, owner: IntegrationOwner): IntegrationDefinition | null {
+  private readForgeIntegration(setting: string, slug: string, kind: ForgeKind, integration: Record<string, unknown>, owner: IntegrationOwner): IntegrationDefinition | null {
     const url = integration.url ?? originUrl(owner.path);
     const repository = typeof url === "string" ? repositoryOf(url) : null;
     if (!repository) {
@@ -1165,15 +1187,21 @@ export class DevtoolConfigure {
       this.addWarning(`${setting}.refresh`, "must be a number of minutes, 0 to read on demand only");
       return null;
     }
-    for (const flag of ["badge", "agentReview"] as const) {
+    for (const flag of ["badge", ...Object.values(AGENT_ACTION_SETTINGS)]) {
       if (integration[flag] !== undefined && typeof integration[flag] !== "boolean") {
         this.addWarning(`${setting}.${flag}`, "must be true or false");
         return null;
       }
     }
-    if ((integration.token !== undefined && !this.checkString(`${setting}.token`, integration.token)) || (integration.prompt !== undefined && !this.checkString(`${setting}.prompt`, integration.prompt))) {
+    for (const [action, flag] of Object.entries(AGENT_ACTION_SETTINGS) as [AgentAction, string][]) {
+      if (integration[flag] !== undefined && !AGENT_ACTIONS[kind].includes(action)) {
+        this.addWarning(`${setting}.${flag}`, `is not an action of ${kind}, which offer ${AGENT_ACTIONS[kind].map((item) => AGENT_ACTION_SETTINGS[item]).join(", ")}`);
+      }
+    }
+    if (integration.token !== undefined && !this.checkString(`${setting}.token`, integration.token)) {
       return null;
     }
+    const prompts = this.readAgentPrompts(`${setting}.agentPrompts`, kind, integration.agentPrompts);
 
     const key = integrationKey(owner.section, owner.project, slug);
     if (typeof integration.token === "string") {
@@ -1186,16 +1214,42 @@ export class DevtoolConfigure {
     return {
       slug,
       name: integration.name as string,
-      type: "pullRequests",
-      icon: (integration.icon as string | undefined) ?? DEFAULT_PULL_REQUESTS_ICON,
+      type: kind,
+      icon: (integration.icon as string | undefined) ?? DEFAULT_FORGE_ICONS[kind],
       url: repository.webUrl,
       embed: false,
       provider: { name: forge.name, label: forge.label },
-      agentReview: (integration.agentReview as boolean | undefined) ?? false,
-      prompt: (integration.prompt as string | undefined) ?? DEFAULT_REVIEW_PROMPT,
+      agentActions: AGENT_ACTIONS[kind].filter((action) => integration[AGENT_ACTION_SETTINGS[action]] === true),
+      agentPrompts: Object.fromEntries(AGENT_ACTIONS[kind].map((action) => [action, prompts[action] ?? this.agentPrompts[kind]?.[action] ?? DEFAULT_AGENT_PROMPTS[action]])),
       badge: (integration.badge as boolean | undefined) ?? true,
       refresh,
     };
+  }
+
+  /**
+   * Reads prompts of the actions of agents, `{ <action>: <prompt> }`, keeping those of the actions of a kind.
+   * @param slug Names the setting in warnings.
+   * @param kind The kind of the items the actions are about.
+   * @param value The raw setting.
+   * @returns The prompts, by action.
+   */
+  private readAgentPrompts(slug: string, kind: ForgeKind, value: unknown): Partial<Record<AgentAction, string>> {
+    if (value === undefined) {
+      return {};
+    }
+    if (!isObject(value)) {
+      this.addWarning(slug, "must be a map of prompts by action");
+      return {};
+    }
+    const prompts: Partial<Record<AgentAction, string>> = {};
+    for (const [action, prompt] of Object.entries(value)) {
+      if (!AGENT_ACTIONS[kind].includes(action as AgentAction)) {
+        this.addWarning(`${slug}.${action}`, `is not an action of ${kind}, which offer ${AGENT_ACTIONS[kind].join(", ")}`);
+      } else if (this.checkString(`${slug}.${action}`, prompt)) {
+        prompts[action as AgentAction] = prompt as string;
+      }
+    }
+    return prompts;
   }
 
   /**

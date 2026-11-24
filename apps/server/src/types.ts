@@ -112,8 +112,13 @@ export type ConnectionMessage =
       data: { name: string; tag: string | null };
     }
   | {
-      type: "pullRequestsRefresh";
+      type: "forgeItemsRefresh";
       data: { key: string };
+    }
+  | {
+      type: "forgeTimelineRead";
+      /** `before`: where the events read start, as a previous part gave it, absent for the last events. */
+      data: { key: string; number: number; before?: string | null };
     }
   | {
       type: "agentStart";

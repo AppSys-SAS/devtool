@@ -3,7 +3,7 @@ import type { EnvironmentKeyChoicePayload, FileEntryPayload, PortConflictAction,
 import configStore from "./config";
 import filesStore from "./files";
 import certificatesStore from "./certificates";
-import pullRequestsStore from "./pull-requests";
+import forgeItemsStore from "./forge-items";
 import environmentStore from "./environment";
 import mcpStore from "./mcp";
 import sessionStore from "./session";
@@ -59,8 +59,11 @@ class WsStore {
           case "certificates":
             certificatesStore.load(payload.data as never);
             break;
-          case "pullRequests":
-            pullRequestsStore.load(payload.data as never);
+          case "forgeItems":
+            forgeItemsStore.load(payload.data as never);
+            break;
+          case "forgeTimeline":
+            forgeItemsStore.loadTimeline(payload.data as never);
             break;
           case "environmentKeys":
             environmentStore.loadKeys(payload.data as never);
@@ -206,11 +209,21 @@ class WsStore {
   }
 
   /**
-   * Asks the server to read the pull requests of an integration now.
+   * Asks the server to read the pull requests or issues of an integration now.
    * @param key The integration, `<section>[/<project>]/<slug>`.
    */
-  pullRequestsRefresh(key: string): void {
-    this.send("pullRequestsRefresh", { key });
+  forgeItemsRefresh(key: string): void {
+    this.send("forgeItemsRefresh", { key });
+  }
+
+  /**
+   * Asks the server for a part of the timeline of a pull request or an issue.
+   * @param key The integration, `<section>[/<project>]/<slug>`.
+   * @param number The number of the item.
+   * @param before Where the events asked for start, as the previous part gave it, null for the last events.
+   */
+  forgeTimelineRead(key: string, number: number, before: string | null = null): void {
+    this.send("forgeTimelineRead", { key, number, before });
   }
 
   /**
@@ -341,7 +354,7 @@ class WsStore {
     sessionStore.load(null);
     environmentStore.load(null);
     certificatesStore.load([]);
-    pullRequestsStore.load([]);
+    forgeItemsStore.load([]);
   }
 }
 

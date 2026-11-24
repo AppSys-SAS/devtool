@@ -198,45 +198,60 @@ and Configs), by a section (in its page, and in its header with `icons` and `lin
   host frame the host of `url` (`X-Frame-Options` removed, `frame-ancestors` set); `false` opens a new tab.
 - `type`: `web` (default), or `pullRequests` (below).
 
-## Pull requests and agents
+## Pull requests, issues and agents
 
-An integration of a section or of a project with `type: pullRequests` lists the open pull requests of a
-repository, refreshed from the Reload button of its page, filtered by Open, Review requested and Mine;
-its agents work in the folder of the section or of the project:
+An integration of a section or of a project with `type: pullRequests` or `type: issues` lists the open
+pull requests or issues of a repository, refreshed from the Reload button of its page, filtered by Open,
+Review requested (pull requests) or Assigned (issues), and Mine. A click on a title shows the item in
+the devtool: its labels, branches and checks or assignees, its description, and its timeline, the most
+recent first: comments, reviews with their discussions about the code (file, line, excerpt of the
+change, replies, resolved ones folded), commits grouped as pushed, changes of labels, assignees, title,
+state and references. The last 30 events are read when it opens, Load previous events reads the others
+(up to 1000). Markdown is shown with its HTML once
+sanitized (no script, event or `javascript:` link), task lists as read-only checkboxes and links in a
+new tab. Its agents work in the folder of the section or of the project:
 
 - `url`: the web address or a remote of the repository (https, ssh, `git@host:group/repo.git`), the
   `origin` remote of the folder of the section or of the project by default.
 - `provider`: the forge, `github` (github.com and GitHub Enterprise Server) or `gitlab`; guessed from a
   host named `github.com`, `github.*`, `gitlab.com` or `gitlab.*`, required otherwise.
 - `token`: read with value blocks and `opAccount` as in commands, once per run of the server (again after
-  a change of the configuration or a refusal of the forge); GitHub needs one, GitLab reads public
-  projects without. GitLab shows only running checks, from the merge status of each merge request.
+  a change of the configuration or a refusal of the forge); GitHub needs one, GitLab reads the items of
+  public projects without, but not their timeline. GitLab shows only running checks, from the merge
+  status of each merge request, and tells its changes by its system notes.
 - `refresh` (default `5`): minutes between two reads once an interface opened, `0` to read from the
   button only.
-- `badge` (default `true`): the sidebar counts the pull requests waiting for a review of the person,
-  next to its icon in `icons` and at the right of its row in `lines`.
-- `agentReview` (default `false`): each pull request offers a Review button starting an agent below.
-- `prompt`: what an agent reviewing a pull request is asked, `%{ADT:PR_URL}`, `%{ADT:PR_NUMBER}`,
-  `%{ADT:PR_TITLE}`, `%{ADT:PR_BRANCH}`, `%{ADT:PR_BASE}` and `%{ADT:PR_AUTHOR}` standing for it; a
-  review reading its changes without checking out its branch by default.
+- `badge` (default `true`): the sidebar counts the pull requests waiting for a review of the person, or
+  the issues assigned to them, next to its icon in `icons` and at the right of its row in `lines`.
+- Actions of agents, each off by default: `agentReview` on pull requests (a Review button), `agentAnalyze`
+  and `agentFix` on issues (two icon buttons: analyze the issue and propose a plan without changing any
+  file, or fix it on a branch of its own).
+- `agentPrompts`: the prompt of each action, `{ review }` or `{ analyze, fix }`, over those of
+  `adt.agentPrompts.<type>` (`pullRequests` or `issues`), over those of the devtool.
+  `%{ADT:PR_URL}`, `%{ADT:PR_NUMBER}`, `%{ADT:PR_TITLE}`, `%{ADT:PR_BRANCH}`, `%{ADT:PR_BASE}` and
+  `%{ADT:PR_AUTHOR}` stand for a pull request, `%{ADT:ISSUE_URL}`, `%{ADT:ISSUE_NUMBER}`,
+  `%{ADT:ISSUE_TITLE}` and `%{ADT:ISSUE_AUTHOR}` for an issue.
 
-`adt.agents`, usually in `config.local.yml`, lists the agents the Review button starts, `args` run in a
+`adt.agents` lists the agents the buttons start, `args` run in a
 terminal of the project (with `env`, `opAccount` and value blocks as in commands) or `url` opened by the
 browser (a web page in a new tab, any other link by the application registered for it):
 `%{ADT:PROMPT}` stands for the prompt and `%{ADT:CWD}` for the folder of the project, encoded in a
-`url`; the text of a pull request is never read as value blocks. The button starts the agent used last
-in this browser, else asks which one; its arrow lists them all.
+`url`; the text of a pull request or an issue is never read as value blocks. A button starts the agent
+used last in this browser, else asks which one; its arrow lists them all.
 
 ```yaml
 adt:
   agents:
     claude-code: { name: Claude Code, icon: simple-icons:claude, args: [ claude, "%{ADT:PROMPT}" ] }
     claude-desktop: { name: Claude Desktop, icon: simple-icons:claude, url: "claude://code/new?folder=%{ADT:CWD}&q=%{ADT:PROMPT}" }
+  agentPrompts:
+    issues: { analyze: "Analyze %{ADT:ISSUE_URL} and list the files involved." }
 projects:
   web:
     integrations:
       pulls: { name: Pull requests, type: pullRequests, token: "{{ $(gh auth token) }}", agentReview: true }
-    lines: [ integration:pulls ]
+      issues: { name: Issues, type: issues, token: "{{ $(gh auth token) }}", agentAnalyze: true, agentFix: true }
+    lines: [ integration:pulls, integration:issues ]
 ```
 
 ## Agent skills
@@ -429,7 +444,7 @@ the screen), `wait_for_output`, `search_terminals`, `run_command`, `run_shell`, 
 `control_terminal`, `resize_terminal`, `resolve_port_conflict`, `port_owners`, `start_section`,
 `stop_section`, `restore_folder`, `list_files`, `read_file`, `write_file`, `update_keys`, `change_files`,
 `environment_status`, `environment_keys`, `environment_tables`, `environment_sync`, `pull_shared_config`,
-`list_certificates`, `renew_certificate`, `list_pull_requests`, `reload_config`, `notify_user`; the terminals are also resources
+`list_certificates`, `renew_certificate`, `list_pull_requests`, `list_issues`, `reload_config`, `notify_user`; the terminals are also resources
 an agent may subscribe to (`devtool://terminals`, `devtool://terminal/<slug>`).
 
 A new client is accepted first, by `adt.mcp.clients` or by the user. Then each call follows the level of

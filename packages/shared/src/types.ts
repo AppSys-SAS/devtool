@@ -213,8 +213,14 @@ export interface CertificatePayload {
   push: string[];
 }
 
-/** What an integration shows: a web page, or the pull requests of a repository. */
-export type IntegrationType = "web" | "pullRequests";
+/** What a forge lists for a repository: its pull requests, or its issues. */
+export type ForgeKind = "pullRequests" | "issues";
+
+/** What an integration shows: a web page, or what a forge lists for a repository. */
+export type IntegrationType = "web" | ForgeKind;
+
+/** What an agent does with an item of a forge: review a pull request, analyze or fix an issue. */
+export type AgentAction = "review" | "analyze" | "fix";
 
 /** An external tool reachable from the interface, shown in the devtool or opened in a new tab. */
 export interface IntegrationDefinition {
@@ -223,19 +229,19 @@ export interface IntegrationDefinition {
   type: IntegrationType;
   /** Iconify name of its icon. */
   icon: string;
-  /** The page, or the web address of the repository of pull requests. */
+  /** The page, or the web address of the repository. */
   url: string;
   /** Whether the interface shows it in a frame, the load balancer then allowing the devtool to frame its host. */
   embed: boolean;
-  /** The forge hosting the repository of pull requests, its name in the configuration and the one shown, null for a web page. */
+  /** The forge hosting the repository, its name in the configuration and the one shown, null for a web page. */
   provider: { name: string; label: string } | null;
-  /** Whether a pull request can be reviewed by an agent. */
-  agentReview: boolean;
-  /** The prompt given to an agent reviewing a pull request, null for a web page. */
-  prompt: string | null;
-  /** Whether the sidebar counts the pull requests waiting for a review of the person. */
+  /** What agents may do with each item, in order. */
+  agentActions: AgentAction[];
+  /** The prompt of each action of agents, from the integration, the devtool settings or the devtool itself. */
+  agentPrompts: Partial<Record<AgentAction, string>>;
+  /** Whether the sidebar counts the items waiting for the person: reviews requested, issues assigned. */
   badge: boolean;
-  /** Minutes between two reads of the pull requests, 0 to read them on demand only. */
+  /** Minutes between two reads of the items, 0 to read them on demand only. */
   refresh: number;
 }
 
@@ -258,42 +264,137 @@ export type PullRequestChecks = "success" | "pending" | "failure";
 /** Where the review of a pull request stands. */
 export type PullRequestReview = "approved" | "changesRequested" | "required";
 
-/** An open pull request of a repository. */
-export interface PullRequestPayload {
+/** A label of an item of a forge. */
+export interface ForgeLabel {
+  name: string;
+  /** Its color as `#rrggbb`, null when the forge gives none. */
+  color: string | null;
+}
+
+/** What every item of a forge has. */
+export interface ForgeItemBase {
   number: number;
   title: string;
   url: string;
   /** The username of its author, null when unknown. */
   author: string | null;
+  /** Its description, in Markdown. */
+  body: string;
+  labels: ForgeLabel[];
+  /** Its last change, in ISO format. */
+  updatedAt: string;
+  /** Whether the person wrote it. */
+  mine: boolean;
+}
+
+/** An open issue of a repository. */
+export interface IssuePayload extends ForgeItemBase {
+  /** The usernames of the people it is assigned to. */
+  assignees: string[];
+  /** Its number of comments. */
+  comments: number;
+  /** Whether it is assigned to the person. */
+  assigned: boolean;
+}
+
+/** An open pull request of a repository. */
+export interface PullRequestPayload extends ForgeItemBase {
   /** Its source branch. */
   branch: string;
   /** Its target branch. */
   base: string;
   draft: boolean;
-  /** Its last change, in ISO format. */
-  updatedAt: string;
   /** The checks of its last commit, null when it has none or the forge does not tell. */
   checks: PullRequestChecks | null;
   /** Where its review stands, null when nothing is required. */
   review: PullRequestReview | null;
   /** Whether a review of the person is requested. */
   reviewRequested: boolean;
-  /** Whether the person wrote it. */
-  mine: boolean;
 }
 
-/** The open pull requests of an integration. */
-export interface PullRequestsPayload {
+/** The open items of an integration listing what a forge holds. */
+export type ForgeItemsPayload = {
   /** The integration, `<section>[/<project>]/<slug>`. */
   key: string;
-  items: PullRequestPayload[];
   /** The username the token belongs to, null when unknown. */
   viewer: string | null;
-  /** When the pull requests were last read, in ISO format, null before the first read. */
+  /** When the items were last read, in ISO format, null before the first read. */
   updatedAt: string | null;
   loading: boolean;
   /** Why the last read failed. */
   error: string | null;
+} & ({ kind: "pullRequests"; items: PullRequestPayload[] } | { kind: "issues"; items: IssuePayload[] });
+
+/** Where a review of a pull request leaves it. */
+export type ForgeReviewState = "approved" | "changesRequested" | "commented" | "dismissed";
+
+/** What a change of an item of a forge is about, telling its icon. */
+export type ForgeEventKind = "label" | "assign" | "reviewRequest" | "merge" | "close" | "reopen" | "push" | "rename" | "reference" | "draft" | "other";
+
+/** A comment of an item of a forge. */
+export interface ForgeComment {
+  /** The username of its author, null when unknown. */
+  author: string | null;
+  /** Its text, in Markdown. */
+  body: string;
+  /** When it was written, in ISO format. */
+  createdAt: string;
+}
+
+/** A discussion about lines of the code of a pull request, its first comment and the replies. */
+export interface ForgeReviewThread {
+  path: string;
+  /** The line commented, null when the forge no longer places it. */
+  line: number | null;
+  /** The lines of the change around the comment, in the unified diff format, null when the forge gives none. */
+  diffHunk: string | null;
+  resolved: boolean;
+  /** Whether the code changed since, the comment then being about an older version. */
+  outdated: boolean;
+  comments: ForgeComment[];
+}
+
+/** Something that happened to an item of a forge, in its timeline. */
+export type ForgeTimelineEvent = {
+  /** The username of who did it, null when unknown. */
+  author: string | null;
+  /** When it happened, in ISO format. */
+  createdAt: string;
+} & (
+  | { type: "comment"; body: string }
+  | { type: "review"; state: ForgeReviewState; body: string; threads: ForgeReviewThread[] }
+  | { type: "commit"; sha: string; message: string }
+  | { type: "event"; kind: ForgeEventKind; text: string; label: ForgeLabel | null }
+);
+
+/** The timeline of an item of a forge, read when asked for. */
+export interface ForgeTimelinePayload {
+  /** The integration, `<section>[/<project>]/<slug>`. */
+  key: string;
+  number: number;
+  /** What happened, the oldest first. */
+  events: ForgeTimelineEvent[];
+  /** Whether the events come before those already sent, rather than replacing them. */
+  previous: boolean;
+  /** Where the events before these start, to read them, null when there is none. */
+  before: string | null;
+  /** About how many events come before these. */
+  remaining: number;
+  /** Why it could not be read. */
+  error: string | null;
+}
+
+/** A part of the timeline of an item: the last events, or every event before a place. */
+export type ForgeTimelinePage = { last: number } | { before: string };
+
+/** The events of a part of a timeline, and what comes before them. */
+export interface ForgeTimelinePart {
+  /** What happened, the oldest first. */
+  events: ForgeTimelineEvent[];
+  /** Where the events before these start, null when there is none. */
+  before: string | null;
+  /** About how many events come before these. */
+  remaining: number;
 }
 
 /** A reference to something of a directory the sidebar offers in one click. */
@@ -759,7 +860,8 @@ export interface WsPayloadMap {
   cdnSession: CdnSessionPayload;
   environment: EnvironmentPayload;
   certificates: CertificatePayload[];
-  pullRequests: PullRequestsPayload[];
+  forgeItems: ForgeItemsPayload[];
+  forgeTimeline: ForgeTimelinePayload;
   environmentTables: EnvironmentTablesPayload;
   environmentKeys: EnvironmentKeysPayload;
   streamUpdate: StreamUpdatePayload;

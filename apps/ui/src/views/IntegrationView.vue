@@ -3,19 +3,22 @@ import { computed, useTemplateRef, watchEffect } from "vue";
 import { Icon } from "@iconify/vue";
 import { ExternalLink, RotateCw } from "@lucide/vue";
 import { integrationKey } from "@appsys/devtool-shared";
-import PullRequestList from "@/components/pull-requests/PullRequestList.vue";
+import ForgeItemDetail from "@/components/forge/ForgeItemDetail.vue";
+import ForgeItemList from "@/components/forge/ForgeItemList.vue";
 import SidebarToggle from "@/components/SidebarToggle.vue";
 import { Button } from "@/components/ui/button";
 import type { AgentPlace } from "@/lib/agents";
 import configStore from "@/stores/config";
 import embedStore from "@/stores/embeds";
-import pullRequestsStore from "@/stores/pull-requests";
+import forgeItemsStore from "@/stores/forge-items";
 import wsStore from "@/stores/ws";
 
 const props = defineProps<{
   integration: string;
   projectSlug?: string;
   directorySlug?: string;
+  /** The number of the pull request or issue shown, none for the list. */
+  number?: string;
 }>();
 
 const place = computed<AgentPlace | null>(() => {
@@ -37,7 +40,8 @@ const integrations = computed(() => {
   return (props.directorySlug ? section?.directories[props.directorySlug]?.integrations : section?.integrations) ?? [];
 });
 const definition = computed(() => integrations.value.find((item) => item.slug === props.integration) ?? null);
-const pullRequestsKey = computed(() => (definition.value?.type === "pullRequests" && place.value ? integrationKey(place.value.projectSlug, place.value.directorySlug, props.integration) : null));
+const forgeKey = computed(() => (definition.value && definition.value.type !== "web" && place.value ? integrationKey(place.value.projectSlug, place.value.directorySlug, props.integration) : null));
+const forgeState = computed(() => (forgeKey.value ? forgeItemsStore.get(forgeKey.value) : null));
 const frameArea = useTemplateRef<HTMLElement>("frameArea");
 
 watchEffect((onCleanup) => {
@@ -72,13 +76,13 @@ watchEffect((onCleanup) => {
           <RotateCw class="size-3.5" />
         </Button>
         <Button
-          v-if="pullRequestsKey"
+          v-if="forgeKey"
           size="icon"
           variant="ghost"
           class="size-7"
-          title="Read the pull requests again"
-          :disabled="pullRequestsStore.get(pullRequestsKey)?.loading"
-          @click="wsStore.pullRequestsRefresh(pullRequestsKey)"
+          title="Read them again"
+          :disabled="forgeState?.loading"
+          @click="wsStore.forgeItemsRefresh(forgeKey)"
         >
           <RotateCw class="size-3.5" />
         </Button>
@@ -104,18 +108,28 @@ watchEffect((onCleanup) => {
       >No integration {{ integration }}.</span>
       <SidebarToggle side="right" />
     </div>
-    <PullRequestList
-      v-if="definition && pullRequestsKey && place"
-      :integration="definition"
-      :place="place"
-    />
+    <template v-if="definition && forgeState && place">
+      <ForgeItemDetail
+        v-if="number"
+        :integration="definition"
+        :place="place"
+        :state="forgeState"
+        :number="Number(number)"
+      />
+      <ForgeItemList
+        v-else
+        :integration="definition"
+        :place="place"
+        :state="forgeState"
+      />
+    </template>
     <div
       v-else-if="definition?.embed"
       ref="frameArea"
       class="min-h-0 flex-1"
     />
     <p
-      v-else-if="definition"
+      v-else-if="definition?.type === 'web'"
       class="p-6 text-sm text-muted-foreground"
     >
       {{ definition.name }} opens in its own tab.

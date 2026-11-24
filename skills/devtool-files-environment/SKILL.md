@@ -47,7 +47,8 @@ Synchronizing overwrites data: only pull or push what the task needs, and say wh
 
 - `list_certificates`: expiry, issuer, errors and renewal of the certificates of the load balancer;
   `renew_certificate { name }` renews one in a terminal.
-- `list_pull_requests`: the open pull requests of the repositories of the projects, as last read from
-  their forge (author, branches, draft, checks, review, review requested from the user, written by the user).
+- `list_pull_requests` and `list_issues`: the open pull requests and issues of the repositories of the
+  sections and projects, as last read from their forge (author, description, labels, branches, checks and
+  review, or assignees and comments; review requested from or assigned to the user, written by the user).
 - `reload_config` reloads the devtool configuration after its files changed; agents never write the
   devtool configuration itself.
