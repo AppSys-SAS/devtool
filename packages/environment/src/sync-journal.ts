@@ -2,10 +2,14 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { resolveConfigFolder } from '@appsys/devtool-config'
 
-/** Dates of both copies of an item when they were last made equal by a pull or a push. */
+/** Both copies of an item when they were last made equal by a pull or a push. */
 export interface SyncRecord {
   localUpdatedAt: Date
   remoteUpdatedAt: Date
+  /** The backend holding the remote copy; missing in records written before backends existed. */
+  backend?: string
+  /** What the backend gave as version of its copy; missing in records written before versions existed. */
+  remoteVersion?: string
 }
 
 /**
@@ -23,21 +27,21 @@ function journalPath (): string {
  * @returns The records, by item path.
  */
 export async function readSyncJournal (): Promise<Map<string, SyncRecord>> {
-  let raw: Record<string, { localUpdatedAt: string, remoteUpdatedAt: string }>
+  let raw: Record<string, { localUpdatedAt: string, remoteUpdatedAt: string, backend?: string, remoteVersion?: string }>
   try {
     raw = JSON.parse(await fs.readFile(journalPath(), 'utf-8')) as typeof raw
   } catch {
     return new Map()
   }
 
-  return new Map(Object.entries(raw).map(([itemPath, record]) => [itemPath, { localUpdatedAt: new Date(record.localUpdatedAt), remoteUpdatedAt: new Date(record.remoteUpdatedAt) }]))
+  return new Map(Object.entries(raw).map(([itemPath, record]) => [itemPath, { ...record, localUpdatedAt: new Date(record.localUpdatedAt), remoteUpdatedAt: new Date(record.remoteUpdatedAt) }]))
 }
 
 /**
- * Records the dates of both copies of an item, now equal.
+ * Records both copies of an item, now equal.
  *
  * @param itemPath - The path of the item.
- * @param record - The dates of its local and CDN copies.
+ * @param record - Its local copy and the copy of its backend.
  */
 export async function writeSyncRecord (itemPath: string, record: SyncRecord): Promise<void> {
   const journal = await readSyncJournal()

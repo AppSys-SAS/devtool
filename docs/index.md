@@ -39,7 +39,7 @@ features:
     linkText: Files and merging
   - icon: 🔄
     title: Shared environment
-    details: Pull configuration files, databases and buckets from a CDN, so a new developer is ready in three commands.
+    details: Pull configuration files, databases and buckets from a CDN, S3, SFTP or git, encrypted if you want, so a new developer is ready in three commands.
     link: /configuration/environment
     linkText: Environment
   - icon: 🔀

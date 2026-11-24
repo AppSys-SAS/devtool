@@ -17,8 +17,8 @@
   },
   "dependencies": {
     "@appsys/devtool-auth": "workspace:*",
-    "@appsys/devtool-cdn": "workspace:*",
     "@appsys/devtool-config": "workspace:*",
+    "@appsys/devtool-environment": "workspace:*",
     "@appsys/devtool-proxy": "workspace:*",
     "@appsys/devtool-server": "workspace:*",
     "@appsys/devtool-shared": "workspace:*",

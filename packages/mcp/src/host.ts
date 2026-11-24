@@ -105,7 +105,7 @@ export interface McpFileSpaces {
   holdsDevtoolConfig(spaceId: string, filePath: string): boolean
 }
 
-/** The environment of the devtool synchronized with the CDN. */
+/** The environment of the devtool synchronized with its backends. */
 export interface McpEnvironment {
   state(): EnvironmentPayload
   keys(path: string): Promise<EnvironmentKeysPayload>

@@ -43,7 +43,18 @@ describe('config schema', () => {
           files: { skills: { path: '.claude/skills', type: 'agentSkills' } }
         }
       },
-      environment: { files: ['devtool/config.yml', { path: 'api/config.yml', local: false }], databases: [{ path: 'api/db.gz', engine: 'postgres', container: 'postgres' }] }
+      environment: {
+        backends: {
+          team: { type: 'cdn', url: 'https://files.example.dev', default: true },
+          archive: { type: 's3', bucket: 'acme-dev', pathStyle: true, encryption: { key: '{{ op://dev/env/key }}' } },
+          nas: { type: 'sftp', host: 'nas.example.dev', username: 'dev' },
+          history: { type: 'git', url: 'git@example.dev:acme/env.git' },
+          custom: { type: 'scripts', list: ['./backend.sh', 'list'], download: ['./backend.sh', 'download', '%{ADT:PATH}', '%{ADT:FILE}'], upload: ['./backend.sh', 'upload', '%{ADT:PATH}', '%{ADT:FILE}'], remove: ['./backend.sh', 'remove', '%{ADT:PATH}'] }
+        },
+        encryption: [{ paths: ['secrets/**'], prompt: true }],
+        files: ['devtool/config.yml', { path: 'api/config.yml', local: false, backend: 'nas', encryption: { password: 'x' } }],
+        databases: [{ path: 'api/db.gz', engine: 'postgres', container: 'postgres', backend: 'archive' }]
+      }
     }
     expect(validate(config), JSON.stringify(validate.errors)).toBe(true)
   })
@@ -53,5 +64,9 @@ describe('config schema', () => {
     expect(validate({ adt: { sidebar: { sort: 'random' } } })).toBe(false)
     expect(validate({ projects: { web: { commands: { dev: { name: 'Dev' } } } } })).toBe(false)
     expect(validate({ integrations: { mail: { name: 'Mail' } } })).toBe(false)
+    expect(validate({ cdn: { url: 'https://files.example.dev' } })).toBe(false)
+    expect(validate({ environment: { backends: { team: { type: 'cdn', url: 'https://files.example.dev', bucket: 'x' } } } })).toBe(false)
+    expect(validate({ environment: { backends: { team: { type: 'ftp' } } } })).toBe(false)
+    expect(validate({ environment: { encryption: [{ paths: ['*'], key: 'a', prompt: true }] } })).toBe(false)
   })
 })

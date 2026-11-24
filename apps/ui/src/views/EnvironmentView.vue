@@ -11,6 +11,7 @@ import {
   FileText,
   KeyRound,
   Loader2,
+  Lock,
   MemoryStick,
   Package,
   Pencil,
@@ -63,8 +64,9 @@ const tableFilters = ref<Record<string, string>>({})
 const confirmOpen = ref(false)
 const pullingConfig = ref(false)
 
-const signedIn = computed(() => session.value?.signedIn === true)
 const running = computed(() => state.value?.run?.finished === false)
+const signInNeeded = computed(() => session.value?.configured === true && !session.value.signedIn && (state.value?.backends ?? []).some(backend => backend.type === 'cdn'))
+const defaultBackend = computed(() => state.value?.backends.find(backend => backend.default) ?? null)
 
 watch(running, isRunning => {
   if (isRunning) {
@@ -104,7 +106,7 @@ const incomplete = computed(() =>
     ([path, { tables, keys }]) => (tables !== null && tables.length === 0) || (keys !== null && (!environmentStore.keys.value[path] || environmentStore.keys.value[path].error !== null))
   )
 )
-const canRun = computed(() => signedIn.value && !running.value && targets.value.length > 0 && !incomplete.value)
+const canRun = computed(() => !running.value && targets.value.length > 0 && !incomplete.value)
 
 const overwritten = computed(() =>
   targets.value
@@ -128,9 +130,18 @@ const overwritten = computed(() =>
 )
 
 /**
- * Compares the local copy of an item with its copy on the CDN.
+ * Names the backend storing an item.
  * @param item The item.
- * @returns The status to show, or null when the CDN copies are unknown.
+ * @returns The name of its backend, "backend" when the environment declares none.
+ */
+function backendOf (item: EnvironmentItemPayload): string {
+  return item.backend ?? 'backend'
+}
+
+/**
+ * Compares the local copy of an item with its copy on its backend.
+ * @param item The item.
+ * @returns The status to show, or null when the copies of its backend are unknown.
  */
 function syncStatus (item: EnvironmentItemPayload): SyncStatus | null {
   if (item.remote === 'unknown') {
@@ -142,7 +153,7 @@ function syncStatus (item: EnvironmentItemPayload): SyncStatus | null {
   }
 
   if (!item.local) {
-    return { label: 'Only on CDN', tone: 'remote' }
+    return { label: `Only on ${backendOf(item)}`, tone: 'remote' }
   }
 
   if (item.synced) {
@@ -153,7 +164,7 @@ function syncStatus (item: EnvironmentItemPayload): SyncStatus | null {
     }
 
     if (localChanged || remoteChanged) {
-      return localChanged ? { label: 'Newer locally', tone: 'local' } : { label: 'Newer on CDN', tone: 'remote' }
+      return localChanged ? { label: 'Newer locally', tone: 'local' } : { label: `Newer on ${backendOf(item)}`, tone: 'remote' }
     }
 
     return { label: 'Up to date', tone: 'synced' }
@@ -164,7 +175,7 @@ function syncStatus (item: EnvironmentItemPayload): SyncStatus | null {
     return { label: 'Up to date', tone: 'synced' }
   }
 
-  return difference > 0 ? { label: 'Newer on CDN', tone: 'remote' } : { label: 'Newer locally', tone: 'local' }
+  return difference > 0 ? { label: `Newer on ${backendOf(item)}`, tone: 'remote' } : { label: 'Newer locally', tone: 'local' }
 }
 
 /**
@@ -236,7 +247,7 @@ function hasKeys (item: EnvironmentItemPayload): boolean {
 /**
  * Gives the copy a differing key takes until the developer chooses: the newer one.
  * @param item The configuration file item.
- * @returns The CDN when its copy is newer, the local copy otherwise.
+ * @returns The backend when its copy is newer, the local copy otherwise.
  */
 function defaultSideOf (item: EnvironmentItemPayload): Side {
   return syncStatus(item)?.tone === 'local' ? 'local' : 'remote'
@@ -286,9 +297,9 @@ function visibleTables (path: string): string[] {
 }
 
 /**
- * Selects the items whose CDN copy is newer than the local one, or only on the CDN.
+ * Selects the items whose backend copy is newer than the local one, or only on their backend.
  */
-function selectNewerOnCdn (): void {
+function selectNewerRemotely (): void {
   selected.value = Object.fromEntries(
     (state.value?.items ?? []).filter(item => syncStatus(item)?.tone === 'remote').map(item => [item.path, { tables: null, keys: null }])
   )
@@ -368,7 +379,19 @@ onMounted(() => wsStore.envRefresh())
               Environment
             </h1>
             <p class="text-sm text-muted-foreground">
-              Configurations, databases, buckets and Redis databases shared by the developers: <code>environment.folder</code> ⇄ CDN.
+              Configurations, databases, buckets and Redis databases shared by the developers: <code>environment.folder</code> ⇄
+              <template v-if="state?.backends.length">
+                <template
+                  v-for="(backend, index) in state.backends"
+                  :key="backend.name"
+                >
+                  {{ index > 0 ? ", " : "" }}<span class="font-medium text-foreground">{{ backend.name }}</span>
+                  <span class="text-xs">({{ backend.type }}{{ backend.encrypted ? ", encrypted" : "" }})</span>
+                </template>
+              </template>
+              <template v-else>
+                backends.
+              </template>
             </p>
           </div>
           <div class="flex items-center gap-2">
@@ -376,9 +399,9 @@ onMounted(() => wsStore.envRefresh())
               size="sm"
               variant="ghost"
               :disabled="running || !state?.items.length"
-              @click="selectNewerOnCdn"
+              @click="selectNewerRemotely"
             >
-              Select newer on CDN
+              Select newer remotely
             </Button>
             <Button
               size="sm"
@@ -394,12 +417,12 @@ onMounted(() => wsStore.envRefresh())
         </div>
 
         <div
-          v-if="session?.configured && !signedIn"
+          v-if="signInNeeded && session"
           class="flex items-center justify-between gap-3 rounded-lg border bg-muted/40 p-3"
         >
           <div class="flex items-center gap-2 text-sm">
             <UserRound class="size-4 text-muted-foreground" />
-            Not signed in: the CDN copies are unknown and nothing can be transferred.
+            Not signed in: the copies of the cdn backends are unknown and cannot be transferred.
           </div>
           <Button
             v-if="!session.pendingLoginUrl"
@@ -415,7 +438,7 @@ onMounted(() => wsStore.envRefresh())
         </div>
 
         <div
-          v-else-if="state?.error"
+          v-if="state?.error"
           class="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-2 text-sm text-destructive"
         >
           <TriangleAlert class="mt-0.5 size-4 shrink-0" />
@@ -430,23 +453,27 @@ onMounted(() => wsStore.envRefresh())
             <p class="font-medium">
               No environment yet
             </p>
-            <p
-              v-if="session?.configured"
-              class="text-sm text-muted-foreground"
-            >
-              The shared devtool configuration declares it: pull it from the CDN to list the configurations, databases, buckets and Redis databases.
+            <p class="text-sm text-muted-foreground">
+              Declare a backend in <code>environment.backends</code> of <code>config.local.yml</code> of the configuration folder to get the shared devtool configuration.
             </p>
-            <p
-              v-else
-              class="text-sm text-muted-foreground"
-            >
-              Add a <code>cdn</code> section to <code>config.local.yml</code> of the configuration folder to get the shared devtool configuration.
+          </div>
+        </Card>
+
+        <Card
+          v-else-if="!state.items.length"
+          class="items-center gap-4 py-10 text-center"
+        >
+          <div class="space-y-1">
+            <p class="font-medium">
+              No items yet
+            </p>
+            <p class="text-sm text-muted-foreground">
+              The shared devtool configuration declares them: pull it from <span class="font-medium text-foreground">{{ defaultBackend?.name ?? "the default backend" }}</span> to list the configurations, databases, buckets and Redis databases.
             </p>
           </div>
           <Button
-            v-if="session?.configured"
             class="gap-1.5"
-            :disabled="!signedIn || pullingConfig"
+            :disabled="pullingConfig"
             @click="pullConfig"
           >
             <Loader2
@@ -544,8 +571,18 @@ onMounted(() => wsStore.envRefresh())
                 </div>
               </div>
               <div class="min-w-0 text-xs">
-                <div class="text-muted-foreground">
-                  CDN
+                <div class="flex items-center gap-1 text-muted-foreground">
+                  <span class="truncate">{{ backendOf(item) }}</span>
+                  <span
+                    v-if="item.encrypted"
+                    title="Encrypted before it is sent"
+                    class="shrink-0"
+                  >
+                    <Lock
+                      class="size-3"
+                      aria-label="Encrypted"
+                    />
+                  </span>
                 </div>
                 <div class="truncate">
                   {{ item.remote === "unknown" ? "Unknown" : item.remote ? copyLabel(item.remote) : "—" }}
@@ -589,7 +626,7 @@ onMounted(() => wsStore.envRefresh())
                   class="flex items-center gap-2 text-xs text-muted-foreground"
                 >
                   <Loader2 class="size-3.5 animate-spin" />
-                  Comparing the local and CDN copies…
+                  Comparing the local and {{ backendOf(item) }} copies…
                 </div>
                 <div
                   v-else-if="environmentStore.keys.value[item.path].error"
@@ -602,6 +639,7 @@ onMounted(() => wsStore.envRefresh())
                   :model-value="selected[item.path].keys!"
                   :entries="environmentStore.keys.value[item.path].entries"
                   :default-side="defaultSideOf(item)"
+                  :remote-name="backendOf(item)"
                   @update:model-value="(keys) => setKeys(item.path, keys)"
                 />
               </template>
@@ -757,7 +795,7 @@ onMounted(() => wsStore.envRefresh())
       confirm-label="Pull and replace"
       @confirm="wsStore.envRun('pull', targets)"
     >
-      <p>The CDN copies will replace your local data:</p>
+      <p>The backend copies will replace your local data:</p>
       <ul class="mt-2 list-disc space-y-1 pl-5">
         <li
           v-for="line in overwritten"

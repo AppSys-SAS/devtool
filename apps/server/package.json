@@ -24,9 +24,9 @@
   },
   "dependencies": {
     "@appsys/devtool-auth": "workspace:*",
-    "@appsys/devtool-cdn": "workspace:*",
     "@appsys/devtool-certs": "workspace:*",
     "@appsys/devtool-config": "workspace:*",
+    "@appsys/devtool-environment": "workspace:*",
     "@appsys/devtool-git": "workspace:*",
     "@appsys/devtool-mcp": "workspace:*",
     "@appsys/devtool-shared": "workspace:*",

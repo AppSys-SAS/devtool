@@ -15,6 +15,7 @@ import { mergeDeep, toRecord } from './utils.js'
 import type { ConfigProvider, LoadBalancerContext, ServerBootstrapOptions } from './types.js'
 
 export { relaunchUnderApp } from './app-launcher.js'
+export { createBackendContext } from './environment.js'
 
 const CONFIG_CHANGE_DELAY_MS = 200
 const UNCATEGORIZED_SECTION = 'uncategorized'

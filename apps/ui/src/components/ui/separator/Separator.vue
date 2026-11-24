@@ -6,6 +6,7 @@ import { Separator } from 'reka-ui'
 import { cn } from '@/lib/utils'
 
 const props = withDefaults(defineProps<
+  // eslint-disable-next-line vue/require-default-prop -- an undefined class adds no class
   SeparatorProps & { class?: HTMLAttributes['class'] }
 >(), {
   orientation: 'horizontal',

@@ -6,11 +6,13 @@ import { Primitive } from 'reka-ui'
 import { cn } from '@/lib/utils'
 import { buttonVariants } from '.'
 
+/* eslint-disable vue/require-default-prop -- optional props left undefined fall back to the variant defaults */
 interface Props extends PrimitiveProps {
   variant?: ButtonVariants['variant']
   size?: ButtonVariants['size']
   class?: HTMLAttributes['class']
 }
+/* eslint-enable vue/require-default-prop */
 
 const props = withDefaults(defineProps<Props>(), {
   as: 'button'

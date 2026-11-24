@@ -15,7 +15,7 @@ CLI, Gemini CLI, Cursor and the other agents that read it.
 |---|---|
 | `devtool-mcp-setup` | connect an agent to the devtool, and configure what agents may do (`adt.mcp`) |
 | `devtool-terminals` | run commands and scripts, follow and drive terminals, debug a failing service, free a port |
-| `devtool-files-environment` | read and change project files, configuration keys without their secret values, the CDN environment and certificates |
+| `devtool-files-environment` | read and change project files, configuration keys without their secret values, the shared environment and certificates |
 
 ## Install them
 

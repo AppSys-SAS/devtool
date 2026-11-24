@@ -1,6 +1,6 @@
 ---
 name: devtool-files-environment
-description: Reads and changes the files the devtool exposes (folders of files of projects, configurations of the environment) through its MCP server, including key-only access to YAML, JSON and .env files that hides secret values, and follows the environment synchronized with a CDN (status, differing keys, pull, push) and the certificates of its load balancer. Use when a task needs a configuration value, a settings file, a database copy or a certificate managed by the devtool.
+description: Reads and changes the files the devtool exposes (folders of files of projects, configurations of the environment) through its MCP server, including key-only access to YAML, JSON and .env files that hides secret values, and follows the environment synchronized with its backends, such as a CDN, S3, SFTP or git (status, differing keys, pull, push) and the certificates of its load balancer. Use when a task needs a configuration value, a settings file, a database copy or a certificate managed by the devtool.
 ---
 
 # Devtool files, configuration keys and environment
@@ -30,18 +30,26 @@ description: Reads and changes the files the devtool exposes (folders of files o
 Never try to read a secret value another way (shell commands printing it, copying the file elsewhere):
 `keys` exists precisely to keep values from agents.
 
-## Environment synchronized with the CDN
+## Environment synchronized with its backends
 
-- `environment_status`: items (files, databases, buckets, Redis databases), their local and CDN copies,
-  whether they are synchronized, and the pull or push running.
-- `environment_keys { path }`: keys differing between the local and CDN copies of a configuration file
-  (types only where the environment is `read: keys`).
+Each item of the environment is stored by a backend of `environment.backends` (a CDN, an S3 bucket, an
+SFTP server, a git repository or scripts), the default one unless the item names another, and may be
+encrypted.
+
+- `environment_status`: items (files, databases, buckets, Redis databases), the backend of each, their
+  local copies and the copies of their backends, whether they are synchronized, and the pull or push
+  running.
+- `environment_keys { path }`: keys differing between the local copy of a configuration file and the
+  copy of its backend (types only where the environment is `read: keys`). Keys the file declares in
+  `ignore` (such as `connections.*.lastUsedAt`) never differ: each copy keeps its own values.
 - `environment_tables { path }`: tables of a local database, key groups of a Redis database.
-- `environment_sync { direction: pull | push, targets: [{ path, tables? }] }` starts a pull (CDN copies
-  replace local ones) or a push; a push, and `pull_shared_config`, are always confirmed by the user.
-  Follow the progress with `environment_status`.
+- `environment_sync { direction: pull | push, targets: [{ path, tables? }] }` starts a pull (the copies
+  of the backends replace the local ones) or a push; a push, and `pull_shared_config` (the shared
+  configuration from the default backend), are always confirmed by the user. Follow the progress with
+  `environment_status`.
 
 Synchronizing overwrites data: only pull or push what the task needs, and say what will be replaced.
+An encrypted file may need a password the user types in the interface: a sync then waits for them.
 
 ## Certificates and configuration
 

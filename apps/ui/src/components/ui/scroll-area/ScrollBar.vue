@@ -5,6 +5,7 @@ import { reactiveOmit } from '@vueuse/core'
 import { ScrollAreaScrollbar, ScrollAreaThumb } from 'reka-ui'
 import { cn } from '@/lib/utils'
 
+// eslint-disable-next-line vue/require-default-prop -- an undefined class adds no class
 const props = withDefaults(defineProps<ScrollAreaScrollbarProps & { class?: HTMLAttributes['class'] }>(), {
   orientation: 'vertical'
 })

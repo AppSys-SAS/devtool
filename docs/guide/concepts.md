@@ -19,9 +19,9 @@ config.yml
 │       ├── files       folders you browse and edit in the interface
 │       └── integrations web tools, pull requests and issues
 ├── integrations        web tools shown for the whole devtool
-├── environment         files and data shared with the team through the CDN
+├── environment         files and data shared with the team
+│   └── backends        where they are stored: CDN, S3, SFTP, git, your scripts
 ├── auth                how you sign in, with your company account
-├── cdn                 where the environment lives
 └── adt                 the devtool itself: name, ports, sidebar, agents
 ```
 
@@ -35,8 +35,8 @@ config.yml
 | Files | A folder you can browse and edit from the interface, or a folder of agent skills. | [Files](/configuration/files) |
 | Integration | A web tool shown inside the devtool, or the pull requests and issues of a repository. | [Integrations](/configuration/integrations) |
 | Environment | The files, database dumps and bucket snapshots every developer needs, kept in a local folder. | [Environment](/configuration/environment) |
-| Sign-in | Your session with the identity provider of the team, used by the CDN and readable by commands. | [Sign-in](/configuration/auth) |
-| CDN | The server storing the shared environment, reached with your sign-in. | [CDN](/configuration/cdn) |
+| Backend | Where the team stores the environment: a CDN, an S3 bucket, an SFTP server, a git repository or your own scripts. Each can encrypt what it stores. | [Backends](/configuration/backends) |
+| Sign-in | Your session with the identity provider of the team, used by the CDN backends and readable by commands. | [Sign-in](/configuration/auth) |
 | Agent | A coding agent, such as Claude Code, that drives the devtool through its MCP server. | [MCP server](/agents/mcp-server) |
 
 Every entry of a map has a **slug**: its key in the YAML file, such as `web` in `projects: { web: ... }`.

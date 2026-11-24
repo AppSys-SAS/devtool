@@ -72,10 +72,12 @@ const rendered = computed(() => purify.sanitize(markdown.render(splitFrontMatter
 </script>
 
 <template>
+  <!-- eslint-disable vue/no-v-html -- the HTML is sanitized by DOMPurify -->
   <div
     class="markdown-preview overflow-auto px-6 py-4 text-sm"
     v-html="rendered"
   />
+  <!-- eslint-enable vue/no-v-html -->
 </template>
 
 <style scoped>

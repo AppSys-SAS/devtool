@@ -28,7 +28,8 @@ The repository is a pnpm workspace:
 | `apps/proxy` | the TCP proxy forwarding port 443 to the load balancer |
 | `apps/ui` | the web interface (Vue, Vite, Tailwind, shadcn-vue) |
 | `packages/config` | loading and merging of the YAML configuration, and its JSON schema |
-| `packages/cdn` | OpenID Connect sign-in and the files of the CDN |
+| `packages/auth` | sign-in with the identity provider (OpenID Connect) |
+| `packages/environment` | the development environment and its backends (CDN, S3, SFTP, git, scripts) |
 | `packages/certs` | certificate renewal |
 | `packages/git` | repositories, pull requests and issues of GitHub and GitLab |
 | `packages/mcp` | the MCP server for coding agents |

@@ -30,6 +30,8 @@ const MAX_VALUE_LENGTH = 60
 const props = defineProps<{
   entries: EnvironmentKeyPayload[]
   defaultSide: Side
+  /** The name of the backend holding the remote copy. */
+  remoteName: string
 }>()
 
 const choices = defineModel<Record<string, Side>>({ required: true })
@@ -137,7 +139,7 @@ function formatValue (value: EnvironmentKeyValuePayload): { full: string, short:
  */
 function differenceLabel (entry: EnvironmentKeyPayload): string {
   if (!entry.local.present) {
-    return 'Only on CDN'
+    return `Only on ${props.remoteName}`
   }
 
   return entry.remote.present ? 'Changed' : 'Only local'
@@ -163,7 +165,7 @@ const allRevealed = computed(() => sensitiveIds.value.length > 0 && sensitiveIds
       <span class="text-xs text-muted-foreground">
         <template v-if="entries.length === 0">Both copies are identical.</template>
         <template v-else>
-          {{ entries.length }} differing {{ entries.length > 1 ? "keys" : "key" }}: {{ remoteCount }} from the CDN, {{ entries.length - remoteCount }} local
+          {{ entries.length }} differing {{ entries.length > 1 ? "keys" : "key" }}: {{ remoteCount }} from {{ remoteName }}, {{ entries.length - remoteCount }} local
         </template>
       </span>
       <div
@@ -201,7 +203,7 @@ const allRevealed = computed(() => sensitiveIds.value.length > 0 && sensitiveIds
           class="h-7 px-2 text-xs"
           @click="choose(allIds, 'remote')"
         >
-          All CDN
+          All {{ remoteName }}
         </Button>
       </div>
     </div>
@@ -213,7 +215,7 @@ const allRevealed = computed(() => sensitiveIds.value.length > 0 && sensitiveIds
       <div class="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] gap-2 border-b bg-muted/40 px-3 py-1.5 text-xs font-medium text-muted-foreground">
         <span>Key</span>
         <span>Local</span>
-        <span>CDN</span>
+        <span class="truncate">{{ remoteName }}</span>
       </div>
       <div
         v-for="row in rows"
@@ -237,7 +239,7 @@ const allRevealed = computed(() => sensitiveIds.value.length > 0 && sensitiveIds
             :class="cn('rounded px-2 py-0.5 text-left transition-colors', branchSide(row) === 'remote' ? 'bg-primary/15 text-foreground' : 'text-muted-foreground hover:bg-accent')"
             @click="choose(row.leaves, 'remote')"
           >
-            {{ branchSide(row) === "mixed" ? "Mixed" : branchSide(row) === "remote" ? "All CDN" : "Take CDN" }}
+            {{ branchSide(row) === "mixed" ? "Mixed" : branchSide(row) === "remote" ? `All ${remoteName}` : `Take ${remoteName}` }}
           </button>
         </template>
 

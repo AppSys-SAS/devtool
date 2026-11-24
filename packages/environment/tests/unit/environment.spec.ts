@@ -3,19 +3,19 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { type EnvironmentItem, type EnvironmentOptions, overwritesLocalData, parseTargets, readEnvironmentOptions, SHARED_CONFIG_PATH } from '../../src/environment.js'
 
-const fileItem: EnvironmentItem = { kind: 'file', path: 'api/config.yml' }
-const databaseItem: EnvironmentItem = { kind: 'database', path: 'api/db.gz', engine: 'postgres', container: 'postgres' }
-const bucketItem: EnvironmentItem = { kind: 'bucket', path: 'api/s3.gz', bucket: 'uploads-dev' }
-const redisItem: EnvironmentItem = { kind: 'redis', path: 'api/redis.gz', url: 'redis://localhost:6379/0' }
+const fileItem: EnvironmentItem = { kind: 'file', path: 'api/config.yml', backend: null, encryption: null, ignore: null }
+const databaseItem: EnvironmentItem = { kind: 'database', path: 'api/db.gz', backend: null, encryption: null, engine: 'postgres', container: 'postgres' }
+const bucketItem: EnvironmentItem = { kind: 'bucket', path: 'api/s3.gz', backend: null, encryption: null, bucket: 'uploads-dev' }
+const redisItem: EnvironmentItem = { kind: 'redis', path: 'api/redis.gz', backend: null, encryption: null, url: 'redis://localhost:6379/0' }
 
 /**
  * Builds an environment made of the given items.
  *
  * @param items - The items of the environment.
- * @returns The environment, with no configuration file, auto pull nor S3 server.
+ * @returns The environment, with no backend, configuration file, auto pull nor S3 server.
  */
 function environmentOf (items: EnvironmentItem[]): EnvironmentOptions {
-  return { folder: '/example/env', items, configFiles: [], autoPulls: [], s3: null }
+  return { folder: '/example/env', backends: [], defaultBackend: null, items, configFiles: [], autoPulls: [], s3: null }
 }
 
 /**
@@ -62,6 +62,8 @@ describe('readEnvironmentOptions', () => {
     it('reads an empty section as an empty environment', () => {
       expect(readEnvironmentOptions({})).toEqual({
         folder: '/example/config',
+        backends: [],
+        defaultBackend: null,
         items: [],
         configFiles: [],
         autoPulls: [],
@@ -77,12 +79,14 @@ describe('readEnvironmentOptions', () => {
         s3: { endpoint: 'http://localhost:9000', accessKeyId: 'minioadmin', secretAccessKey: 'minioadmin' }
       })).toEqual({
         folder: '/example/config',
+        backends: [],
+        defaultBackend: null,
         items: [
-          { kind: 'file', path: 'devtool/config.yml' },
-          { kind: 'file', path: 'api/config.yml' },
-          { kind: 'file', path: 'devtool/docker-compose.yml' },
-          { kind: 'database', path: 'api/db.gz', engine: 'postgres', container: 'postgres' },
-          { kind: 'bucket', path: 'api/s3.gz', bucket: 'uploads-dev' }
+          { kind: 'file', path: 'devtool/config.yml', backend: null, encryption: null, ignore: null },
+          { kind: 'file', path: 'api/config.yml', backend: null, encryption: null, ignore: null },
+          { kind: 'file', path: 'devtool/docker-compose.yml', backend: null, encryption: null, ignore: null },
+          { kind: 'database', path: 'api/db.gz', backend: null, encryption: null, engine: 'postgres', container: 'postgres' },
+          { kind: 'bucket', path: 'api/s3.gz', backend: null, encryption: null, bucket: 'uploads-dev' }
         ],
         configFiles: [
           { path: 'devtool/config.yml', display: true, local: true },
@@ -153,7 +157,7 @@ describe('readEnvironmentOptions', () => {
     it('reads a path as a synchronized, displayed file with its local override', () => {
       const options = read({ files: ['api/config.yml'] })
 
-      expect(options.items).toEqual([{ kind: 'file', path: 'api/config.yml' }])
+      expect(options.items).toEqual([fileItem])
       expect(options.configFiles).toEqual([{ path: 'api/config.yml', display: true, local: true }])
       expect(options.autoPulls).toEqual([])
     })
@@ -161,29 +165,40 @@ describe('readEnvironmentOptions', () => {
     it('defaults every flag of an object entry to true', () => {
       const options = read({ files: [{ path: 'api/config.yml' }] })
 
-      expect(options.items).toEqual([{ kind: 'file', path: 'api/config.yml' }])
+      expect(options.items).toEqual([fileItem])
       expect(options.configFiles).toEqual([{ path: 'api/config.yml', display: true, local: true }])
     })
 
     it('keeps flags explicitly set to true', () => {
       const options = read({ files: [{ path: 'api/config.yml', display: true, local: true, sync: true }] })
 
-      expect(options.items).toEqual([{ kind: 'file', path: 'api/config.yml' }])
+      expect(options.items).toEqual([fileItem])
       expect(options.configFiles).toEqual([{ path: 'api/config.yml', display: true, local: true }])
+    })
+
+    it('reads the keys a configuration file ignores', () => {
+      const [item] = read({ files: [{ path: 'db/connections.json', ignore: ['connections.*.lastUsedAt'] }] }).items
+      expect(item.kind === 'file' && item.ignore?.matches(['connections', '0', 'lastUsedAt'])).toBe(true)
+      expect(read({ files: [{ path: 'db/connections.json', ignore: [] }] }).items[0]).toMatchObject({ ignore: null })
+    })
+
+    it('rejects ignored keys that are not key paths, or on a file without keys', () => {
+      expect(() => read({ files: [{ path: 'a.json', ignore: 'connections' }] })).toThrow('invalid ignore of a.json in the environment: must be a list of key paths, such as connections.*.lastUsedAt')
+      expect(() => read({ files: [{ path: 'a.txt', ignore: ['a'] }] })).toThrow('invalid ignore of a.txt in the environment: needs a YAML, JSON or .env file')
     })
 
     it('hides a file from the configurations tab with display: false', () => {
       const options = read({ files: [{ path: 'api/config.yml', display: false }] })
 
       expect(options.configFiles).toEqual([{ path: 'api/config.yml', display: false, local: true }])
-      expect(options.items).toEqual([{ kind: 'file', path: 'api/config.yml' }])
+      expect(options.items).toEqual([fileItem])
     })
 
     it('leaves out the local override with local: false', () => {
       const options = read({ files: [{ path: 'api/config.yml', local: false }] })
 
       expect(options.configFiles).toEqual([{ path: 'api/config.yml', display: true, local: false }])
-      expect(options.items).toEqual([{ kind: 'file', path: 'api/config.yml' }])
+      expect(options.items).toEqual([fileItem])
     })
 
     it('keeps a file with sync: false out of the synchronized items', () => {
@@ -193,7 +208,7 @@ describe('readEnvironmentOptions', () => {
         { path: 'devtool/config.local.yml', display: true, local: true },
         { path: 'api/config.yml', display: true, local: true }
       ])
-      expect(options.items).toEqual([{ kind: 'file', path: 'api/config.yml' }])
+      expect(options.items).toEqual([fileItem])
     })
 
     it('ignores the pull of a file that is not synchronized', () => {
@@ -268,7 +283,7 @@ describe('readEnvironmentOptions', () => {
     })
 
     it('still synchronizes an item whose pull is empty', () => {
-      expect(read({ files: [{ path: 'api/config.yml', pull: {} }] }).items).toEqual([{ kind: 'file', path: 'api/config.yml' }])
+      expect(read({ files: [{ path: 'api/config.yml', pull: {} }] }).items).toEqual([fileItem])
     })
 
     it('rejects a pull that is not an object', () => {
@@ -319,7 +334,7 @@ describe('readEnvironmentOptions', () => {
   describe('databases', () => {
     it.each(['postgres', 'mariadb', 'mongodb'])('reads a %s database', engine => {
       expect(read({ databases: [{ path: 'api/db.gz', engine, container: 'db' }] }).items).toEqual([
-        { kind: 'database', path: 'api/db.gz', engine, container: 'db' }
+        { kind: 'database', path: 'api/db.gz', backend: null, encryption: null, engine, container: 'db' }
       ])
     })
 
@@ -328,9 +343,7 @@ describe('readEnvironmentOptions', () => {
     })
 
     it('drops unknown keys of a database', () => {
-      expect(read({ databases: [{ path: 'api/db.gz', engine: 'postgres', container: 'postgres', name: 'example' }] }).items).toEqual([
-        { kind: 'database', path: 'api/db.gz', engine: 'postgres', container: 'postgres' }
-      ])
+      expect(read({ databases: [{ path: 'api/db.gz', engine: 'postgres', container: 'postgres', name: 'example' }] }).items).toEqual([databaseItem])
     })
 
     it('rejects an unknown engine', () => {
@@ -358,7 +371,7 @@ describe('readEnvironmentOptions', () => {
     it('reads a bucket', () => {
       const options = read({ buckets: [{ path: 'api/s3.gz', bucket: 'uploads-dev' }] })
 
-      expect(options.items).toEqual([{ kind: 'bucket', path: 'api/s3.gz', bucket: 'uploads-dev' }])
+      expect(options.items).toEqual([bucketItem])
       expect(options.configFiles).toEqual([])
     })
 
@@ -377,7 +390,7 @@ describe('readEnvironmentOptions', () => {
     it('reads a Redis database', () => {
       const options = read({ redis: [{ path: 'api/redis.gz', url: 'redis://localhost:6379/0' }] })
 
-      expect(options.items).toEqual([{ kind: 'redis', path: 'api/redis.gz', url: 'redis://localhost:6379/0' }])
+      expect(options.items).toEqual([redisItem])
       expect(options.configFiles).toEqual([])
     })
 
@@ -420,6 +433,67 @@ describe('readEnvironmentOptions', () => {
     it('gives no S3 server when the setting is not an object', () => {
       expect(read({ s3: 'http://localhost:9000' }).s3).toBeNull()
       expect(read({ s3: null }).s3).toBeNull()
+    })
+  })
+
+  describe('backends', () => {
+    const backends = {
+      team: { type: 'cdn', url: 'https://files.example.dev/' },
+      nas: { type: 'sftp', host: 'nas.example.dev', username: 'dev', default: true },
+      archive: { type: 's3', bucket: 'acme-dev', prefix: 'env' }
+    }
+
+    it('reads the backends, the default one being the one marked default', () => {
+      const options = read({ backends })
+      expect(options.backends.map(backend => [backend.slug, backend.type])).toEqual([['team', 'cdn'], ['nas', 'sftp'], ['archive', 's3']])
+      expect(options.defaultBackend).toBe('nas')
+      expect(options.backends[0]).toMatchObject({ url: 'https://files.example.dev', default: false, encryption: null })
+      expect(options.backends[2]).toMatchObject({ prefix: 'env/', region: 'us-east-1', pathStyle: false })
+    })
+
+    it('takes the first backend as default when none is marked, and the first marked one when several are', () => {
+      expect(read({ backends: { team: backends.team, archive: backends.archive } }).defaultBackend).toBe('team')
+      expect(read({ backends: { a: { ...backends.team, default: true }, b: { ...backends.team, default: true } } }).defaultBackend).toBe('a')
+    })
+
+    it('gives each item its backend, the default one when it names none', () => {
+      const options = read({ backends, files: ['devtool/config.yml', { path: 'api/config.yml', backend: 'team' }], databases: [{ path: 'api/db.gz', engine: 'postgres', container: 'postgres', backend: 'archive' }] })
+      expect(options.items.map(item => [item.path, item.backend])).toEqual([['devtool/config.yml', 'nas'], ['api/config.yml', 'team'], ['api/db.gz', 'archive']])
+    })
+
+    it('rejects an item naming an unknown backend, and invalid backends', () => {
+      expect(() => readEnvironmentOptions({ backends, files: [{ path: 'api/config.yml', backend: 'cloud' }] })).toThrow('api/config.yml: backend "cloud" is not declared in environment.backends')
+      expect(() => readEnvironmentOptions({ backends: { team: { type: 'ftp' } } })).toThrow('environment.backends.team.type must be one of cdn, s3, sftp, git, scripts')
+      expect(() => readEnvironmentOptions({ backends: { team: { type: 'cdn' } } })).toThrow('environment.backends.team.url must be the http or https address of the CDN')
+      expect(() => readEnvironmentOptions({ backends: { team: { ...backends.team, encryption: { key: 'a', password: 'b' } } } })).toThrow('environment.backends.team.encryption must be')
+    })
+
+    it('reads the encryption of a backend', () => {
+      expect(read({ backends: { team: { ...backends.team, encryption: { prompt: true } } } }).backends[0].encryption).toEqual({ prompt: true })
+    })
+  })
+
+  describe('encryption', () => {
+    const rules = [{ paths: ['secrets/**', '**/*.env'], password: '{{ op://dev/env/password }}' }, { paths: ['api/*'], prompt: true }]
+
+    it('encrypts the items matching a rule, the first matching rule winning, an item setting overriding them', () => {
+      const options = read({
+        encryption: rules,
+        files: ['secrets/api/token.yml', 'api/prod.env', 'api/config.yml', { path: 'api/keys.yml', encryption: { key: 'S2V5' } }, 'web/config.yml']
+      })
+      expect(options.items.map(item => [item.path, item.encryption])).toEqual([
+        ['secrets/api/token.yml', { password: '{{ op://dev/env/password }}' }],
+        ['api/prod.env', { password: '{{ op://dev/env/password }}' }],
+        ['api/config.yml', { prompt: true }],
+        ['api/keys.yml', { key: 'S2V5' }],
+        ['web/config.yml', null]
+      ])
+    })
+
+    it('rejects a rule without paths or secret, and an invalid item setting', () => {
+      expect(() => readEnvironmentOptions({ encryption: [{ password: 'x' }] })).toThrow('environment.encryption[0] needs paths')
+      expect(() => readEnvironmentOptions({ encryption: [{ paths: ['*'] }] })).toThrow('environment.encryption[0] needs paths and must be')
+      expect(() => readEnvironmentOptions({ files: [{ path: 'api/config.yml', encryption: { prompt: 'yes' } }] })).toThrow('invalid encryption of api/config.yml')
     })
   })
 })

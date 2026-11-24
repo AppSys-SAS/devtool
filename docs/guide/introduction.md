@@ -23,8 +23,9 @@ The devtool turns that into a sidebar:
 - **Real host names over HTTPS.** Instead of `localhost:5173` and `localhost:3000`, you open
   `https://web.example.dev` and `https://api.example.dev`. Cookies, CORS and OAuth callbacks behave
   like in production.
-- **A shared environment.** Configuration files, database dumps and bucket snapshots live on a CDN.
-  One command brings a fresh machine up to date.
+- **A shared environment.** Configuration files, database dumps and bucket snapshots live where your
+  team already stores files: a CDN, an S3 bucket, an SFTP server, a git repository, encrypted if you
+  want. One command brings a fresh machine up to date.
 - **Agents that can help.** Coding agents connect over MCP to read your terminals, run your commands
   and edit your files, each action allowed, asked or denied as you decide.
 
@@ -60,8 +61,8 @@ your repositories live, extra DNS names, a different port. It is merged last, so
   notification when a command ends.
 - **The Server page** shows the certificates, the ports, the warnings about your configuration and the
   order of the sidebar.
-- **The Environment page** compares your local files, databases and buckets with the CDN and lets you
-  pull or push them.
+- **The Environment page** compares your local files, databases and buckets with the copies of their
+  backends and lets you pull or push them.
 - **The Agents page** shows which coding agents are connected, what they asked and what you allowed.
 
 Next: [install the devtool](/guide/getting-started) and write your first configuration.

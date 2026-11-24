@@ -8,6 +8,7 @@ import CommandInputsDialog from '@/components/CommandInputsDialog.vue'
 import EmbedFrames from '@/components/EmbedFrames.vue'
 import McpRequestDialog from '@/components/mcp/McpRequestDialog.vue'
 import McpToasts from '@/components/mcp/McpToasts.vue'
+import SecretPromptDialog from '@/components/SecretPromptDialog.vue'
 import commandRunsStore from '@/stores/command-runs'
 import configStore from '@/stores/config'
 import layoutStore from '@/stores/layout'
@@ -76,5 +77,6 @@ onMounted(() => {
     <CommandInputsDialog />
     <McpRequestDialog />
     <McpToasts />
+    <SecretPromptDialog />
   </div>
 </template>

@@ -87,7 +87,7 @@ function renew (certificate: CertificatePayload): void {
 }
 
 /**
- * Sends the renewed certificate and key to the CDN.
+ * Sends the renewed certificate and key to their environment backends.
  */
 function push (): void {
   if (pushOffer.value) {
@@ -168,10 +168,10 @@ function push (): void {
 
   <ConfirmDialog
     v-model:open="pushOpen"
-    title="Push to the CDN?"
+    title="Push to the environment?"
     confirm-label="Push"
     @confirm="push"
   >
-    {{ pushOffer?.name }} is renewed. Send {{ pushOffer?.paths.join(" and ") }} to the CDN, where the others pull them.
+    {{ pushOffer?.name }} is renewed. Send {{ pushOffer?.paths.join(" and ") }} to their environment backends, where the others pull them.
   </ConfirmDialog>
 </template>

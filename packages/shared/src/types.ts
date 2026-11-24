@@ -146,12 +146,20 @@ export interface DnsRecord {
   address: string
 }
 
-/** The local DNS: its own names, every other name being resolved by the system. */
+/** A DNS server the local DNS relays queries to. */
+export interface DnsServerAddress {
+  host: string
+  port: number
+}
+
+/** The local DNS: its own names, every other name being resolved by its upstream server or the system. */
 export interface DnsDefinition {
   port: number
   /** Who may query it. */
   access: HostAccess
   records: DnsRecord[]
+  /** The server resolving the other names, null to resolve them through the system. */
+  upstream: DnsServerAddress | null
 }
 
 /** Hosts whose TLS connections the load balancer forwards untouched, chosen by their server name. */
@@ -720,10 +728,14 @@ export interface EnvironmentCopyPayload {
   updatedAt: string
 }
 
-/** An item of the development environment with its local copy and its copy on the CDN. */
+/** An item of the development environment with its local copy and its copy on its backend. */
 export interface EnvironmentItemPayload {
   path: string
   kind: 'file' | 'database' | 'bucket' | 'redis'
+  /** The name of the backend storing the item, null when the environment declares none. */
+  backend: string | null
+  /** Whether the file is encrypted before it reaches its backend. */
+  encrypted: boolean
   engine: string | null
   container: string | null
   bucket: string | null
@@ -732,7 +744,7 @@ export interface EnvironmentItemPayload {
   /** Whether the item is a configuration file whose keys can be pulled or pushed one by one. */
   keyed: boolean
   local: EnvironmentCopyPayload | null
-  /** The CDN copy, null when there is none, "unknown" when the CDN copies could not be listed. */
+  /** The copy of the backend, null when there is none, "unknown" when the backend could not list its files. */
   remote: EnvironmentCopyPayload | null | 'unknown'
   /** Dates of both copies, in ISO format, when a pull or a push last made them equal. */
   synced: { localUpdatedAt: string, remoteUpdatedAt: string } | null
@@ -783,14 +795,34 @@ export interface EnvironmentRunPayload {
   finished: boolean
 }
 
+/** A backend of the development environment. */
+export interface EnvironmentBackendPayload {
+  name: string
+  /** Its kind: cdn, s3, sftp, git or scripts. */
+  type: string
+  /** Whether items naming no backend use it. */
+  default: boolean
+  /** Whether it encrypts every file it stores. */
+  encrypted: boolean
+}
+
 /** State of the development environment. */
 export interface EnvironmentPayload {
-  /** Whether the configuration declares an environment and a CDN. */
+  /** Whether the configuration declares an environment with at least one backend. */
   configured: boolean
+  /** The backends of the environment, in their declaration order. */
+  backends: EnvironmentBackendPayload[]
   items: EnvironmentItemPayload[]
-  /** Why the CDN copies are unknown, or why the environment could not be read. */
+  /** Why the copies of a backend are unknown, by backend, or why the environment could not be read. */
   error: string | null
   run: EnvironmentRunPayload | null
+}
+
+/** A secret the server asks the developer to type, such as the password of encrypted files. */
+export interface SecretRequestPayload {
+  id: string
+  /** What the secret unlocks. */
+  label: string
 }
 
 /** Tables of the local database of an environment item, or key groups of its local Redis database. */
@@ -858,6 +890,8 @@ export interface WsPayloadMap {
   file: FilePayload
   authSession: AuthSessionPayload
   environment: EnvironmentPayload
+  secretRequest: SecretRequestPayload
+  secretDone: { id: string }
   certificates: CertificatePayload[]
   forgeItems: ForgeItemsPayload[]
   forgeTimeline: ForgeTimelinePayload

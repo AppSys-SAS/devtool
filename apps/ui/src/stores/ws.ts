@@ -6,6 +6,7 @@ import certificatesStore from './certificates'
 import forgeItemsStore from './forge-items'
 import environmentStore from './environment'
 import mcpStore from './mcp'
+import secretsStore from './secrets'
 import sessionStore from './session'
 
 class WsStore {
@@ -55,6 +56,12 @@ class WsStore {
             break
           case 'environment':
             environmentStore.load(payload.data as never)
+            break
+          case 'secretRequest':
+            secretsStore.add(payload.data as never)
+            break
+          case 'secretDone':
+            secretsStore.remove((payload.data as { id: string }).id)
             break
           case 'certificates':
             certificatesStore.load(payload.data as never)
@@ -263,7 +270,7 @@ class WsStore {
   }
 
   /**
-   * Asks the server for the keys differing between the local and CDN copies of a YAML item.
+   * Asks the server for the keys differing between the local and backend copies of a YAML item.
    * @param path The path of the item.
    */
   envKeys (path: string): void {
@@ -272,7 +279,7 @@ class WsStore {
 
   /**
    * Asks the server to pull or push environment items.
-   * @param direction Whether the CDN copies replace the local ones, or the reverse.
+   * @param direction Whether the backend copies replace the local ones, or the reverse.
    * @param targets The items, with the tables of the databases and the keys of the YAML files (null for the whole item).
    */
   envRun (direction: 'pull' | 'push', targets: { path: string, tables: string[] | null, keys: EnvironmentKeyChoicePayload[] | null }[]): void {
@@ -353,6 +360,7 @@ class WsStore {
     configStore.reset()
     sessionStore.load(null)
     environmentStore.load(null)
+    secretsStore.reset()
     certificatesStore.load([])
     forgeItemsStore.load([])
   }

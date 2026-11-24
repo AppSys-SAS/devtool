@@ -641,8 +641,15 @@ describe('auth', () => {
     expect((await load({})).auth).toBeNull()
   })
 
-  it('warns about a CDN without identity provider', async () => {
-    expect((await load({ cdn: { url: 'https://cdn.example.dev' } })).warnings).toEqual(['cdn: needs an auth section, signing the developers in.'])
+  it('warns about the former cdn section, a cdn backend without identity provider and invalid backends', async () => {
+    expect((await load({ cdn: { url: 'https://cdn.example.dev' } })).warnings).toEqual(['cdn: is replaced by a backend of the environment: environment.backends.<name> { type: cdn, url }.'])
+    expect((await load({ environment: { backends: { team: { type: 'cdn', url: 'https://cdn.example.dev' } } } })).warnings).toEqual([
+      'environment.backends.team: a cdn backend needs an auth section, signing the developers in.'
+    ])
+    expect((await load({ environment: { backends: { team: { type: 'ftp' }, nas: { type: 'sftp', host: 'nas.example.dev' } } } })).warnings).toEqual([
+      'environment.backends.team.type: must be one of cdn, s3, sftp, git, scripts.',
+      'environment.backends.nas.username: must name the user on the SFTP server.'
+    ])
   })
 
   it('warns about an unknown provider and incomplete settings', async () => {
@@ -675,8 +682,33 @@ describe('dns', () => {
       records: [
         { names: ['example.dev', '*.example.dev'], address: 'auto' },
         { names: ['lan.example.dev'], address: '192.168.1.20' }
-      ]
+      ],
+      upstream: null
     })
+  })
+
+  it('gives no DNS when it is disabled', async () => {
+    const configure = await load({ dns: { enabled: false, records: { dev: { names: ['example.dev'], address: 'auto' } } } })
+    expect(configure.dns).toBeNull()
+    expect(configure.warnings).toEqual([])
+  })
+
+  it('reads the upstream server, port 53 by default', async () => {
+    const records = { dev: { names: ['example.dev'], address: 'auto' } }
+    expect((await load({ dns: { upstream: '127.0.0.1:5353', records } })).dns?.upstream).toEqual({ host: '127.0.0.1', port: 5353 })
+    expect((await load({ dns: { upstream: 'dns.example.dev', records } })).dns?.upstream).toEqual({ host: 'dns.example.dev', port: 53 })
+    expect((await load({ dns: { upstream: '[::1]:5354', records } })).dns?.upstream).toEqual({ host: '::1', port: 5354 })
+  })
+
+  it('warns about an invalid upstream server, or one that is this DNS itself', async () => {
+    const records = { dev: { names: ['example.dev'], address: 'auto' } }
+    const invalid = await load({ dns: { upstream: 'not a host:99999', records } })
+    expect(invalid.dns?.upstream).toBeNull()
+    expect(invalid.warnings).toEqual(['dns.upstream: must be <host>[:<port>], such as 127.0.0.1:5353.'])
+
+    const itself = await load({ dns: { port: 5353, upstream: 'localhost:5353', records } })
+    expect(itself.dns?.upstream).toBeNull()
+    expect(itself.warnings).toEqual(['dns.upstream: is this DNS itself: give the address of another DNS server.'])
   })
 
   it('listens on port 53 for this machine by default', async () => {

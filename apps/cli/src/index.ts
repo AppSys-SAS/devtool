@@ -6,30 +6,28 @@ import os from 'node:os'
 import path from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import { fileURLToPath } from 'node:url'
-import { checkbox, confirm, select } from '@inquirer/prompts'
+import { checkbox, confirm, password, select } from '@inquirer/prompts'
 import { Command } from 'commander'
 import { type AuthOptions, AuthSignInRequiredError, login, logout, openInBrowser, readAuthOptions } from '@appsys/devtool-auth'
 import {
-  CdnClient,
-  type CdnOptions,
-  defaultEnvironmentFolder,
+  createBackends,
   Environment,
+  type EnvironmentBackend,
   type EnvironmentItem,
   type EnvironmentOptions,
   type EnvironmentSelection,
   listTables,
-  localPathOf,
+  mediaTypeOf,
   overwritesLocalData,
   parseTargets,
-  readCdnOptions,
   readEnvironmentOptions,
   redisDatabaseName,
   SHARED_CONFIG_PATH,
   type TransferResult
-} from '@appsys/devtool-cdn'
+} from '@appsys/devtool-environment'
 import { CONFIG_FOLDER_VARIABLE, loadMergedConfig, resolveDefaultConfigPaths } from '@appsys/devtool-config'
 import runProxy from '@appsys/devtool-proxy'
-import runServer, { relaunchUnderApp, renewCertificates } from '@appsys/devtool-server'
+import runServer, { createBackendContext, relaunchUnderApp, renewCertificates } from '@appsys/devtool-server'
 import { logger, type LogLevel } from '@appsys/devtool-shared'
 import pkg from '../package.json' with { type: 'json' }
 import { agentSkillFolders, distinctFolders, foreignSkills, type SkillInstallMode, syncSkills, wasSynced } from './skills.js'
@@ -53,18 +51,81 @@ async function requireConfiguredAuth (): Promise<AuthOptions> {
   return options
 }
 
+/** The environment of the configuration, connected to its backends. */
+interface OpenedEnvironment {
+  options: EnvironmentOptions
+  backends: Map<string, EnvironmentBackend>
+  environment: Environment
+}
+
 /**
- * Reads the CDN options of the configuration of the devtool installation.
- * @returns The options.
+ * Asks the developer for a secret in the terminal, such as the password of encrypted files.
+ * @param label What the secret unlocks.
+ * @returns The secret typed.
  */
-async function requireConfiguredCdn (): Promise<CdnOptions> {
-  const { config } = await loadMergedConfig()
-  const options = readCdnOptions(config.cdn, config.auth)
-  if (!options) {
-    await requireConfiguredAuth()
-    throw new Error('no `cdn` section (url) in the devtool configuration')
+async function askSecretInTerminal (label: string): Promise<string> {
+  if (!process.stdin.isTTY) {
+    throw new Error(`${label} needs a password: run the command in a terminal, or give the password with a value block`)
   }
-  return options
+  return password({ message: `Password of ${label}`, mask: true })
+}
+
+/**
+ * Connects the environment of the configuration to its backends, downloading the shared configuration
+ * first from the default backend when the environment declares no item yet.
+ * @param configPaths Paths of the configuration files.
+ * @param bootstrap Whether to download the shared configuration when no item is declared.
+ * @returns The environment; its backends must be closed once done.
+ */
+async function openEnvironment (configPaths: string[], bootstrap = true): Promise<OpenedEnvironment> {
+  const { config } = await loadMergedConfig(configPaths)
+  const options = readEnvironmentOptions(config.environment)
+  if (!options || options.backends.length === 0 || options.defaultBackend === null) {
+    throw new Error('no backend in environment.backends: declare one in config.local.yml, such as { team: { type: cdn, url } }')
+  }
+  const context = createBackendContext(config, askSecretInTerminal)
+  const backends = createBackends(options.backends, context)
+  const environment = new Environment(backends, options, context)
+  if (!bootstrap || options.items.length > 0) {
+    return { options, backends, environment }
+  }
+
+  try {
+    const result = await environment.pull({ item: { kind: 'file', path: SHARED_CONFIG_PATH, backend: options.defaultBackend, encryption: null, ignore: null }, tables: null })
+    if (!result.done) {
+      throw new Error(`${SHARED_CONFIG_PATH} is not on ${options.defaultBackend}`)
+    }
+  } finally {
+    await closeBackends(backends)
+  }
+  return openEnvironment(configPaths, false)
+}
+
+/**
+ * Closes the connections of backends.
+ * @param backends The backends.
+ */
+async function closeBackends (backends: Map<string, EnvironmentBackend>): Promise<void> {
+  await Promise.all([...backends.values()].map(async backend => backend.close()))
+}
+
+/**
+ * Runs a task on a backend of the environment, then closes the backends.
+ * @param name The name of the backend, the default one when missing.
+ * @param task Uses the backend.
+ */
+async function withBackend (name: string | undefined, task: (backend: EnvironmentBackend) => Promise<void>): Promise<void> {
+  const { options, backends } = await openEnvironment(resolveDefaultConfigPaths(), false)
+  try {
+    const slug = name ?? options.defaultBackend!
+    const backend = backends.get(slug)
+    if (!backend) {
+      throw new Error(`no backend named ${slug} in environment.backends (${[...backends.keys()].join(', ')})`)
+    }
+    await task(backend)
+  } finally {
+    await closeBackends(backends)
+  }
 }
 
 /**
@@ -77,26 +138,6 @@ async function signIn (options: AuthOptions): Promise<void> {
     openInBrowser(url)
   })
   logger.info('CLI', 'Login', 'Signed in')
-}
-
-const SHARED_CONFIG_SELECTION: EnvironmentSelection = { item: { kind: 'file', path: SHARED_CONFIG_PATH }, tables: null }
-
-/**
- * Loads the environment declared by the shared configuration, downloading that configuration first when it is not
- * there yet.
- * @param client The client of the devtool files of the CDN.
- * @param configPaths Paths of the configuration files.
- * @returns The environment.
- */
-async function loadEnvironment (client: CdnClient, configPaths: string[]): Promise<EnvironmentOptions> {
-  const read = async (): Promise<EnvironmentOptions | null> => readEnvironmentOptions((await loadMergedConfig(configPaths)).config.environment)
-  const bootstrap: EnvironmentOptions = { folder: defaultEnvironmentFolder(), items: [], configFiles: [], autoPulls: [], s3: null }
-  const options = (await read()) ?? ((await new Environment(client, bootstrap).pull(SHARED_CONFIG_SELECTION)).done ? await read() : null)
-  if (!options) {
-    throw new Error(`no \`environment\` section in ${localPathOf(bootstrap.folder, SHARED_CONFIG_PATH)}`)
-  }
-
-  return options
 }
 
 /**
@@ -215,26 +256,28 @@ async function transfer (selections: EnvironmentSelection[], run: (selection: En
 
 /**
  * Pulls or pushes items of the environment, chosen by targets or interactively.
- * @param direction Whether the CDN copy replaces the local one, or the reverse.
+ * @param direction Whether the copies of the backends replace the local ones, or the reverse.
  * @param targets The targets, every item when empty.
  * @param flags Whether to choose interactively and whether local data may be replaced without asking.
  */
 async function syncEnvironment (direction: 'pull' | 'push', targets: string[], flags: { interactive?: boolean, yes?: boolean }): Promise<void> {
-  const client = new CdnClient(await requireConfiguredCdn())
-  const options = await loadEnvironment(client, resolveDefaultConfigPaths())
-  const selections = flags.interactive ? await chooseSelections(options, direction) : parseTargets(options, targets)
-  const environment = new Environment(client, options)
-  if (direction === 'push') {
-    await transfer(selections, selection => environment.push(selection))
-    return
-  }
+  const { options, backends, environment } = await openEnvironment(resolveDefaultConfigPaths())
+  try {
+    const selections = flags.interactive ? await chooseSelections(options, direction) : parseTargets(options, targets)
+    if (direction === 'push') {
+      await transfer(selections, selection => environment.push(selection))
+      return
+    }
 
-  if (!(await acceptOverwrite(selections, flags.yes === true))) {
-    logger.warn('CLI', 'Env', 'Nothing pulled')
-    return
-  }
+    if (!(await acceptOverwrite(selections, flags.yes === true))) {
+      logger.warn('CLI', 'Env', 'Nothing pulled')
+      return
+    }
 
-  await transfer(selections, selection => environment.pull(selection))
+    await transfer(selections, selection => environment.pull(selection))
+  } finally {
+    await closeBackends(backends)
+  }
 }
 
 /**
@@ -380,58 +423,66 @@ async function main (): Promise<void> {
       logger.info('CLI', 'Logout', 'Signed out')
     })
 
-  const cdn = program.command('cdn').description('Devtool files of the CDN (database dumps, configurations)')
-
-  cdn
-    .command('pull <path> [destination]')
-    .description('Download a file; `-` as destination writes it to the standard output')
-    .action(async (filePath: string, destination: string | undefined) => {
-      const content = await new CdnClient(await requireConfiguredCdn()).download(filePath)
-      if (!content) {
-        throw new Error(`no such file: ${filePath}`)
-      }
-
-      if (destination === '-') {
-        await pipeline(content, process.stdout)
-        return
-      }
-
-      const target = path.resolve(destination ?? path.basename(filePath))
-      const partial = `${target}.part`
-      try {
-        await pipeline(content, createWriteStream(partial, { mode: 0o600 }))
-        await fs.rename(partial, target)
-      } finally {
-        await fs.rm(partial, { force: true })
-      }
-      logger.info('CLI', 'Pull', `${filePath} -> ${target}`)
-    })
-
-  cdn
-    .command('push <path> <file>')
-    .description('Upload a file, replacing the stored one (write group only)')
-    .option('-t, --type <mediaType>', 'media type served with the file', 'application/octet-stream')
-    .action(async (filePath: string, file: string, options: { type: string }) => {
-      await new CdnClient(await requireConfiguredCdn()).upload(filePath, path.resolve(file), options.type)
-      logger.info('CLI', 'Push', `${file} -> ${filePath}`)
-    })
-
-  cdn
-    .command('rm <path>')
-    .description('Delete a file (write group only)')
-    .action(async (filePath: string) => {
-      await new CdnClient(await requireConfiguredCdn()).remove(filePath)
-      logger.info('CLI', 'Remove', filePath)
-    })
-
   const env = program
     .command('env')
-    .description('Development environment (environment.folder), mirrored on the CDN: configurations, databases, buckets, Redis databases')
+    .description('Development environment (environment.folder), mirrored on its backends: configurations, databases, buckets, Redis databases')
     .addHelpText('after', '\nTargets: <path> for an item, <path>:<table>,<table> for tables of a database, <path>:<group>,<group> for key groups of a Redis database (such as account/redis.gz:session:*); every item without target.')
+
+  const file = env.command('file').description('Any file of a backend, by hand')
+
+  file
+    .command('pull <path> [destination]')
+    .description('Download a file; `-` as destination writes it to the standard output')
+    .option('-b, --backend <name>', 'backend of environment.backends, the default one when omitted')
+    .action(async (filePath: string, destination: string | undefined, flags: { backend?: string }) => {
+      await withBackend(flags.backend, async backend => {
+        const content = await backend.download(filePath)
+        if (!content) {
+          throw new Error(`no such file: ${filePath}`)
+        }
+        if (destination === '-') {
+          await pipeline(content, process.stdout)
+          return
+        }
+
+        const target = path.resolve(destination ?? path.basename(filePath))
+        const partial = `${target}.part`
+        try {
+          await pipeline(content, createWriteStream(partial, { mode: 0o600 }))
+          await fs.rename(partial, target)
+        } finally {
+          await fs.rm(partial, { force: true })
+        }
+        logger.info('CLI', 'Pull', `${filePath} -> ${target}`)
+      })
+    })
+
+  file
+    .command('push <path> <file>')
+    .description('Upload a file, replacing the stored one')
+    .option('-b, --backend <name>', 'backend of environment.backends, the default one when omitted')
+    .option('-t, --type <mediaType>', 'media type of the file, guessed from its name when omitted')
+    .action(async (filePath: string, localFile: string, flags: { backend?: string, type?: string }) => {
+      await withBackend(flags.backend, async backend => {
+        await backend.upload(filePath, path.resolve(localFile), flags.type ?? mediaTypeOf(filePath))
+        logger.info('CLI', 'Push', `${localFile} -> ${filePath}`)
+      })
+    })
+
+  file
+    .command('rm <path>')
+    .description('Delete a file')
+    .option('-b, --backend <name>', 'backend of environment.backends, the default one when omitted')
+    .action(async (filePath: string, flags: { backend?: string }) => {
+      await withBackend(flags.backend, async backend => {
+        await backend.remove(filePath)
+        logger.info('CLI', 'Remove', filePath)
+      })
+    })
 
   env
     .command('pull [targets...]')
-    .description('Replace local items, and the local data they hold, by the CDN copies')
+    .description('Replace local items, and the local data they hold, by the copies of their backends')
     .option('-i, --interactive', 'choose items, tables and key groups')
     .option('-y, --yes', 'replace local data without asking')
     .action(async (targets: string[], flags: { interactive?: boolean, yes?: boolean }) => {
@@ -440,7 +491,7 @@ async function main (): Promise<void> {
 
   env
     .command('push [targets...]')
-    .description('Dump the local data of the items and send them to the CDN (write group only)')
+    .description('Dump the local data of the items and send them to their backends')
     .option('-i, --interactive', 'choose items, tables and key groups')
     .action(async (targets: string[], flags: { interactive?: boolean }) => {
       await syncEnvironment('push', targets, flags)

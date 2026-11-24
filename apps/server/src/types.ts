@@ -108,6 +108,10 @@ export type ConnectionMessage
     data: Record<string, never>
   }
   | {
+    type: 'secretAnswer'
+    data: { id: string, value: string | null }
+  }
+  | {
     type: 'certificateRenew'
     data: { name: string, tag: string | null }
   }

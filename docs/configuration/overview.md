@@ -18,12 +18,12 @@ The devtool reads everything from one folder, the first of:
 3. `~/.config/appsys/devtool`.
 
 Nothing is read from where the devtool is installed. The folder holds two files, plus what the
-devtool keeps for itself (`session.json` for the CDN sign-in, `sync.json` for the environment
-synchronization):
+devtool keeps for itself (`session.json` for your [sign-in](/configuration/auth), `sync.json` for the
+environment synchronization):
 
 | File | Holds | Shared |
 |---|---|---|
-| `config.yml` | The configuration of the team: sections, projects, environment, agents. | Yes, often through the [CDN](/configuration/cdn) |
+| `config.yml` | The configuration of the team: sections, projects, environment, agents. | Yes, often through a [backend](/configuration/backends) of the environment |
 | `config.local.yml` | Your own settings and overrides: `workspace`, extra DNS names, a different port. | Never |
 
 A missing file is skipped, so a fresh machine can start with `config.local.yml` alone.
@@ -160,7 +160,7 @@ A team with many projects usually keeps one file per project, so a change touche
 
 ```text
 ~/.config/appsys/devtool/
-├── config.yml             adt, environment, cdn... and include
+├── config.yml             adt, auth, environment... and include
 ├── config.local.yml       your workspace
 ├── config/
 │   └── sections.yml       every section
@@ -238,8 +238,8 @@ nothing. The schema catches those, in your editor and in the configurator.
 | `loadBalancers` | map | | Certificates by domain: see [Certificates](/configuration/certificates). |
 | `passthrough` | list | | See [Network and DNS](/configuration/network). |
 | `dns` | map | | See [Network and DNS](/configuration/network#local-dns). |
-| `environment` | map | | See [Environment](/configuration/environment). |
-| `cdn` | map | | See [CDN](/configuration/cdn). |
+| `environment` | map | | See [Environment](/configuration/environment), [Backends](/configuration/backends) and [Encryption](/configuration/encryption). |
+| `auth` | map | | See [Sign-in](/configuration/auth). |
 
 ### Errors when loading
 

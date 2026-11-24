@@ -17,6 +17,7 @@ import { DevtoolLB } from './lb.js'
 import { DevtoolMcp, type McpLevelChange, type McpServerHost, type McpUiMessage } from '@appsys/devtool-mcp'
 import { listPortOwners } from './ports.js'
 import { DevtoolForgeItems } from './forge-items.js'
+import { SecretPrompts } from './secret-prompts.js'
 import type {
   AgentStartPayload,
   CommandStreamCreatePayload,
@@ -59,6 +60,8 @@ export class DevtoolServer implements McpServerHost {
 
   readonly environment: DevtoolEnvironment
 
+  private readonly secretPrompts: SecretPrompts
+
   readonly certificates: DevtoolCertificates
 
   readonly forgeItems: DevtoolForgeItems
@@ -83,7 +86,8 @@ export class DevtoolServer implements McpServerHost {
     this.http = null as unknown as DevtoolHttp
     this.lb = null
     this.commandStreams = []
-    this.environment = new DevtoolEnvironment(payload => this.http.sendToWsConnections('environment', payload))
+    this.secretPrompts = new SecretPrompts(async (type, data) => this.http.sendToWsConnections(type, data))
+    this.environment = new DevtoolEnvironment(payload => this.http.sendToWsConnections('environment', payload), async label => this.secretPrompts.ask(label))
     this.authSession = new DevtoolAuthSession(async payload => {
       await this.http.sendToWsConnections('authSession', payload)
       if (!payload.pendingLoginUrl) {
@@ -253,6 +257,9 @@ export class DevtoolServer implements McpServerHost {
     await this.http.sendToWsConnections('config', this.configWrapper.getForClient(this.version), ws)
     await this.http.sendToWsConnections('authSession', await this.authSession.status(), ws)
     await this.http.sendToWsConnections('environment', this.environment.state(), ws)
+    for (const request of this.secretPrompts.waiting()) {
+      await this.http.sendToWsConnections('secretRequest', request, ws)
+    }
     await this.http.sendToWsConnections('certificates', this.certificates.state(), ws)
     await this.http.sendToWsConnections('forgeItems', this.forgeItems.state(), ws)
     this.forgeItems.start()
@@ -289,6 +296,11 @@ export class DevtoolServer implements McpServerHost {
 
     if (message.type === 'authLogout') {
       await this.authSession.logout()
+      return
+    }
+
+    if (message.type === 'secretAnswer') {
+      await this.secretPrompts.answer(message.data.id, typeof message.data.value === 'string' ? message.data.value : null)
       return
     }
 

@@ -43,10 +43,12 @@ const numberValue = computed({
   <label class="config-field" :class="{ inline: type === 'checkbox' }">
     <input v-if="type === 'checkbox'" v-model="value" type="checkbox">
     <span class="label">{{ label }}</span>
-    <select v-if="type === 'select'" v-model="value">
-      <option :value="undefined">-</option>
-      <option v-for="option in options" :key="option" :value="option">{{ option }}</option>
-    </select>
+    <span v-if="type === 'select'" class="select">
+      <select v-model="value">
+        <option :value="undefined">-</option>
+        <option v-for="option in options" :key="option" :value="option">{{ option }}</option>
+      </select>
+    </span>
     <input
       v-else-if="type === 'number'"
       v-model="numberValue"
@@ -79,12 +81,17 @@ const numberValue = computed({
 
 .config-field.inline {
   flex-direction: row;
+  align-self: start;
   align-items: center;
   gap: 8px;
+  box-sizing: border-box;
+  height: 58px;
+  padding-top: 24px;
 }
 
 .label {
   font-size: 13px;
+  line-height: 20px;
   font-weight: 600;
   color: var(--vp-c-text-1);
 }
@@ -97,7 +104,9 @@ const numberValue = computed({
 input[type='text'],
 input[type='number'],
 select {
+  box-sizing: border-box;
   width: 100%;
+  height: 34px;
   padding: 6px 10px;
   border: 1px solid var(--vp-c-divider);
   border-radius: 8px;
@@ -111,6 +120,30 @@ input[type='number']:focus,
 select:focus {
   outline: 2px solid var(--vp-c-brand-soft);
   border-color: var(--vp-c-brand-1);
+}
+
+.select {
+  position: relative;
+  display: block;
+}
+
+.select select {
+  appearance: none;
+  padding-right: 32px;
+  cursor: pointer;
+}
+
+.select::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  right: 13px;
+  width: 7px;
+  height: 7px;
+  border-right: 2px solid var(--vp-c-text-2);
+  border-bottom: 2px solid var(--vp-c-text-2);
+  transform: translateY(-70%) rotate(45deg);
+  pointer-events: none;
 }
 
 input[type='checkbox'] {

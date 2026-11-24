@@ -12,9 +12,9 @@
         { "type": "json", "path": "apps/server/package.json", "jsonpath": "$.version" },
         { "type": "json", "path": "apps/ui/package.json", "jsonpath": "$.version" },
         { "type": "json", "path": "packages/auth/package.json", "jsonpath": "$.version" },
-        { "type": "json", "path": "packages/cdn/package.json", "jsonpath": "$.version" },
         { "type": "json", "path": "packages/certs/package.json", "jsonpath": "$.version" },
         { "type": "json", "path": "packages/config/package.json", "jsonpath": "$.version" },
+        { "type": "json", "path": "packages/environment/package.json", "jsonpath": "$.version" },
         { "type": "json", "path": "packages/git/package.json", "jsonpath": "$.version" },
         { "type": "json", "path": "packages/mcp/package.json", "jsonpath": "$.version" },
         { "type": "json", "path": "packages/shared/package.json", "jsonpath": "$.version" }

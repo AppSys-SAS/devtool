@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { type ConfigFormat, configFormatOf, countChoices, diffConfig, type KeyChoice, type KeyDifference, mergeConfig, readMap, readYaml } from '../../src/config-merge.js'
+import { type ConfigFormat, configFormatOf, countChoices, diffConfig, IgnoredKeys, type KeyChoice, type KeyDifference, mergeConfig, readMap, readYaml } from '../../src/config-merge.js'
 
 /**
  * Gives the format of a file path known to be mergeable.
@@ -472,9 +472,57 @@ describe('diffConfig', () => {
     expect(() => diffConfig(yaml, '- a\n', 'a: 1\n')).toThrow('the local copy is not a YAML map')
   })
 
-  it('names the CDN copy in the error for an invalid CDN copy', () => {
-    expect(() => diffConfig(yaml, 'a: 1\n', 'a: [\n')).toThrow(/^the CDN copy is not valid YAML: /)
-    expect(() => diffConfig(json, '{}', '[]')).toThrow('the CDN copy is not a JSON object')
+  it('names the backend copy in the error for an invalid backend copy', () => {
+    expect(() => diffConfig(yaml, 'a: 1\n', 'a: [\n')).toThrow(/^the backend copy is not valid YAML: /)
+    expect(() => diffConfig(json, '{}', '[]')).toThrow('the backend copy is not a JSON object')
+  })
+})
+
+describe('ignored keys', () => {
+  const json = formatOf('connections.json')
+  const ignored = new IgnoredKeys(['connections.*.lastUsedAt'])
+  const local = JSON.stringify({ version: 1, connections: [{ id: 'a', url: 'pg://a', lastUsedAt: 10 }, { id: 'b', url: 'pg://b', lastUsedAt: 20 }] }, null, 2)
+  const remote = JSON.stringify({ version: 1, connections: [{ id: 'a', url: 'pg://a', lastUsedAt: 1 }, { id: 'b', url: 'pg://b', lastUsedAt: 0 }] }, null, 2)
+
+  it('matches one key or list index with *, any depth with **, and dotted keys as they are', () => {
+    expect(ignored.matches(['connections', '3', 'lastUsedAt'])).toBe(true)
+    expect(ignored.matches(['connections', 'lastUsedAt'])).toBe(false)
+    expect(ignored.matches(['connections', '3', 'url'])).toBe(false)
+    expect(new IgnoredKeys(['**.updatedAt']).matches(['a', 'b', '0', 'updatedAt'])).toBe(true)
+    expect(new IgnoredKeys(['APP.TOKEN']).matches(['APP.TOKEN'])).toBe(true)
+    expect(new IgnoredKeys(['APP.TOKEN']).matches(['APPXTOKEN'])).toBe(false)
+  })
+
+  it('finds no difference when only ignored keys differ, even inside a list', () => {
+    expect(diffConfig(json, local, remote)).toHaveLength(1)
+    expect(diffConfig(json, local, remote, ignored)).toEqual([])
+  })
+
+  it('still finds the other differences of a list, with its whole values', () => {
+    const changed = remote.replace('pg://b', 'pg://c')
+    const connectionsOf = (text: string): unknown => (JSON.parse(text) as { connections: unknown }).connections
+    expect(diffConfig(json, local, changed, ignored)).toEqual([{ path: ['connections'], local: connectionsOf(local), remote: connectionsOf(changed) }])
+  })
+
+  it('skips an ignored key of a map', () => {
+    expect(diffConfig(formatOf('app.yml'), 'a: 1\nb: 2\n', 'a: 1\nb: 3\n', new IgnoredKeys(['b']))).toEqual([])
+    expect(diffConfig(formatOf('.env'), 'A=1\nTOKEN=x\n', 'A=1\nTOKEN=y\n', new IgnoredKeys(['TOKEN']))).toEqual([])
+  })
+
+  it('keeps the ignored values of the copy merged into, a new list entry bringing its own', () => {
+    const added = JSON.stringify({ version: 1, connections: [{ id: 'a', url: 'pg://z', lastUsedAt: 1 }, { id: 'b', url: 'pg://b', lastUsedAt: 0 }, { id: 'c', url: 'pg://c', lastUsedAt: 5 }] }, null, 2)
+    const differences = diffConfig(json, local, added, ignored)
+    const pulled = JSON.parse(mergeConfig(json, local, 'local', differences, [{ path: ['connections'], side: 'remote' }], ignored)) as { connections: unknown[] }
+    expect(pulled.connections).toEqual([{ id: 'a', url: 'pg://z', lastUsedAt: 10 }, { id: 'b', url: 'pg://b', lastUsedAt: 20 }, { id: 'c', url: 'pg://c', lastUsedAt: 5 }])
+
+    const pushed = JSON.parse(mergeConfig(json, added, 'remote', differences, [{ path: ['connections'], side: 'local' }], ignored)) as { connections: unknown[] }
+    expect(pushed.connections).toEqual([{ id: 'a', url: 'pg://a', lastUsedAt: 1 }, { id: 'b', url: 'pg://b', lastUsedAt: 0 }])
+  })
+
+  it('keeps an ignored key of a map the incoming value lacks', () => {
+    const yaml = formatOf('app.yml')
+    const differences = diffConfig(yaml, 'a:\n  b: 1\n  seen: 9\n', 'a:\n  b: 2\n', new IgnoredKeys(['a.seen']))
+    expect(mergeConfig(yaml, 'a:\n  b: 1\n  seen: 9\n', 'local', differences, [{ path: ['a', 'b'], side: 'remote' }], new IgnoredKeys(['a.seen']))).toBe('a:\n  b: 2\n  seen: 9\n')
   })
 })
 

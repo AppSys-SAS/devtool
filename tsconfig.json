@@ -11,7 +11,7 @@
       "path": "./packages/auth"
     },
     {
-      "path": "./packages/cdn"
+      "path": "./packages/environment"
     },
     {
       "path": "./packages/certs"
