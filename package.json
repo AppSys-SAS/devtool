@@ -1,6 +1,9 @@
 {
   "name": "@appsys/devtool",
+  "version": "0.1.1",
   "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
   "packageManager": "pnpm@12.11.2",
   "workspaces": [
     "apps/*",
@@ -8,15 +11,28 @@
   ],
   "scripts": {
     "build": "pnpm -r build",
-    "typecheck": "pnpm -r typecheck",
+    "typecheck": "pnpm -r typecheck && tsc -p tsconfig.eslint.json",
     "dev": "pnpm --parallel --filter @appsys/devtool-server --filter @appsys/devtool-ui dev",
     "dev:ui": "pnpm --filter @appsys/devtool-ui dev",
     "dev:server": "pnpm --filter @appsys/devtool-server dev",
     "dev:cli": "pnpm --filter @appsys/devtool-cli dev",
-    "lint": "pnpm -r lint"
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:e2e": "playwright test"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.65.1",
+    "@stylistic/eslint-plugin": "^5.10.0",
     "@types/node": "^26.6.5",
-    "typescript": "^7.0.2"
+    "@typescript/native": "npm:typescript@^7.0.2",
+    "@vue/eslint-config-typescript": "^14.9.0",
+    "eslint": "^10.15.0",
+    "eslint-plugin-vue": "^10.12.1",
+    "globals": "^17.14.0",
+    "typescript": "npm:@typescript/typescript6@^6.0.2",
+    "typescript-eslint": "^8.72.2",
+    "vitest": "^5.1.0",
+    "vue-eslint-parser": "^10.4.2"
   }
 }
