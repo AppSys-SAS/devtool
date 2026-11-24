@@ -19,26 +19,37 @@ CLI, Gemini CLI, Cursor and the other agents that read it.
 
 ## Install them
 
-Link (or copy) the skill folders where your agent loads skills, for one project or for every project:
+The skills ship with the devtool. Put them where your agents load skills with:
+
+```bash
+devtool skills sync
+```
+
+The command asks which folders to fill, among those the agents read, and how to put the skills there:
 
 | Agent | One project | Every project |
 |---|---|---|
 | Claude Code | `.claude/skills/` | `~/.claude/skills/` |
 | Codex CLI, Gemini CLI, Cursor, Amp and other agents of the format | `.agents/skills/` | `~/.agents/skills/` |
 
-From a clone of the repository:
+- **Copy**, the default: the skills stay in place if the devtool is reinstalled or moved. Run the command
+  again after updating the devtool.
+- **Link**: the skills follow the installation of the devtool and are always up to date, but break if it
+  is reinstalled somewhere else (another Node.js version, another package manager).
+
+Run it again whenever you like: it updates the skills it installed, removes those the devtool no longer
+ships, and leaves your own skills alone. A skill of your own with the same name as one of the devtool is
+kept unless you agree to replace it. Two folders linked to each other (`~/.claude/skills` pointing to
+`~/.agents/skills`, for instance) get the skills once.
+
+In a script, or without a terminal, give the folders and the mode:
 
 ```bash
-mkdir -p ~/.agents/skills ~/.claude/skills
-for skill in skills/devtool-*; do
-  ln -sfn "$PWD/$skill" ~/.agents/skills/
-  ln -sfn "$PWD/$skill" ~/.claude/skills/
-done
+devtool skills sync --target ~/.agents/skills ~/.claude/skills --link
 ```
 
-Links keep the skills up to date when you pull the repository. Some agents also read their own folder
-(`.gemini/skills/`, `.cursor/skills/`): check the documentation of your agent when a skill is not picked
-up.
+Some agents also read their own folder (`.gemini/skills/`, `.cursor/skills/`): pass it with `--target`
+when a skill is not picked up.
 
 ::: tip Tool names
 The skills name the tools as the server declares them (`list_commands`, `read_terminal`...). Your agent

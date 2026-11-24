@@ -12,23 +12,22 @@ so the same folders work in Claude Code, Codex CLI, Gemini CLI, Cursor and the o
 
 ## Installation
 
-Link (or copy) the skill folders where your agent loads skills, for one project or for every project:
+```bash
+devtool skills sync
+```
+
+The command asks which skill folders of your agents to fill, and whether to copy the skills or link
+them to the installation of the devtool; run it again to update them. Without a terminal, give the
+folders and the mode: `devtool skills sync --target ~/.agents/skills ~/.claude/skills --copy`.
 
 | Agent | Project | Every project |
 |---|---|---|
 | Claude Code | `.claude/skills/` | `~/.claude/skills/` |
 | Codex CLI, Gemini CLI, Cursor, Amp and other agents of the format | `.agents/skills/` | `~/.agents/skills/` |
 
-```bash
-mkdir -p ~/.agents/skills ~/.claude/skills
-for skill in skills/devtool-*; do
-  ln -sfn "$PWD/$skill" ~/.agents/skills/
-  ln -sfn "$PWD/$skill" ~/.claude/skills/
-done
-```
-
-Some agents also read their own folder (`.gemini/skills/`, `.cursor/skills/`); check the documentation of
-your agent when a skill is not picked up.
+Some agents also read their own folder (`.gemini/skills/`, `.cursor/skills/`); pass it with `--target`
+when a skill is not picked up. See the [documentation](https://appsys-sas.github.io/devtool/agents/skills)
+for the details.
 
 The skills name the tools of the server as the server declares them (`list_commands`, `read_terminal`…);
 an agent may show them with a prefix, such as `mcp__devtool__list_commands` in Claude Code.
