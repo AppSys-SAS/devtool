@@ -2,7 +2,7 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { glob } from 'glob'
-import { load } from 'js-yaml'
+import { loadAll, YAMLException } from 'js-yaml'
 import cloneDeep from 'lodash.clonedeep'
 import mergeWith from 'lodash.mergewith'
 
@@ -156,7 +156,7 @@ function mergeValue (left: unknown, right: unknown, key: string, holder: unknown
  * @returns The merged configuration.
  */
 export function mergeConfig<T extends RawConfig> (a: T, b: RawConfig): T {
-  return mergeWith(a, cloneDeep(b), mergeValue) as T
+  return mergeWith(a, cloneDeep(b), mergeValue)
 }
 
 /** The files declaring each setting of a configuration, by {@link configSourceKey}, in the order they are merged. */
@@ -190,11 +190,26 @@ function recordSources (value: unknown, file: string, sources: ConfigSources, pr
 }
 
 /**
+ * Parses the single YAML document of a file.
+ * @param content The content of the file.
+ * @param filename The file, named in error messages.
+ * @returns The value of the document, undefined when the file holds none.
+ * @throws {YAMLException} When the content is invalid or holds several documents.
+ */
+function parseYamlDocument (content: string, filename: string): unknown {
+  const documents = loadAll(content, { filename })
+  if (documents.length > 1) {
+    throw new YAMLException(`expected a single document in "${filename}", but found more`)
+  }
+  return documents[0]
+}
+
+/**
  * Loads a YAML config file, expands environment variables, merges its includes recursively, and normalizes relative paths.
  * @param filePath Path of the YAML config file to load.
  * @param seen Set of already loaded absolute file paths used to prevent include cycles.
  * @param baseDirectory Directory relative paths are resolved from; includes are resolved from the file directory.
- * @param sources Receives the file declaring each setting, the file before its includes.
+ * @param sources Receives the file declaring each setting, the file before its includes; `include` is not a setting.
  * @returns The merged raw configuration object.
  */
 async function loadConfigFileInternal (filePath: string, seen: Set<string>, baseDirectory: string, sources: ConfigSources): Promise<RawConfig> {
@@ -206,14 +221,14 @@ async function loadConfigFileInternal (filePath: string, seen: Set<string>, base
   seen.add(resolvedFilePath)
 
   const fileContent = await fs.readFile(resolvedFilePath, { encoding: 'utf-8' })
-  const loaded = load(fileContent)
-  const config = expandEnvVarsDeep(typeof loaded === 'object' && loaded ? (loaded) : {}) as RawConfig
+  const loaded = parseYamlDocument(fileContent, resolvedFilePath)
+  const { include, ...config } = expandEnvVarsDeep(typeof loaded === 'object' && loaded ? loaded : {}) as RawConfig
   const cwd = path.dirname(resolvedFilePath)
-  const includes = Array.isArray(config.include) ? (config.include as unknown[]).filter((item): item is string => typeof item === 'string') : []
-  recordSources({ ...config, include: undefined }, resolvedFilePath, sources)
+  const includes = Array.isArray(include) ? include.filter((item): item is string => typeof item === 'string') : []
+  recordSources(config, resolvedFilePath, sources)
 
-  for (const include of includes) {
-    const includeGlob = expandEnvVars(include)
+  for (const includeItem of includes) {
+    const includeGlob = expandEnvVars(includeItem)
     const files = (await glob(includeGlob, { cwd, absolute: true })).sort((a, b) => a.localeCompare(b))
 
     for (const includePath of files) {
@@ -221,7 +236,6 @@ async function loadConfigFileInternal (filePath: string, seen: Set<string>, base
     }
   }
 
-  delete config.include
   resolveFolderPaths(config, baseDirectory)
 
   return config

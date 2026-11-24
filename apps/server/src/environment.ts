@@ -185,10 +185,10 @@ export class DevtoolEnvironment {
     const skipped: { path: string, detail: string }[] = []
     const { items } = await environment.describe()
     for (const { item, local, remote, synced } of items.filter(described => paths.includes(described.item.path))) {
-      if (remote === null || remote === 'unknown' || (synced && remote.updatedAt.getTime() === synced.remoteUpdatedAt.getTime())) {
+      if (remote === null || remote === 'unknown' || remote.updatedAt.getTime() === synced?.remoteUpdatedAt.getTime()) {
         continue
       }
-      if (local && (!synced || local.updatedAt.getTime() !== synced.localUpdatedAt.getTime())) {
+      if (local && local.updatedAt.getTime() !== synced?.localUpdatedAt.getTime()) {
         skipped.push({ path: item.path, detail: synced ? 'local copy changed since the last sync, pull it by hand' : 'local copy never synchronized, pull it by hand' })
         continue
       }
@@ -283,7 +283,7 @@ export class DevtoolEnvironment {
   async keys (path: string): Promise<EnvironmentKeysPayload> {
     const environment = this.environment()
     const item = this._options?.items.find(candidate => candidate.path === path)
-    if (!environment || !item || item.kind !== 'file') {
+    if (!environment || item?.kind !== 'file') {
       return { path, entries: [], error: `${path} is not a file of the environment` }
     }
 

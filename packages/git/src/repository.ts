@@ -10,7 +10,7 @@ export interface ForgeRepository {
   webUrl: string
 }
 
-const SCP_REMOTE = /^[^@/\s]+@([^:/\s]+):(.+)$/
+const SCP_REMOTE = /^[^@/\s]+@(\[[^\]/\s]+\]|[^:/[\]\s]+):(.+)$/
 
 /**
  * Reads a repository from its web address or a remote of git, https, ssh or `user@host:path`.
@@ -42,7 +42,7 @@ export function repositoryOf (url: string): ForgeRepository | null {
     pathname = parsed.pathname
   }
 
-  const path = pathname.replace(/^\/+|\/+$/g, '').replace(/\.git$/, '')
+  const path = pathname.replace(/^\/+|\/+$/g, '').replace(/\/*\.git$/, '')
   return path.includes('/') ? { host, path, webUrl: `${protocol}//${host}/${path}` } : null
 }
 

@@ -99,7 +99,17 @@ export function readAgentSkill (content: string, folder: string): AgentSkill {
 }
 
 /**
- * Sets fields of the header of an agent skill, keeping its other keys, its comments and its body.
+ * Gives the line break a text uses.
+ *
+ * @param content - The text.
+ * @returns The line break ending its first line, `\n` when it has a single line.
+ */
+function lineBreakOf (content: string): string {
+  return /\r?\n/.exec(content)?.[0] ?? '\n'
+}
+
+/**
+ * Sets fields of the header of an agent skill, keeping its other keys, its comments, its body and its line breaks.
  *
  * @param content - The content of its `SKILL.md`.
  * @param fields - The fields to set.
@@ -116,18 +126,21 @@ export function withAgentSkillFields (content: string, fields: Partial<AgentSkil
   for (const [key, value] of Object.entries(fields)) {
     document.set(key, value)
   }
-  return `---\n${document.toString({ lineWidth: 0 })}---\n${header === null && body ? `\n${body}` : body}`
+  const lineBreak = lineBreakOf(content)
+  const newHeader = `---\n${document.toString({ lineWidth: 0 })}---\n`.replaceAll('\n', lineBreak)
+  return `${newHeader}${header === null && body ? `${lineBreak}${body}` : body}`
 }
 
 /**
  * Replaces the body of an agent skill, keeping its header as it is written.
  *
  * @param content - The content of its `SKILL.md`.
- * @param body - The new body.
+ * @param body - The new body, which starts on the line after the header.
  * @returns The new content.
  */
 export function withAgentSkillBody (content: string, body: string): string {
-  return `${splitFrontMatter(content).prefix}${body}`
+  const { prefix } = splitFrontMatter(content)
+  return prefix && !prefix.endsWith('\n') ? `${prefix}${lineBreakOf(content)}${body}` : `${prefix}${body}`
 }
 
 /**

@@ -116,7 +116,7 @@ function getShellArgs (shell: string, command: string): string[] {
  * @returns True when both commands exist with the same arguments.
  */
 function areArgsEqual (left: CommandArg[] | null, right: string[]): boolean {
-  if (!left || left.length !== right.length) {
+  if (left?.length !== right.length) {
     return false
   }
 
@@ -306,13 +306,13 @@ export class DevtoolCommandStream {
   static async create (server: DevtoolServer, data: CommandStreamCreatePayload, detached = false, hooks: CommandStreamHooks = {}): Promise<DevtoolCommandStream> {
     const instance = new DevtoolCommandStream(server)
     instance._onExit = hooks.onExit ?? null
-    await instance.create(data)
+    instance.create(data)
     if (hooks.automation) {
       instance.automation = hooks.automation
     }
 
     if (detached) {
-      await instance.startDetached()
+      instance.startDetached()
       return instance
     }
 
@@ -332,7 +332,7 @@ export class DevtoolCommandStream {
    * @param data The command asked for by the interface.
    * @throws When a choice the command needs has no valid value.
    */
-  async create ({
+  create ({
     projectSlug,
     directorySlug,
     primary = false,
@@ -343,7 +343,7 @@ export class DevtoolCommandStream {
     name = null,
     notifications = false,
     options = {}
-  }: CommandStreamCreatePayload): Promise<void> {
+  }: CommandStreamCreatePayload): void {
     let cwd = process.cwd()
 
     if (typeof options.cwd === 'string') {
@@ -467,7 +467,9 @@ export class DevtoolCommandStream {
       }
     }
     const screen = this._screen
-    await new Promise<void>(resolve => screen.write('', resolve))
+    await new Promise<void>(resolve => {
+      screen.write('', resolve)
+    })
 
     const buffer = screen.buffer.active
     const lines: string[] = []
@@ -565,7 +567,7 @@ export class DevtoolCommandStream {
    * Starts the command outside of any terminal, leaving it running on its own.
    * @throws When no shell can start it.
    */
-  private async startDetached (): Promise<void> {
+  private startDetached (): void {
     ensureNodePtySpawnHelperExecutable()
     const finalArgs = this.replaceVariables(expandCommandArgs(this._template ?? this.args, this._inputs))
     const env = { ...process.env, ...this.defaultEnv, ...this.env }
@@ -1060,7 +1062,7 @@ export class DevtoolCommandStream {
     if (this.proc) {
       throw new Error('Process not stopped')
     }
-    await this.server.removeCommandStream(this.slug)
+    this.server.removeCommandStream(this.slug)
     await this.sendToWsConnections('streamRemove', { slug: this.slug })
     this.events.emit('close')
     this.events.removeAllListeners()

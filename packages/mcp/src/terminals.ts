@@ -391,7 +391,7 @@ export function terminalTools (host: McpHost): McpTool[] {
       description: 'Lists the commands and scripts declared in the devtool configuration, with their inputs, their running terminal and the level of each action (read, run, input, control) for agents.',
       input: { section: z.string().optional().describe('Only the commands of this section') },
       readOnly: true,
-      run: async ({ section }) =>
+      run: ({ section }) =>
         allCommands(host.config)
           .filter(target => (!section || target.section.slug === section) && target.command.mcp.read.level !== 'deny')
           .map(target => describeCommand(host, target))
@@ -402,7 +402,7 @@ export function terminalTools (host: McpHost): McpTool[] {
       description: 'Lists the terminals of the devtool: who started them, their command, whether they run, their exit code and the cursor of the end of their output.',
       input: {},
       readOnly: true,
-      run: async () => readableTerminals(host).map(describeTerminal)
+      run: () => readableTerminals(host).map(describeTerminal)
     }),
     defineTool({
       name: 'read_terminal',
@@ -453,7 +453,7 @@ export function terminalTools (host: McpHost): McpTool[] {
         lines: z.number().int().min(1).max(500).optional().describe('Last matching lines kept per terminal, 20 by default')
       },
       readOnly: true,
-      run: async ({ pattern, lines }) =>
+      run: ({ pattern, lines }) =>
         readableTerminals(host)
           .filter(stream => terminalRule(host.config, stream, 'read').level === 'allow')
           .map(stream => ({ terminal: stream.slug, name: stream.name, ...terminalLog(stream, undefined, lines ?? 20, pattern) }))

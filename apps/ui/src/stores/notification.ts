@@ -39,7 +39,7 @@ class NotificationStore {
   constructor () {
     void navigator.locks?.request(SENDER_LOCK, () => {
       this._sender = true
-      return new Promise<never>(() => undefined)
+      return new Promise<never>(() => {})
     })
   }
 

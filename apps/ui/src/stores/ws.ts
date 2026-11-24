@@ -35,7 +35,7 @@ class WsStore {
 
     this.socket.onmessage = event => {
       try {
-        const payload = JSON.parse(event.data) as { type: string, data: unknown }
+        const payload = JSON.parse(event.data as string) as { type: string, data: unknown }
         switch (payload.type) {
           case 'config':
             if (this.loading.value || !this.connected.value) {

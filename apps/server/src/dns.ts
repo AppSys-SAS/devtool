@@ -228,7 +228,13 @@ export class DevtoolDns {
    */
   private async stop (): Promise<void> {
     this._udp?.close()
-    await new Promise<void>(resolve => (this._tcp ? this._tcp.close(() => resolve()) : resolve()))
+    await new Promise<void>(resolve => {
+      if (this._tcp) {
+        this._tcp.close(() => resolve())
+      } else {
+        resolve()
+      }
+    })
     this._udp = null
     this._tcp = null
     this._port = null

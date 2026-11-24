@@ -107,7 +107,7 @@ async function scriptText (container: string, script: string): Promise<string> {
 async function scriptInput (container: string, script: string, input: AsyncIterable<Buffer>, args: string[] = []): Promise<void> {
   const child = spawn('docker', ['exec', '-i', container, 'sh', '-c', script, 'sh', ...args], { stdio: ['pipe', 'ignore', 'pipe'] })
   const errors = collectErrors(child)
-  const piped = pipeline(Readable.from(input), child.stdin).then(() => null, (error: unknown) => error)
+  const piped = pipeline(Readable.from(input), child.stdin).then(() => null, (error: unknown) => (error instanceof Error ? error : new Error(String(error))))
   await assertExit(child, errors, `docker exec ${container}`)
   const pipeError = await piped
   if (pipeError) {
@@ -133,8 +133,8 @@ async function* prefixed (prefix: string, body: AsyncIterable<Buffer>): AsyncGen
  * @param text - The text.
  * @returns A stream of one chunk.
  */
-async function* textStream (text: string): AsyncGenerator<Buffer> {
-  yield Buffer.from(text)
+function textStream (text: string): AsyncIterable<Buffer> {
+  return Readable.from([Buffer.from(text)])
 }
 
 const POSTGRES_CLIENT = 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -X -q -v ON_ERROR_STOP=1'
@@ -229,7 +229,9 @@ const mariadb: DatabaseEngine = {
     const preamble = `SET FOREIGN_KEY_CHECKS = 0;\n${replace ? `DELETE FROM ${quoteMariadb(table)};\n` : ''}`
     await scriptInput(container, `${MARIADB_ROOT} mariadb -uroot "$MARIADB_DATABASE"`, prefixed(preamble, sql))
   },
-  async finish () {}
+  finish () {
+    return Promise.resolve()
+  }
 }
 
 /**
@@ -252,7 +254,9 @@ auth() {
  *
  * @returns A stream without chunk.
  */
-async function* emptyStream (): AsyncGenerator<Buffer> {}
+function emptyStream (): AsyncIterable<Buffer> {
+  return Readable.from([])
+}
 
 /** MongoDB of the official image: collections as tables, the database and credentials from the container environment. */
 const mongodb: DatabaseEngine = {
@@ -285,7 +289,9 @@ const mongodb: DatabaseEngine = {
       [table]
     )
   },
-  async finish () {}
+  finish () {
+    return Promise.resolve()
+  }
 }
 
 const ENGINES: Record<DatabaseEngineName, DatabaseEngine> = { postgres, mariadb, mongodb }

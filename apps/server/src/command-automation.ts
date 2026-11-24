@@ -2,9 +2,9 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { parseEnv } from 'node:util'
+import { stripAnsi } from '@appsys/devtool-shared'
 import { parse as parseYaml } from 'yaml'
 import { OpTerminal } from './op-terminal.js'
-import { stripAnsi } from './utils.js'
 
 const VALUE_BLOCK = /\{\{\s*(.*?)\s*\}\}/gs
 const SECRET_REFERENCE = /^op:\/\/[^\r\n]+$/

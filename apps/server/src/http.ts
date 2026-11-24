@@ -23,20 +23,30 @@ export class DevtoolHttp {
 
   private constructor (context: ServerContextLike) {
     this.context = context
-    this.server = http.createServer(this.onRequest.bind(this))
+    this.server = http.createServer((req, res) => {
+      void this.onRequest(req, res)
+    })
     this.wss = new WebSocketServer({
       server: this.server,
       path: '/ws/'
     })
   }
 
-  static async create (context: ServerContextLike): Promise<DevtoolHttp> {
+  /**
+   * Creates the HTTP server of the interfaces and listens to their WebSocket connections.
+   * @param context The server the messages of the interfaces go to.
+   * @returns The HTTP server, not listening yet.
+   */
+  static create (context: ServerContextLike): DevtoolHttp {
     const instance = new DevtoolHttp(context)
-    await instance.create()
+    instance.create()
     return instance
   }
 
-  private async create (): Promise<void> {
+  /**
+   * Listens to the WebSocket connections of the interfaces and keeps them alive.
+   */
+  private create (): void {
     this.wss.on('connection', ws => {
       const wsConnection = ws as WsConnection
       wsConnection.isAlive = true
@@ -45,19 +55,28 @@ export class DevtoolHttp {
         wsConnection.isAlive = true
       })
 
-      wsConnection.on('message', async message => {
-        try {
-          const parsed = JSON.parse(message.toString()) as { type: string, data: unknown }
-          await this.context.onConnectionMessage(parsed.type, parsed.data, wsConnection)
-        } catch (error) {
-          logger.warn('HTTP', 'WS message', error instanceof Error ? error.message : 'Unknown WS parsing error')
-        }
+      wsConnection.on('message', message => {
+        void this.onMessage(wsConnection, message as Buffer)
       })
 
       void this.context.onNewConnection(wsConnection)
     })
 
     this.setupPingPong()
+  }
+
+  /**
+   * Hands a message of an interface to the server, logging the ones it cannot read.
+   * @param ws The connection of the interface.
+   * @param message The raw message, JSON `{ type, data }`.
+   */
+  private async onMessage (ws: WsConnection, message: Buffer): Promise<void> {
+    try {
+      const parsed = JSON.parse(message.toString()) as { type: string, data: unknown }
+      await this.context.onConnectionMessage(parsed.type, parsed.data, ws)
+    } catch (error) {
+      logger.warn('HTTP', 'WS message', error instanceof Error ? error.message : 'Unknown WS parsing error')
+    }
   }
 
   async listen (): Promise<void> {
@@ -68,7 +87,14 @@ export class DevtoolHttp {
     logger.info('Server', 'HTTP', `Started on port ${port}`)
   }
 
-  async sendToWsConnections (type: string, data: unknown, wsInstance: WebSocket | null = null): Promise<void> {
+  /**
+   * Sends a payload to one interface, or to every open interface.
+   * @param type The type of the payload.
+   * @param data The payload.
+   * @param wsInstance The connection of the interface, every connection when null.
+   * @returns A promise resolved once the payload is handed to the connections.
+   */
+  sendToWsConnections (type: string, data: unknown, wsInstance: WebSocket | null = null): Promise<void> {
     const payload = JSON.stringify({ type, data })
     for (const ws of this.wss.clients) {
       if (ws.readyState !== ws.OPEN) {
@@ -79,6 +105,7 @@ export class DevtoolHttp {
       }
       ws.send(payload)
     }
+    return Promise.resolve()
   }
 
   /**
