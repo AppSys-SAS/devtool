@@ -38,6 +38,7 @@ in one local web interface.
 - [Contributing](#contributing)
 - [Security](#security)
 - [License](#license)
+- [Trademark](#trademark)
 
 ## Features
 
@@ -126,6 +127,12 @@ The devtool is a development tool for the machine of a developer: **do not use i
 ## License
 
 Copyright 2026 AppSys SAS. Licensed under the [Apache License, Version 2.0](LICENSE).
+
+## Trademark
+
+AppSys is a registered trademark of AppSys SAS. The license covers the code, not the AppSys name or
+logos: a fork may describe itself as based on the AppSys Devtool, but not use the name or logos for its
+own product or suggest an endorsement by AppSys.
 
 <div align="center">
 <br>
