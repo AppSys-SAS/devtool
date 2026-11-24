@@ -72,6 +72,8 @@ export interface McpSettings {
   enabled: boolean
   /** Whether the interfaces notify the requests waiting for an answer. */
   notifications: boolean
+  /** Whether the agent skills of the devtool are served to the agents. */
+  skills: boolean
   /** Seconds before a request without answer is refused. */
   timeout: number
   /** The rules of everything, refined by the categories below. */
@@ -545,6 +547,8 @@ export interface DirectoryFiles {
   /** What agents may do with the files. */
   mcp: McpRules
   mcpTarget: McpTarget
+  /** For agent skills, the globs of the skill folders served to the agents, null to serve none. */
+  mcpSkills: string[] | null
 }
 
 export interface DirectoryDefinition {

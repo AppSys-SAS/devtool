@@ -33,8 +33,11 @@ claude mcp add --scope user --transport http appsys-devtool http://127.0.0.1:673
 For the other agents (Claude Desktop, Codex, Gemini CLI, opencode, Cursor, GitHub Copilot, Windsurf, Zed,
 Cline, Qwen Code, Mistral Vibe, Junie, JetBrains AI Assistant, Warp), the **Connection** tab of the Agents
 page gives the exact configuration, and so does the
-[setup skill](https://github.com/AppSys-SAS/devtool/blob/main/skills/devtool-mcp-setup/SKILL.md#agent-configurations).
+[setup skill](https://github.com/AppSys-SAS/devtool/blob/main/packages/skills/skills/devtool-mcp-setup/SKILL.md#agent-configurations).
 Install the [agent skills](/agents/skills) next to it so the agent knows how to use the tools well.
+
+The agents that the buttons of pull requests and issues start, the [coding agents](/agents/coding-agents),
+use the MCP server too once connected: a review or a fix can then run your tests and read your logs.
 
 The first time an agent connects, the devtool asks you whether to accept it, unless
 `adt.mcp.clients` already allows or denies it.

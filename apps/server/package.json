@@ -30,6 +30,7 @@
     "@appsys/devtool-git": "workspace:*",
     "@appsys/devtool-mcp": "workspace:*",
     "@appsys/devtool-shared": "workspace:*",
+    "@appsys/devtool-skills": "workspace:*",
     "@iconify-json/akar-icons": "^1.2.7",
     "@iconify-json/bxl": "^1.2.4",
     "@iconify-json/devicon": "^1.2.81",

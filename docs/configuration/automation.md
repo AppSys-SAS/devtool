@@ -11,7 +11,8 @@ password prompt, a token that must never be written in the configuration. This p
 tools the devtool gives you for that: `unless`, `answers` and **value blocks**.
 
 They work on the commands of your projects, and also on the renewal of
-[certificates](/configuration/certificates) and the agents of [integrations](/configuration/integrations).
+[certificates](/configuration/certificates) and the [coding agents](/agents/coding-agents) of pull requests
+and issues.
 
 ## A command that logs in only when needed
 

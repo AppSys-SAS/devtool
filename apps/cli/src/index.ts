@@ -28,6 +28,7 @@ import {
 import { CONFIG_FOLDER_VARIABLE, loadMergedConfig, resolveDefaultConfigPaths } from '@appsys/devtool-config'
 import runProxy from '@appsys/devtool-proxy'
 import runServer, { createBackendContext, relaunchUnderApp, renewCertificates } from '@appsys/devtool-server'
+import { SKILLS_FOLDER } from '@appsys/devtool-skills'
 import { logger, type LogLevel } from '@appsys/devtool-shared'
 import pkg from '../package.json' with { type: 'json' }
 import { agentSkillFolders, distinctFolders, foreignSkills, type SkillInstallMode, syncSkills, wasSynced } from './skills.js'
@@ -36,7 +37,6 @@ const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
 const UI_PATH = path.resolve(__dirname, '../../ui/dist')
-const SKILLS_PATH = path.resolve(__dirname, '../../../skills')
 
 /**
  * Reads the identity provider of the configuration of the devtool installation.
@@ -320,12 +320,12 @@ async function syncAgentSkills (flags: { target?: string[], copy?: boolean, link
 
   for (const folder of await distinctFolders(folders)) {
     const replace: string[] = []
-    for (const skill of await foreignSkills(SKILLS_PATH, folder)) {
+    for (const skill of await foreignSkills(SKILLS_FOLDER, folder)) {
       if (interactive && (await confirm({ message: `${folder} already has a ${skill} skill of its own: replace it?`, default: false }))) {
         replace.push(skill)
       }
     }
-    const result = await syncSkills({ source: SKILLS_PATH, folder, mode, replace })
+    const result = await syncSkills({ source: SKILLS_FOLDER, folder, mode, replace })
     const parts = (['added', 'updated', 'removed', 'unchanged'] as const).filter(kind => result[kind].length).map(kind => `${kind} ${result[kind].join(', ')}`)
     logger.info('CLI', 'Skills', `${folder.replace(os.homedir(), '~')}: ${parts.join('; ') || 'nothing to do'}`)
     if (result.skipped.length) {

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { type FSWatcher, watch } from 'node:fs'
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import { SKILLS_FOLDER } from '@appsys/devtool-skills'
 import type { FilePayload, FileTreePayload, McpMessagePayload, PortOwner, RuntimeConfig, SidebarOrderChange } from '@appsys/devtool-shared'
 import { logger, SORT_MODES } from '@appsys/devtool-shared'
 import type { WebSocket } from 'ws'
@@ -45,6 +46,8 @@ export class DevtoolServer implements McpServerHost {
   private readonly configProvider: ConfigProvider
 
   readonly version: string
+
+  readonly skillsFolder = SKILLS_FOLDER
 
   private configWrapper: DevtoolConfigure
 

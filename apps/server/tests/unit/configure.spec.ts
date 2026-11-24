@@ -178,6 +178,7 @@ describe('defaults', () => {
     expect(adt.mcp).toEqual({
       enabled: false,
       notifications: true,
+      skills: true,
       timeout: 120,
       default: rules,
       commands: rules,
@@ -409,9 +410,13 @@ describe('adt.agentPrompts', () => {
 
 describe('adt.mcp', () => {
   it('reads the switches, timeout and terminals of the server', async () => {
-    const { adt, warnings } = await load({ adt: { mcp: { enabled: true, notifications: false, timeout: 30, ownTerminals: 'ask' } } })
+    const { adt, warnings } = await load({ adt: { mcp: { enabled: true, notifications: false, skills: false, timeout: 30, ownTerminals: 'ask' } } })
     expect(warnings).toEqual([])
-    expect(adt.mcp).toMatchObject({ enabled: true, notifications: false, timeout: 30, ownTerminals: 'ask' })
+    expect(adt.mcp).toMatchObject({ enabled: true, notifications: false, skills: false, timeout: 30, ownTerminals: 'ask' })
+  })
+
+  it('serves the skills of the devtool by default', async () => {
+    expect((await load({ adt: { mcp: { enabled: true } } })).adt.mcp.skills).toBe(true)
   })
 
   it('notifies the requests of agents as the devtool notifies by default', async () => {
@@ -1628,10 +1633,39 @@ describe('files', () => {
       restore: 'pull',
       commands: ['pull'],
       mcp: configure.adt.mcp.files,
-      mcpTarget: { path: ['projects', 'api', 'files', 'data', 'mcp'], declaredIn: null }
+      mcpTarget: { path: ['projects', 'api', 'files', 'data', 'mcp'], declaredIn: null },
+      mcpSkills: null
     })
     expect(files.skills).toMatchObject({ name: 'skills', type: 'agentSkills', path: path.join(workspace, 'api', '.claude/skills'), restore: null, commands: [] })
     expect(files.home.path).toBe('/opt/shared')
+  })
+
+  it('reads the skills a folder of agent skills serves over MCP', async () => {
+    const configure = await loadApi({
+      files: {
+        all: { path: 'all', type: 'agentSkills', mcpSkills: true },
+        some: { path: 'some', type: 'agentSkills', mcpSkills: ['review', 'deploy-*'] },
+        none: { path: 'none', type: 'agentSkills' }
+      }
+    })
+    expect(configure.warnings).toEqual([])
+    const { files } = apiOf(configure)
+    expect([files.all.mcpSkills, files.some.mcpSkills, files.none.mcpSkills]).toEqual([['*'], ['review', 'deploy-*'], null])
+  })
+
+  it('warns about skills served from a plain folder of files, or an invalid list', async () => {
+    const configure = await loadApi({
+      files: {
+        plain: { path: 'plain', mcpSkills: true },
+        empty: { path: 'empty', type: 'agentSkills', mcpSkills: [] }
+      }
+    })
+    const { files } = apiOf(configure)
+    expect([files.plain.mcpSkills, files.empty.mcpSkills]).toEqual([null, null])
+    expect(configure.warnings).toEqual([
+      'projects[main].directories[api].files[plain].mcpSkills: only applies to files of type agentSkills.',
+      'projects[main].directories[api].files[empty].mcpSkills: must be true or a list of skill folders, such as [ review, "deploy-*" ].'
+    ])
   })
 
   it('accepts the keys level for a folder of files', async () => {

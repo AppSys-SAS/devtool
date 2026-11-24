@@ -15,7 +15,7 @@ adt:
 ```
 
 Agents have their own pages: [Agent permissions (MCP)](/configuration/mcp) covers `adt.mcp`, and
-[Integrations](/configuration/integrations#agents) covers `adt.agents` and `adt.agentPrompts`.
+[Coding agents](/agents/coding-agents) covers `adt.agents` and `adt.agentPrompts`.
 
 ## Name and icon
 
@@ -159,7 +159,7 @@ drag the items, then save.
 | `notifications` | boolean | `true` | Notify when a command ends. |
 | `sidebar` | map | | See below. |
 | `mcp` | map | | See [Agent permissions (MCP)](/configuration/mcp). |
-| `agents`, `agentPrompts` | map | | See [Integrations](/configuration/integrations#agents). |
+| `agents`, `agentPrompts` | map | | See [Coding agents](/agents/coding-agents). |
 
 ### `adt.sidebar`
 

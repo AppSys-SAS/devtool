@@ -1,14 +1,15 @@
 import { randomUUID } from 'node:crypto'
 import type http from 'node:http'
-import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js'
-import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
-import { isInitializeRequest, SubscribeRequestSchema, UnsubscribeRequestSchema } from '@modelcontextprotocol/sdk/types.js'
+import { NodeStreamableHTTPServerTransport } from '@modelcontextprotocol/node'
+import { isInitializeRequest, McpServer, ResourceTemplate } from '@modelcontextprotocol/server'
+import { z } from 'zod'
 import type { McpDecision, McpDetail } from '@appsys/devtool-shared'
 import { isLoopback, logger } from '@appsys/devtool-shared'
 import { DevtoolApprovals, McpRefusal, type McpPermission } from './approvals.js'
 import { environmentTools } from './environment.js'
 import { fileTools } from './files.js'
 import type { McpServerHost, McpUiMessage } from './host.js'
+import { DevtoolSkills } from './skills.js'
 import { describeTerminal, readableTerminals, terminalLog, terminalTools } from './terminals.js'
 import { type McpCall, type McpTool, McpToolError } from './tool.js'
 
@@ -30,7 +31,7 @@ const INSTRUCTIONS = [
 
 interface McpSession {
   server: McpServer
-  transport: StreamableHTTPServerTransport
+  transport: NodeStreamableHTTPServerTransport
   /** The terminals followed by the agent, by URI, with what stops following them. */
   subscriptions: Map<string, () => void>
   /** When the agent last sent a request or closed one. */
@@ -81,6 +82,8 @@ export class DevtoolMcp {
 
   private readonly _sessions = new Map<string, McpSession>()
 
+  private readonly _skills = new DevtoolSkills()
+
   /**
    * @param host The devtool server.
    */
@@ -96,11 +99,18 @@ export class DevtoolMcp {
   }
 
   /**
-   * Applies the configuration, closing every session when the server is disabled.
+   * Applies the configuration: its rules, the skills it serves, every session closed when the server
+   * is disabled.
    */
   async configure (): Promise<void> {
-    const { adt } = this._host.config
+    const { adt, projects } = this._host.config
     await this.approvals.configure(adt.mcp, adt.cacheDir)
+    await this._skills.configure([
+      ...(adt.mcp.skills ? [{ prefix: 'devtool', folder: this._host.skillsFolder, include: ['*'] }] : []),
+      ...Object.values(projects).flatMap(project => Object.values(project.directories).flatMap(directory => Object.values(directory.files).flatMap(files =>
+        files.mcpSkills ? [{ prefix: `files/${project.slug}/${directory.slug}/${files.slug}`, folder: files.path, include: files.mcpSkills }] : []
+      )))
+    ])
     if (!adt.mcp.enabled) {
       await Promise.all([...this._sessions.values()].map(session => session.transport.close()))
     }
@@ -227,7 +237,7 @@ export class DevtoolMcp {
       lastSeen: Date.now(),
       open: 0,
       listens: false,
-      transport: new StreamableHTTPServerTransport({
+      transport: new NodeStreamableHTTPServerTransport({
         sessionIdGenerator: randomUUID,
         onsessioninitialized: id => {
           this._sessions.set(id, session)
@@ -245,11 +255,12 @@ export class DevtoolMcp {
     }
 
     for (const tool of this._tools) {
-      server.registerTool(tool.name, { title: tool.title, description: tool.description, inputSchema: tool.input, annotations: { readOnlyHint: tool.readOnly } }, (input, extra) =>
-        this.call(session, tool, input, extra.sessionId ?? '', extra.signal)
+      server.registerTool(tool.name, { title: tool.title, description: tool.description, inputSchema: z.object(tool.input), annotations: { readOnlyHint: tool.readOnly } }, (input, ctx) =>
+        this.call(session, tool, input, ctx.sessionId ?? '', ctx.mcpReq.signal)
       )
     }
     this.registerResources(session)
+    this._skills.attach(server)
     await server.connect(session.transport)
     return session
   }
@@ -387,8 +398,8 @@ export class DevtoolMcp {
         throw new Error('The client is not accepted yet: call a tool first')
       }
     }
-    server.registerResource('terminals', TERMINALS_URI, { title: 'Terminals', mimeType: 'application/json' }, (uri, extra) => {
-      accepted(extra.sessionId)
+    server.registerResource('terminals', TERMINALS_URI, { title: 'Terminals', mimeType: 'application/json' }, (uri, ctx) => {
+      accepted(ctx.sessionId)
       return { contents: [{ uri: uri.href, mimeType: 'application/json', text: JSON.stringify(readableTerminals(this._host).map(describeTerminal), null, 2) }] }
     })
     server.registerResource(
@@ -397,8 +408,8 @@ export class DevtoolMcp {
         list: () => ({ resources: readableTerminals(this._host).map(stream => ({ uri: `${TERMINAL_URI_PREFIX}${stream.slug}`, name: stream.name, mimeType: 'application/json' })) })
       }),
       { title: 'Terminal', mimeType: 'application/json' },
-      (uri, variables, extra) => {
-        accepted(extra.sessionId)
+      (uri, variables, ctx) => {
+        accepted(ctx.sessionId)
         const stream = readableTerminals(this._host).find(item => item.slug === variables.slug)
         if (!stream) {
           throw new Error(`No terminal ${String(variables.slug)}`)
@@ -408,12 +419,12 @@ export class DevtoolMcp {
       }
     )
 
-    server.server.setRequestHandler(SubscribeRequestSchema, (request, extra) => {
-      accepted(extra.sessionId)
+    server.server.setRequestHandler('resources/subscribe', (request, ctx) => {
+      accepted(ctx.sessionId)
       this.subscribe(session, request.params.uri)
       return {}
     })
-    server.server.setRequestHandler(UnsubscribeRequestSchema, request => {
+    server.server.setRequestHandler('resources/unsubscribe', request => {
       session.subscriptions.get(request.params.uri)?.()
       session.subscriptions.delete(request.params.uri)
       return {}

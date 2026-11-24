@@ -136,10 +136,13 @@ projects:
 | `restore` | command slug | | Command of the project restoring the folder when it is missing. |
 | `commands` | list of command slugs | | Commands of the project shown on the page. |
 | `mcp` | level or levels | inherited | What agents may do; `keys` is allowed. |
+| `mcpSkills` | `true` or list of globs | `false` | `agentSkills` only: [serve its skills over MCP](/agents/skills#serve-them-over-mcp). |
 
 ### Warnings
 
 - `is replaced by default: { action: files:<slug> }`: a folder of files is named `default`.
 - `type: must be files or agentSkills`: the folder is dropped.
+- `mcpSkills: only applies to files of type agentSkills`,
+  `mcpSkills: must be true or a list of skill folders, such as [ review, "deploy-*" ]`: no skill is served.
 - `restore: must name a command of the directory`.
 - `commands: unknown commands <slugs>`: the unknown ones are left out.

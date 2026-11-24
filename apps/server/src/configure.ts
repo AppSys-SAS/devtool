@@ -88,6 +88,7 @@ function defaultMcpSettings (notifications: boolean): McpSettings {
   return {
     enabled: false,
     notifications,
+    skills: true,
     timeout: 120,
     default: rules,
     commands: rules,
@@ -433,7 +434,7 @@ export class DevtoolConfigure {
   private readMcp (value: unknown): McpSettings {
     const settings = defaultMcpSettings(this.adt.notifications)
     const mcp = toRecord(value)
-    for (const key of ['enabled', 'notifications'] as const) {
+    for (const key of ['enabled', 'notifications', 'skills'] as const) {
       if (mcp[key] === true || mcp[key] === false) {
         settings[key] = mcp[key]
       } else if (mcp[key] !== undefined) {
@@ -1714,10 +1715,35 @@ export class DevtoolConfigure {
         restore,
         commands: commands.filter(command => command in directory.extras),
         mcp: this.readMcpRules(`${slug}[${filesSlug}].mcp`, entry.mcp, inherited, ['projects', directory.slug, 'files', filesSlug]),
-        mcpTarget: this.settingTarget(['projects', directory.slug, 'files', filesSlug, 'mcp'])
+        mcpTarget: this.settingTarget(['projects', directory.slug, 'files', filesSlug, 'mcp']),
+        mcpSkills: this.readMcpSkills(`${slug}[${filesSlug}].mcpSkills`, entry.mcpSkills, type)
       }
     }
     return files
+  }
+
+  /**
+   * Reads which skills of a folder of files are served to the agents, `mcpSkills: true` for all of them
+   * or a list of globs matching their folders.
+   * @param slug Names the setting in warnings.
+   * @param value The raw setting.
+   * @param type The type of the folder of files.
+   * @returns The globs of the served skill folders, null when none is served.
+   */
+  private readMcpSkills (slug: string, value: unknown, type: DirectoryFilesType): string[] | null {
+    if (value === undefined || value === false) {
+      return null
+    }
+    if (type !== 'agentSkills') {
+      this.addWarning(slug, 'only applies to files of type agentSkills')
+      return null
+    }
+    const globs = value === true ? ['*'] : toStringArray(value)
+    if (!globs?.length) {
+      this.addWarning(slug, 'must be true or a list of skill folders, such as [ review, "deploy-*" ]')
+      return null
+    }
+    return globs
   }
 
   private pathFrom (projectPath: string, directoryPath?: string): string {

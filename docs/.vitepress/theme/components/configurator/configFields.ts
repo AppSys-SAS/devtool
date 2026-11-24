@@ -116,6 +116,7 @@ export const BACKEND_FIELDS: Record<string, FieldDefinition[]> = {
 
 export const AGENT_FIELDS: FieldDefinition[] = [
   { path: ['adt', 'mcp', 'enabled'], label: 'Enable the MCP server', type: 'checkbox' },
+  { path: ['adt', 'mcp', 'skills'], label: 'Serve the devtool skills', type: 'checkbox', defaultValue: true },
   { path: ['adt', 'mcp', 'timeout'], label: 'Seconds to answer', type: 'number', defaultValue: 120 },
   ...['read', 'run', 'input', 'control', 'write'].map((action): FieldDefinition => (
     { path: ['adt', 'mcp', 'default', action], label: `Default level: ${action}`, type: 'select', options: MCP_LEVELS }
@@ -146,7 +147,8 @@ export const SERVICE_FIELDS: FieldDefinition[] = [
 export const FILES_FIELDS: FieldDefinition[] = [
   { path: ['name'], label: 'Name' },
   { path: ['path'], label: 'Folder' },
-  { path: ['type'], label: 'Type', type: 'select', options: ['files', 'agentSkills'], defaultValue: 'files' }
+  { path: ['type'], label: 'Type', type: 'select', options: ['files', 'agentSkills'], defaultValue: 'files' },
+  { path: ['mcpSkills'], label: 'Skills served over MCP', type: 'list', placeholder: 'review, deploy-*', hint: 'agentSkills only.' }
 ]
 
 export const INTEGRATION_FIELDS: FieldDefinition[] = [
