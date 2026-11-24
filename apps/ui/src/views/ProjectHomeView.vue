@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { Icon } from "@iconify/vue";
+import IntegrationLink from "@/components/IntegrationLink.vue";
 import DirectorySummaryCard from "@/components/project/DirectorySummaryCard.vue";
 import { iconFromMeta } from "@/lib/directory-commands";
 import configStore from "@/stores/config";
@@ -10,7 +11,10 @@ const props = defineProps<{
 }>();
 
 const project = computed(() => configStore.getProject(props.projectSlug));
-const directories = computed(() => Object.values(project.value?.directories ?? {}).filter((directory) => !directory.missing));
+const directories = computed(() => {
+  const value = project.value;
+  return (value?.content ?? []).flatMap((key) => value?.directories[key] ?? []).filter((directory) => !directory.missing);
+});
 const running = computed(
   () => configStore.commandStreams.value.filter((stream) => stream.projectSlug === props.projectSlug && stream.status === "RUNNING").length,
 );
@@ -44,6 +48,18 @@ const running = computed(
         {{ project.path }}
       </p>
     </header>
+
+    <div
+      v-if="project.integrations.length"
+      class="mb-6 grid gap-2 sm:grid-cols-2 xl:grid-cols-3"
+    >
+      <IntegrationLink
+        v-for="integration in project.integrations"
+        :key="integration.slug"
+        :integration="integration"
+        :project-slug="projectSlug"
+      />
+    </div>
 
     <div class="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
       <DirectorySummaryCard

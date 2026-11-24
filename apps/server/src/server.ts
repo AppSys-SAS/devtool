@@ -1,14 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { type FSWatcher, watch } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { FilePayload, FileTreePayload, McpMessagePayload, PortOwner, RuntimeConfig } from "@appsys/devtool-shared";
-import { logger } from "@appsys/devtool-shared";
+import type { FilePayload, FileTreePayload, McpMessagePayload, PortOwner, RuntimeConfig, SidebarOrderChange } from "@appsys/devtool-shared";
+import { logger, SORT_MODES } from "@appsys/devtool-shared";
 import type { WebSocket } from "ws";
 import { DevtoolCdnSession } from "./cdn-session.js";
 import type { CommandAutomation } from "./command-automation.js";
 import { DevtoolCertificates } from "./certificates.js";
 import { type CommandStreamHooks, DevtoolCommandStream } from "./command-stream.js";
-import { acceptsMcpLevel, writeMcpLevel } from "./config-edit.js";
+import { acceptsMcpLevel, writeMcpLevel, writeSetting } from "./config-edit.js";
 import { agentAutomationKey, DevtoolConfigure } from "./configure.js";
 import { DevtoolEnvironment } from "./environment.js";
 import { DevtoolFileSpaces, type FileSpace, isDevtoolConfig } from "./file-spaces.js";
@@ -179,6 +179,36 @@ export class DevtoolServer implements McpServerHost {
   }
 
   /**
+   * Writes how the sections, or the content of some sections, are ordered, changed from an interface,
+   * to the personal override or to the file declaring each, then reloads the configuration once; each
+   * failure is shown in the interfaces.
+   * @param changes The lists ordered, their modes and orders, and the files written.
+   */
+  private async setSidebarOrder(changes: SidebarOrderChange[]): Promise<void> {
+    for (const change of changes) {
+      try {
+        if (change.section !== null && !this.config.projects[change.section]) {
+          throw new Error(`${change.section} is not a section`);
+        }
+        if (!SORT_MODES.includes(change.sort) || (change.order !== null && !(Array.isArray(change.order) && change.order.every((key) => typeof key === "string")))) {
+          throw new Error(`${change.sort} is not a way to order the sidebar`);
+        }
+        const base = change.section === null ? ["adt", "sidebar"] : ["sections", change.section];
+        const file = change.file === "local" ? this.configWrapper.localPath : this.configWrapper.settingTarget([...base, "sort"]).declaredIn;
+        if (!file) {
+          throw new Error(change.file === "local" ? "no personal override is loaded" : "no configuration file declares it");
+        }
+        await writeSetting(file, [...base, "sort"], change.sort);
+        await writeSetting(file, [...base, "order"], change.order);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        await this.notifyUser({ id: randomUUID(), client: "devtool", message: `Order not changed: ${message}`, level: "error", date: Date.now() });
+      }
+    }
+    await this.reconfigure();
+  }
+
+  /**
    * Answers a request of an agent to the MCP server.
    * @param req The request.
    * @param res Its response.
@@ -273,6 +303,11 @@ export class DevtoolServer implements McpServerHost {
 
     if (message.type === "agentStart") {
       await this.startAgent(message.data);
+      return;
+    }
+
+    if (message.type === "sidebarSetOrder") {
+      await this.setSidebarOrder(message.data.changes);
       return;
     }
 
@@ -532,14 +567,16 @@ export class DevtoolServer implements McpServerHost {
   }
 
   /**
-   * Starts an agent of the configuration run by a command in a terminal of a directory, its prompt
-   * given once the value blocks of the command are read, and shows the terminal to the interface.
-   * @param data The agent, the directory, the prompt and the terminal.
+   * Starts an agent of the configuration run by a command in a terminal of a project or of one of its
+   * directories, its prompt given once the value blocks of the command are read, and shows the terminal
+   * to the interface.
+   * @param data The agent, the project and directory, the prompt and the terminal.
    */
   private async startAgent(data: AgentStartPayload): Promise<void> {
     const agent = this.config.adt.agents.find((item) => item.slug === data.agent);
-    if (!agent?.args || !this.config.projects[data.projectSlug]?.directories[data.directorySlug]) {
-      logger.warn("Server", "Agents", `No agent ${data.agent} run by a command in ${data.projectSlug}/${data.directorySlug}`);
+    const project = this.config.projects[data.projectSlug];
+    if (!agent?.args || !project || (data.directorySlug !== null && !project.directories[data.directorySlug])) {
+      logger.warn("Server", "Agents", `No agent ${data.agent} run by a command in ${data.projectSlug}/${data.directorySlug ?? ""}`);
       return;
     }
     await this.newCommandStream(

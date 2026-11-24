@@ -5,11 +5,11 @@ import { Bookmark, FolderTree, Sparkles } from "@lucide/vue";
 import { RouterLink, RouterView } from "vue-router";
 import type { DirectoryExtra } from "@appsys/devtool-shared";
 import CommandItem from "@/components/CommandItem.vue";
+import IntegrationLink from "@/components/IntegrationLink.vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { hasIntegrationPage, integrationRoute } from "@/lib/shortcuts";
 import bookmarkStore from "@/stores/bookmark";
 import configStore from "@/stores/config";
 import layoutStore, { rightSidebarKey } from "@/stores/layout";
@@ -185,22 +185,13 @@ const handleOpenLinkInNewTab = (href: string) => {
             </CardTitle>
           </CardHeader>
           <CardContent class="space-y-2">
-            <component
-              :is="hasIntegrationPage(integration) ? RouterLink : 'a'"
+            <IntegrationLink
               v-for="integration in directory.integrations"
               :key="integration.slug"
-              v-bind="hasIntegrationPage(integration) ? { to: integrationRoute(integration, projectSlug, directorySlug) } : { href: integration.url, target: '_blank', rel: 'noopener' }"
-              class="flex w-full items-start gap-2 rounded-md border px-3 py-2 text-left text-sm transition-colors hover:bg-accent/60"
-            >
-              <Icon
-                :icon="integration.icon"
-                class="mt-0.5 size-4 shrink-0"
-              />
-              <span class="min-w-0 flex-1">
-                <strong class="block truncate">{{ integration.name }}</strong>
-                <span class="block truncate text-xs text-muted-foreground">{{ integration.url }}</span>
-              </span>
-            </component>
+              :integration="integration"
+              :project-slug="projectSlug"
+              :directory-slug="directorySlug"
+            />
           </CardContent>
         </Card>
 

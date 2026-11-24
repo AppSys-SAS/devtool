@@ -1,7 +1,7 @@
 import type { ConfigSources, RawConfig } from "@appsys/devtool-config";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { McpUiMessage } from "@appsys/devtool-mcp";
-import type { CommandInputValue, FileEntryPayload, PortConflictAction, RuntimeConfig } from "@appsys/devtool-shared";
+import type { CommandInputValue, FileEntryPayload, PortConflictAction, RuntimeConfig, SidebarOrderChange } from "@appsys/devtool-shared";
 import type { WebSocket } from "ws";
 import type { EnvironmentTarget } from "./environment.js";
 
@@ -57,12 +57,13 @@ export interface CommandStreamCreatePayload {
   };
 }
 
-/** Asks to start an agent of the configuration with a prompt, in a terminal of a directory. */
+/** Asks to start an agent of the configuration with a prompt, in a terminal of a project or of one of its directories. */
 export interface AgentStartPayload {
   /** The slug of the agent. */
   agent: string;
   projectSlug: string;
-  directorySlug: string;
+  /** The directory the agent works in, null for the project itself. */
+  directorySlug: string | null;
   prompt: string;
   /** The name of the terminal. */
   name: string;
@@ -117,6 +118,10 @@ export type ConnectionMessage =
   | {
       type: "agentStart";
       data: AgentStartPayload;
+    }
+  | {
+      type: "sidebarSetOrder";
+      data: { changes: SidebarOrderChange[] };
     }
   | {
       type: "envRefresh";

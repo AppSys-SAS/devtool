@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { TriangleAlert } from "@lucide/vue";
 import CertificatesCard from "@/components/CertificatesCard.vue";
+import SidebarOrderCard from "@/components/sidebar-order/SidebarOrderCard.vue";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import configStore from "@/stores/config";
@@ -44,6 +45,7 @@ const version = window.devtool?.version ?? "0.0.0";
         </p>
       </CardContent>
     </Card>
+    <SidebarOrderCard />
     <CertificatesCard />
   </div>
 </template>

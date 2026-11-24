@@ -17,7 +17,7 @@ class PullRequestsStore {
 
   /**
    * Gives the pull requests of an integration.
-   * @param key The integration, `<section>/<project>/<slug>`.
+   * @param key The integration, `<section>[/<project>]/<slug>`.
    * @returns Its state, null before the server sends it.
    */
   get(key: string): PullRequestsPayload | null {

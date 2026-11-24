@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { IntegrationDefinition, PullRequestsPayload, RuntimeConfig } from "@appsys/devtool-shared";
-import { logger } from "@appsys/devtool-shared";
+import { integrationKey, logger } from "@appsys/devtool-shared";
 import { findForge, ForgeError, repositoryOf } from "@appsys/devtool-git";
 import { type CommandAutomation, CommandSecrets } from "./command-automation.js";
 import { integrationAutomationKey } from "./configure.js";
@@ -50,11 +50,11 @@ export class DevtoolPullRequests {
    */
   configure(config: RuntimeConfig, automations: Record<string, CommandAutomation>, tokens: Record<string, string>): void {
     this._sources = new Map();
-    for (const [projectSlug, project] of Object.entries(config.projects)) {
-      for (const [directorySlug, directory] of Object.entries(project.directories)) {
-        for (const integration of directory.integrations.filter((item) => item.type === "pullRequests")) {
-          const key = `${projectSlug}/${directorySlug}/${integration.slug}`;
-          this._sources.set(key, { integration, folder: directory.path, token: tokens[key] ?? null, automation: automations[integrationAutomationKey(key)] ?? null });
+    for (const section of Object.values(config.projects)) {
+      for (const owner of [{ project: null, path: section.path, integrations: section.integrations }, ...Object.values(section.directories).map((directory) => ({ project: directory.slug, path: directory.path, integrations: directory.integrations }))]) {
+        for (const integration of owner.integrations.filter((item) => item.type === "pullRequests")) {
+          const key = integrationKey(section.slug, owner.project, integration.slug);
+          this._sources.set(key, { integration, folder: owner.path, token: tokens[key] ?? null, automation: automations[integrationAutomationKey(key)] ?? null });
         }
       }
     }
@@ -103,7 +103,7 @@ export class DevtoolPullRequests {
 
   /**
    * Reads the pull requests of an integration now, unless a read is running.
-   * @param key The integration, `<section>/<project>/<slug>`.
+   * @param key The integration, `<section>[/<project>]/<slug>`.
    */
   async refresh(key: string): Promise<void> {
     const source = this._sources.get(key);

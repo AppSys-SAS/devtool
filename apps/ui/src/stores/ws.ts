@@ -1,5 +1,5 @@
 import { ref } from "vue";
-import type { EnvironmentKeyChoicePayload, FileEntryPayload, PortConflictAction } from "@appsys/devtool-shared";
+import type { EnvironmentKeyChoicePayload, FileEntryPayload, PortConflictAction, SidebarOrderChange } from "@appsys/devtool-shared";
 import configStore from "./config";
 import filesStore from "./files";
 import certificatesStore from "./certificates";
@@ -207,22 +207,31 @@ class WsStore {
 
   /**
    * Asks the server to read the pull requests of an integration now.
-   * @param key The integration, `<section>/<project>/<slug>`.
+   * @param key The integration, `<section>[/<project>]/<slug>`.
    */
   pullRequestsRefresh(key: string): void {
     this.send("pullRequestsRefresh", { key });
   }
 
   /**
-   * Asks the server to start an agent run by a command, in a terminal of a directory shown once started.
+   * Asks the server to start an agent run by a command, in a terminal of a project or of one of its
+   * directories, shown once started.
    * @param agent The slug of the agent.
-   * @param projectSlug The project of the directory.
-   * @param directorySlug The directory the agent works in.
+   * @param projectSlug The project the agent works in.
+   * @param directorySlug The directory the agent works in, null for the project itself.
    * @param prompt The prompt given to the agent.
    * @param name The name of the terminal.
    */
-  agentStart(agent: string, projectSlug: string, directorySlug: string, prompt: string, name: string): void {
+  agentStart(agent: string, projectSlug: string, directorySlug: string | null, prompt: string, name: string): void {
     this.send("agentStart", { agent, projectSlug, directorySlug, prompt, name });
+  }
+
+  /**
+   * Asks the server to write how lists of the sidebar are ordered, then to reload the configuration.
+   * @param changes The lists, their modes and orders, and the files written.
+   */
+  sidebarSetOrder(changes: SidebarOrderChange[]): void {
+    this.send("sidebarSetOrder", { changes });
   }
 
   /**

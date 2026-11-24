@@ -2,18 +2,18 @@
 import { computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { TabsList, TabsRoot, TabsTrigger } from "reka-ui";
-import type { AgentDefinition, DirectoryDefinition, IntegrationDefinition, PullRequestPayload } from "@appsys/devtool-shared";
-import { DEFAULT_REVIEW_PROMPT, pullRequestPrompt } from "@appsys/devtool-shared";
+import type { AgentDefinition, IntegrationDefinition, PullRequestPayload } from "@appsys/devtool-shared";
+import { DEFAULT_REVIEW_PROMPT, integrationKey, pullRequestPrompt } from "@appsys/devtool-shared";
 import PullRequestRow from "@/components/pull-requests/PullRequestRow.vue";
-import { startAgent } from "@/lib/agents";
+import { type AgentPlace, startAgent } from "@/lib/agents";
 import { formatRelativeDate } from "@/lib/format";
 import configStore from "@/stores/config";
 import pullRequestsStore from "@/stores/pull-requests";
 
 const props = defineProps<{
   integration: IntegrationDefinition;
-  projectSlug: string;
-  directory: DirectoryDefinition;
+  /** The project or directory declaring the integration, where the agents work. */
+  place: AgentPlace;
 }>();
 
 const FILTERS = {
@@ -30,7 +30,7 @@ const tab = computed<Filter>({
   set: (value) => void router.replace({ query: { ...route.query, tab: value } }),
 });
 
-const state = computed(() => pullRequestsStore.get(`${props.projectSlug}/${props.directory.slug}/${props.integration.slug}`));
+const state = computed(() => pullRequestsStore.get(integrationKey(props.place.projectSlug, props.place.directorySlug, props.integration.slug)));
 const items = computed(() => state.value?.items ?? []);
 const tabs = computed(() => (Object.entries(FILTERS) as [Filter, (typeof FILTERS)[Filter]][]).map(([value, filter]) => ({ value, label: filter.label, count: items.value.filter(filter.keep).length })));
 const shown = computed(() => items.value.filter(FILTERS[tab.value].keep));
@@ -42,7 +42,7 @@ const shown = computed(() => items.value.filter(FILTERS[tab.value].keep));
  */
 function review(pullRequest: PullRequestPayload, agent: AgentDefinition): void {
   const prompt = pullRequestPrompt(props.integration.prompt ?? DEFAULT_REVIEW_PROMPT, pullRequest);
-  startAgent(agent, props.projectSlug, props.directory, prompt, `Review #${pullRequest.number}`);
+  startAgent(agent, props.place, prompt, `Review #${pullRequest.number}`);
 }
 </script>
 

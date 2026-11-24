@@ -2,9 +2,11 @@
 import { computed, useTemplateRef, watchEffect } from "vue";
 import { Icon } from "@iconify/vue";
 import { ExternalLink, RotateCw } from "@lucide/vue";
+import { integrationKey } from "@appsys/devtool-shared";
 import PullRequestList from "@/components/pull-requests/PullRequestList.vue";
 import SidebarToggle from "@/components/SidebarToggle.vue";
 import { Button } from "@/components/ui/button";
+import type { AgentPlace } from "@/lib/agents";
 import configStore from "@/stores/config";
 import embedStore from "@/stores/embeds";
 import pullRequestsStore from "@/stores/pull-requests";
@@ -16,10 +18,26 @@ const props = defineProps<{
   directorySlug?: string;
 }>();
 
-const directory = computed(() => (props.projectSlug && props.directorySlug ? (configStore.getDirectory(props.projectSlug, props.directorySlug)?.directory ?? null) : null));
-const integrations = computed(() => (props.projectSlug && props.directorySlug ? (directory.value?.integrations ?? []) : configStore.integrations.value));
+const place = computed<AgentPlace | null>(() => {
+  const section = props.projectSlug ? configStore.projects.value?.[props.projectSlug] : undefined;
+  if (!section) {
+    return null;
+  }
+  if (!props.directorySlug) {
+    return { projectSlug: section.slug, directorySlug: null, path: section.path };
+  }
+  const directory = section.directories[props.directorySlug];
+  return directory ? { projectSlug: section.slug, directorySlug: directory.slug, path: directory.path } : null;
+});
+const integrations = computed(() => {
+  if (!props.projectSlug) {
+    return configStore.integrations.value;
+  }
+  const section = configStore.projects.value?.[props.projectSlug];
+  return (props.directorySlug ? section?.directories[props.directorySlug]?.integrations : section?.integrations) ?? [];
+});
 const definition = computed(() => integrations.value.find((item) => item.slug === props.integration) ?? null);
-const pullRequestsKey = computed(() => (definition.value?.type === "pullRequests" ? `${props.projectSlug}/${props.directorySlug}/${props.integration}` : null));
+const pullRequestsKey = computed(() => (definition.value?.type === "pullRequests" && place.value ? integrationKey(place.value.projectSlug, place.value.directorySlug, props.integration) : null));
 const frameArea = useTemplateRef<HTMLElement>("frameArea");
 
 watchEffect((onCleanup) => {
@@ -87,10 +105,9 @@ watchEffect((onCleanup) => {
       <SidebarToggle side="right" />
     </div>
     <PullRequestList
-      v-if="definition && pullRequestsKey && directory && projectSlug"
+      v-if="definition && pullRequestsKey && place"
       :integration="definition"
-      :project-slug="projectSlug"
-      :directory="directory"
+      :place="place"
     />
     <div
       v-else-if="definition?.embed"

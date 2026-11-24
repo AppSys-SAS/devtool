@@ -168,10 +168,30 @@ adt:
   sidebar: { environment: true, configs: true, login: true }
 ```
 
+`sort` orders a list of the sidebar: `config` (default, the order of the configuration), `name`, or
+`manual`, the keys of `order` first, then the others in the order of the configuration. `adt.sidebar`
+orders the sections, by slug; a section orders its content, its `lines` and its projects mixed, a
+project by its slug and a row by its shortcut (`integration:pulls`), `adt.sidebar.sort` by default. With
+`config`, the rows of a section come first. An entry of `order` naming nothing is reported.
+
+```yaml
+adt:
+  sidebar: { sort: manual, order: [ devtool, account ] }
+sections:
+  account:
+    sort: manual
+    order: [ account, integration:pulls, account-web ]
+```
+
+The Sidebar card of the Server page shows these orders and edits them: its Edit button chooses once the
+file written (Personal, `config.local.yml`, or Shared, the file declaring each setting), then a mode per
+list and, by hand, an order dragged item by item; Save writes every change and reloads the configuration.
+
 ## Integrations
 
 External tools reachable over HTTP, declared at the root of the configuration (rows under Environment
-and Configs) or by a project (listed in its side panel):
+and Configs), by a section (in its page, and in its header with `icons` and `lines`) or by a project
+(listed in its side panel):
 
 - `name`, `url` (http or https): required; `icon`: an Iconify name.
 - `embed` (default `true`): shown in a frame of the devtool, the load balancer then letting the devtool
@@ -180,11 +200,12 @@ and Configs) or by a project (listed in its side panel):
 
 ## Pull requests and agents
 
-An integration of a project with `type: pullRequests` lists the open pull requests of a repository,
-refreshed from the Reload button of its page, filtered by Open, Review requested and Mine:
+An integration of a section or of a project with `type: pullRequests` lists the open pull requests of a
+repository, refreshed from the Reload button of its page, filtered by Open, Review requested and Mine;
+its agents work in the folder of the section or of the project:
 
 - `url`: the web address or a remote of the repository (https, ssh, `git@host:group/repo.git`), the
-  `origin` remote of the project by default.
+  `origin` remote of the folder of the section or of the project by default.
 - `provider`: the forge, `github` (github.com and GitHub Enterprise Server) or `gitlab`; guessed from a
   host named `github.com`, `github.*`, `gitlab.com` or `gitlab.*`, required otherwise.
 - `token`: read with value blocks and `opAccount` as in commands, once per run of the server (again after
@@ -250,6 +271,8 @@ A project puts what it declares in its sidebar row with `icons` (icons at the ri
 
 - `integration:<slug>`, `command:<slug>`, `files:<slug>`
 - `service:<slug>[:<index>]`: opens the host at that index of the service (default `0`) in a new tab.
+
+A section does the same in its header with `icons` and `lines`, naming its own integrations only.
 
 `default` is what the project does by default, with the same syntax; a command becomes its main
 command (status of the row, stop and restart). `trigger` says how it runs:

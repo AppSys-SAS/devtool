@@ -54,6 +54,12 @@ const router = createRouter({
           props: true,
         },
         {
+          name: "project-integration",
+          path: "i/:integration",
+          component: () => import("@/views/IntegrationView.vue"),
+          props: true,
+        },
+        {
           path: "d/:directorySlug",
           component: () => import("@/views/DirectoryIndexView.vue"),
           props: true,

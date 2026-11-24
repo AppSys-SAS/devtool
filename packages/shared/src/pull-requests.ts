@@ -7,6 +7,17 @@ export const DEFAULT_REVIEW_PROMPT =
   "Read its changes without checking out its branch, then list the problems you find by file and line, the most severe first.";
 
 /**
+ * Names an integration of a section or of one of its projects among those of the configuration.
+ * @param section The slug of the section.
+ * @param project The slug of the project declaring it, null for the section itself.
+ * @param slug The slug of the integration.
+ * @returns Its key, `<section>[/<project>]/<slug>`.
+ */
+export function integrationKey(section: string, project: string | null, slug: string): string {
+  return project === null ? `${section}/${slug}` : `${section}/${project}/${slug}`;
+}
+
+/**
  * Writes the prompt of the review of a pull request.
  * @param template The prompt, `%{ADT:PR_URL}`, `PR_NUMBER`, `PR_TITLE`, `PR_BRANCH`, `PR_BASE` and `PR_AUTHOR` standing for the pull request.
  * @param pullRequest The pull request.

@@ -5,4 +5,5 @@ export * from "./markdown.js";
 export * from "./mcp.js";
 export * from "./network.js";
 export * from "./pull-requests.js";
+export * from "./sidebar.js";
 export * from "./types.js";

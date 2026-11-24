@@ -1,8 +1,8 @@
 import path from "node:path";
 import fs from "node:fs/promises";
 import net from "node:net";
-import type { AgentDefinition, CertificateAcme, ClientConfigPayload, CommandArg, CommandChoice, CommandForm, CommandInput, CommandInputValue, DirectoryDefinition, DirectoryFiles, DirectoryFilesType, DirectoryScripts, ScriptSettings, AdtDefinition, DirectoryDefaultAction, DirectoryShortcut, DnsDefinition, DnsRecord, HostAccess, IntegrationDefinition, IntegrationType, LoadBalancerCertificate, McpCategory, McpEnvironmentItem, McpPatterns, McpRules, McpSettings, McpTarget, PassthroughRule, ProjectDefinition, ProjectRestore, RuntimeConfig, SidebarSettings } from "@appsys/devtool-shared";
-import { DEFAULT_REVIEW_PROMPT, defaultMcpRules, isMcpLevel, logger, readMcpRules } from "@appsys/devtool-shared";
+import type { AgentDefinition, CertificateAcme, ClientConfigPayload, CommandArg, CommandChoice, CommandForm, CommandInput, CommandInputValue, DirectoryDefinition, DirectoryFiles, DirectoryFilesType, DirectoryScripts, ScriptSettings, AdtDefinition, DirectoryDefaultAction, DirectoryShortcut, DnsDefinition, DnsRecord, HostAccess, IntegrationDefinition, IntegrationType, LoadBalancerCertificate, McpCategory, McpEnvironmentItem, McpPatterns, McpRules, McpSettings, McpTarget, PassthroughRule, ProjectDefinition, ProjectRestore, RuntimeConfig, SidebarSettings, SortMode } from "@appsys/devtool-shared";
+import { DEFAULT_REVIEW_PROMPT, defaultMcpRules, integrationKey, isMcpLevel, logger, readMcpRules, shortcutKey, SORT_MODES, sortKeys } from "@appsys/devtool-shared";
 import { type LegoOptionValue, legoRunArgs } from "@appsys/devtool-certs";
 import { configSourceKey, resolveAppIdentity, resolveCacheFolder } from "@appsys/devtool-config";
 import { FORGES, findForge, originUrl, repositoryOf } from "@appsys/devtool-git";
@@ -26,7 +26,7 @@ export function certificateAutomationKey(name: string): string {
 
 /**
  * Names the automation reading the token of an integration among the automations of the configuration.
- * @param key The integration, `<section>/<project>/<slug>`.
+ * @param key The integration, `<section>[/<project>]/<slug>`.
  * @returns The key of its automation.
  */
 export function integrationAutomationKey(key: string): string {
@@ -46,6 +46,8 @@ const DEFAULT_INTEGRATION_ICON = "lucide:app-window";
 const DEFAULT_PULL_REQUESTS_ICON = "lucide:git-pull-request";
 const DEFAULT_AGENT_ICON = "lucide:bot";
 const INTEGRATION_TYPES: readonly IntegrationType[] = ["web", "pullRequests"];
+/** The optional parts of the sidebar, each shown or hidden. */
+const SIDEBAR_PARTS = ["environment", "configs", "login"] as const satisfies readonly (keyof SidebarSettings)[];
 
 /**
  * Gives the settings of the devtool before the configuration is read.
@@ -65,7 +67,7 @@ function defaultAdt(): AdtDefinition {
     notifications: true,
     hosts: [],
     access: "local",
-    sidebar: { environment: false, configs: false, login: false },
+    sidebar: { environment: false, configs: false, login: false, sort: "config", order: [], sections: [] },
     mcp: defaultMcpSettings(true),
     agents: [],
   };
@@ -105,6 +107,17 @@ const ENVIRONMENT_LISTS = { files: "file", databases: "database", buckets: "buck
 const MCP_CATEGORIES: readonly McpCategory[] = ["commands", "scripts", "files", "terminals", "certificates", "devtool"];
 const FILES_TYPES: readonly DirectoryFilesType[] = ["files", "agentSkills"];
 
+/** What shortcuts may name: the integrations of a project, and the commands, files and services of a directory. */
+type ShortcutOwner = Pick<DirectoryDefinition, "integrations"> & Partial<Pick<DirectoryDefinition, "extras" | "files" | "loadBalancer">>;
+
+/** The section or the project of a section declaring integrations, and its folder. */
+interface IntegrationOwner {
+  path: string;
+  section: string;
+  /** The project, null for the section itself. */
+  project: string | null;
+}
+
 /** An `mcp` setting declared by something holding others, applied over the rules of what it holds. */
 interface McpLayer {
   value: unknown;
@@ -133,7 +146,7 @@ export class DevtoolConfigure {
 
   public integrations: IntegrationDefinition[];
 
-  /** The tokens of the integrations, value blocks not read yet, by `<section>/<project>/<slug>`, never sent to the interfaces. */
+  /** The tokens of the integrations, value blocks not read yet, by `<section>[/<project>]/<slug>`, never sent to the interfaces. */
   public integrationTokens: Record<string, string>;
 
   /** Where the settings of the configuration come from. */
@@ -205,12 +218,12 @@ export class DevtoolConfigure {
    */
   private settingTargets(): ClientConfigPayload["mcp"]["targets"] {
     return {
-      default: this.mcpTarget(["adt", "mcp", "default"]),
-      ...(Object.fromEntries(MCP_CATEGORIES.map((category) => [category, this.mcpTarget(["adt", "mcp", category])])) as Record<McpCategory, McpTarget>),
-      ownTerminals: this.mcpTarget(["adt", "mcp", "ownTerminals"]),
-      shell: this.mcpTarget(["adt", "mcp", "shell", "level"]),
-      clients: this.mcpTarget(["adt", "mcp", "clients", "level"]),
-      environment: this.mcpTarget(["environment", "mcp"]),
+      default: this.settingTarget(["adt", "mcp", "default"]),
+      ...(Object.fromEntries(MCP_CATEGORIES.map((category) => [category, this.settingTarget(["adt", "mcp", category])])) as Record<McpCategory, McpTarget>),
+      ownTerminals: this.settingTarget(["adt", "mcp", "ownTerminals"]),
+      shell: this.settingTarget(["adt", "mcp", "shell", "level"]),
+      clients: this.settingTarget(["adt", "mcp", "clients", "level"]),
+      environment: this.settingTarget(["environment", "mcp"]),
     };
   }
 
@@ -247,12 +260,12 @@ export class DevtoolConfigure {
   }
 
   /**
-   * Gives where an MCP setting is written: the last file declaring it, else the first file declaring
-   * what holds it, the personal override left out, else the first shared configuration file.
+   * Gives where a setting is written: the last file declaring it, else the first file declaring what
+   * holds it, the personal override left out, else the first shared configuration file.
    * @param settingPath The keys leading to the setting in the configuration files.
    * @returns The setting and the file declaring it.
    */
-  mcpTarget(settingPath: string[]): McpTarget {
+  settingTarget(settingPath: string[]): McpTarget {
     const declaring = (keys: string[]): string[] => (this.origin.sources[configSourceKey(keys)] ?? []).filter((file) => file !== this.origin.localPath);
     const own = declaring(settingPath).at(-1);
     if (own) {
@@ -303,6 +316,11 @@ export class DevtoolConfigure {
     } catch (error) {
       this.addWarning("projects", error instanceof Error ? error.message : "Unknown projects error");
     }
+    this.adt.sidebar.sections = this.sortItems(
+      "adt.sidebar.order",
+      Object.values(this.projects).map((project) => ({ key: project.slug, name: project.name })),
+      this.adt.sidebar,
+    );
   }
 
   /**
@@ -368,13 +386,14 @@ export class DevtoolConfigure {
     }
 
     const sidebar = toRecord(adt.sidebar);
-    for (const key of Object.keys(this.adt.sidebar) as (keyof SidebarSettings)[]) {
+    for (const key of SIDEBAR_PARTS) {
       if (sidebar[key] === true || sidebar[key] === false) {
         this.adt.sidebar[key] = sidebar[key];
       } else if (sidebar[key] !== undefined) {
         this.addWarning(`adt.sidebar.${key}`, "is not a boolean");
       }
     }
+    Object.assign(this.adt.sidebar, this.readSort("adt.sidebar", sidebar, "config"));
 
     this.adt.agents = this.readAgents(adt.agents);
   }
@@ -431,7 +450,7 @@ export class DevtoolConfigure {
           return [];
         }
         const from = `environment.${list}.${index}`;
-        return [{ path: item.path, kind, rules: this.readMcpRules(`${from}.mcp`, item.mcp, inherited, from), target: this.mcpTarget(["environment", list, String(index), "mcp"]) }];
+        return [{ path: item.path, kind, rules: this.readMcpRules(`${from}.mcp`, item.mcp, inherited, from), target: this.settingTarget(["environment", list, String(index), "mcp"]) }];
       }),
     );
   }
@@ -526,7 +545,7 @@ export class DevtoolConfigure {
         warn: Number.isInteger(warn) && (warn as number) > 0 ? (warn as number) : 30,
         acme: options.acme === undefined ? null : this.readAcme(`loadBalancers[${key}].acme`, domain.slice(1), options),
         mcp: this.readMcpRules(`loadBalancers[${key}].mcp`, options.mcp, this.adt.mcp.certificates, `loadBalancers.${key}`),
-        mcpTarget: this.mcpTarget(["loadBalancers", key, "mcp"]),
+        mcpTarget: this.settingTarget(["loadBalancers", key, "mcp"]),
       };
 
       logger.info("Config", "LoadBalancer", domain);
@@ -637,8 +656,13 @@ export class DevtoolConfigure {
       missing: false,
       restore: this.readRestore(`${slug}.restore`, project.restore),
       mcp: this.readMcpRules(`${slug}.mcp`, project.mcp, this.adt.mcp.default, `sections.${projectSlug}`),
-      mcpTarget: this.mcpTarget(["sections", projectSlug, "mcp"]),
+      mcpTarget: this.settingTarget(["sections", projectSlug, "mcp"]),
       restoreRule: this.layeredRules(this.adt.mcp.commands, layers).run,
+      integrations: [],
+      icons: [],
+      lines: [],
+      ...this.readSort(slug, project, this.adt.sidebar.sort),
+      content: [],
       meta: project.meta,
     };
 
@@ -675,7 +699,52 @@ export class DevtoolConfigure {
       return;
     }
 
+    projectDefinition.integrations = this.readIntegrations(`${slug}.integrations`, project.integrations, { path: projectPath, section: projectSlug, project: null });
+    projectDefinition.icons = this.readShortcuts(`${slug}.icons`, projectDefinition, project.icons);
+    projectDefinition.lines = this.readShortcuts(`${slug}.lines`, projectDefinition, project.lines);
+    projectDefinition.content = this.sortItems(
+      `${slug}.order`,
+      [
+        ...projectDefinition.lines.map((line) => ({ key: shortcutKey(line), name: projectDefinition.integrations.find((integration) => integration.slug === line.slug)?.name ?? line.slug })),
+        ...Object.values(projectDefinition.directories).map((directory) => ({ key: directory.slug, name: directory.name })),
+      ],
+      projectDefinition,
+    );
     this.projects[projectSlug] = projectDefinition;
+  }
+
+  /**
+   * Reads how a list of the sidebar is ordered, `sort` and `order`.
+   * @param slug Names the setting holding them in warnings.
+   * @param setting The raw setting holding them.
+   * @param fallback The mode when none or an invalid one is given.
+   * @returns The mode and the keys in the order chosen by hand.
+   */
+  private readSort(slug: string, setting: Record<string, unknown>, fallback: SortMode): { sort: SortMode; order: string[] } {
+    let sort = setting.sort ?? fallback;
+    if (!SORT_MODES.includes(sort as SortMode)) {
+      this.addWarning(`${slug}.sort`, `must be ${SORT_MODES.join(", ")}`);
+      sort = fallback;
+    }
+    const order = setting.order === undefined ? [] : toStringArray(setting.order);
+    if (!order) {
+      this.addWarning(`${slug}.order`, "must be a list");
+    }
+    return { sort: sort as SortMode, order: order ?? [] };
+  }
+
+  /**
+   * Orders items of the sidebar, warning about the keys of `order` naming none of them.
+   * @param slug Names the `order` setting in warnings.
+   * @param items The items, in the order of the configuration, each with its key and the name shown.
+   * @param ordering How they are ordered.
+   * @returns The keys of the items in order.
+   */
+  private sortItems(slug: string, items: { key: string; name: string }[], ordering: { sort: SortMode; order: string[] }): string[] {
+    for (const key of ordering.order.filter((entry) => !items.some((item) => item.key === entry))) {
+      this.addWarning(slug, `${key} names nothing here`);
+    }
+    return sortKeys(items, ordering.sort, ordering.order);
   }
 
   /**
@@ -731,7 +800,7 @@ export class DevtoolConfigure {
       missing: false,
       restore: this.readRestore(`${slug}.restore`, directory.restore),
       mcp: this.readMcpRules(`${slug}.mcp`, directory.mcp, projectDefinition.mcp, `projects.${directorySlug}`),
-      mcpTarget: this.mcpTarget(["projects", directorySlug, "mcp"]),
+      mcpTarget: this.settingTarget(["projects", directorySlug, "mcp"]),
       restoreRule: this.layeredRules(this.adt.mcp.commands, layers).run,
       meta: directory.meta,
     };
@@ -864,7 +933,7 @@ export class DevtoolConfigure {
         ),
         script: null,
         mcp: this.readMcpRules(`${slug}.extras[${extraSlug}].mcp`, extra.mcp, this.layeredRules(this.adt.mcp.commands, layers), `projects.${directorySlug}.commands.${extraSlug}`),
-        mcpTarget: this.mcpTarget(["projects", directorySlug, "commands", extraSlug, "mcp"]),
+        mcpTarget: this.settingTarget(["projects", directorySlug, "commands", extraSlug, "mcp"]),
         meta: extra.meta,
       };
     }
@@ -885,7 +954,7 @@ export class DevtoolConfigure {
       directoryDefinition.args = directoryDefinition.extras[mainCommand]?.args ?? null;
     }
     directoryDefinition.files = this.readFiles(`${slug}.files`, directoryDefinition, directory.files, this.layeredRules(this.adt.mcp.files, layers));
-    directoryDefinition.integrations = this.readIntegrations(`${slug}.integrations`, directory.integrations, { path: directoryPath, key: `${projectDefinition.slug}/${directorySlug}` });
+    directoryDefinition.integrations = this.readIntegrations(`${slug}.integrations`, directory.integrations, { path: directoryPath, section: projectDefinition.slug, project: directorySlug });
     directoryDefinition.defaultAction = this.readDefaultAction(`${slug}.default`, directoryDefinition, directory.default);
     directoryDefinition.icons = this.readShortcuts(`${slug}.icons`, directoryDefinition, directory.icons);
     directoryDefinition.lines = this.readShortcuts(`${slug}.lines`, directoryDefinition, directory.lines);
@@ -1005,10 +1074,10 @@ export class DevtoolConfigure {
    * `badge`, `agentReview` and `prompt`, their token kept in {@link integrationTokens}.
    * @param slug Names the setting in warnings.
    * @param value The raw setting.
-   * @param project The folder and the key of the project declaring them, null at the root.
+   * @param owner The section or the project declaring them, null at the root.
    * @returns The valid integrations.
    */
-  private readIntegrations(slug: string, value: unknown, project: { path: string; key: string } | null): IntegrationDefinition[] {
+  private readIntegrations(slug: string, value: unknown, owner: IntegrationOwner | null): IntegrationDefinition[] {
     if (value === undefined) {
       return [];
     }
@@ -1033,9 +1102,9 @@ export class DevtoolConfigure {
         continue;
       }
       if (type === "pullRequests") {
-        const pullRequests = project ? this.readPullRequests(setting, integrationSlug, integration, project) : null;
-        if (!project) {
-          this.addWarning(`${setting}.type`, "pullRequests needs a project, whose folder the agents work in");
+        const pullRequests = owner ? this.readPullRequests(setting, integrationSlug, integration, owner) : null;
+        if (!owner) {
+          this.addWarning(`${setting}.type`, "pullRequests needs a section or a project, whose folder the agents work in");
         }
         if (pullRequests) {
           integrations.push(pullRequests);
@@ -1070,19 +1139,19 @@ export class DevtoolConfigure {
 
   /**
    * Reads an integration listing the pull requests of a repository: `url`, the `origin` remote of the
-   * project by default, `provider`, guessed from the host by default, `token`, read with value blocks,
-   * `opAccount`, `refresh` in minutes, `badge`, `agentReview`, off by default, and `prompt`.
+   * folder of its owner by default, `provider`, guessed from the host by default, `token`, read with
+   * value blocks, `opAccount`, `refresh` in minutes, `badge`, `agentReview`, off by default, and `prompt`.
    * @param setting Names the integration in warnings.
    * @param slug The slug of the integration.
    * @param integration The raw integration.
-   * @param project The folder and the key of the project declaring it.
+   * @param owner The section or the project declaring it.
    * @returns The integration, null when invalid.
    */
-  private readPullRequests(setting: string, slug: string, integration: Record<string, unknown>, project: { path: string; key: string }): IntegrationDefinition | null {
-    const url = integration.url ?? originUrl(project.path);
+  private readPullRequests(setting: string, slug: string, integration: Record<string, unknown>, owner: IntegrationOwner): IntegrationDefinition | null {
+    const url = integration.url ?? originUrl(owner.path);
     const repository = typeof url === "string" ? repositoryOf(url) : null;
     if (!repository) {
-      this.addWarning(`${setting}.url`, integration.url === undefined ? `is missing and ${project.path} has no origin remote` : "must name a repository");
+      this.addWarning(`${setting}.url`, integration.url === undefined ? `is missing and ${owner.path} has no origin remote` : "must name a repository");
       return null;
     }
     const names = FORGES.map((known) => known.name).join(", ");
@@ -1106,7 +1175,7 @@ export class DevtoolConfigure {
       return null;
     }
 
-    const key = `${project.key}/${slug}`;
+    const key = integrationKey(owner.section, owner.project, slug);
     if (typeof integration.token === "string") {
       this.integrationTokens[key] = integration.token;
       const automation = this.readAutomation(setting, integration, [], { token: integration.token });
@@ -1184,14 +1253,14 @@ export class DevtoolConfigure {
   }
 
   /**
-   * Reads a list of shortcuts of a directory, each `integration:<slug>`, `command:<slug>`,
-   * `files:<slug>` or `service:<slug>[:<host index>]`, keeping those naming something of the directory.
+   * Reads a list of shortcuts, each `integration:<slug>`, `command:<slug>`, `files:<slug>` or
+   * `service:<slug>[:<host index>]`, keeping those naming something of their owner.
    * @param slug Names the setting in warnings.
-   * @param directory The directory, its integrations, commands, files and services already read.
+   * @param owner The directory, or the project offering its integrations only, all already read.
    * @param value The raw setting.
    * @returns The valid shortcuts, in order.
    */
-  private readShortcuts(slug: string, directory: DirectoryDefinition, value: unknown): DirectoryShortcut[] {
+  private readShortcuts(slug: string, owner: ShortcutOwner, value: unknown): DirectoryShortcut[] {
     if (value === undefined) {
       return [];
     }
@@ -1199,18 +1268,18 @@ export class DevtoolConfigure {
       this.addWarning(slug, "must be a list of <type>:<slug>");
       return [];
     }
-    return value.flatMap((entry, index) => this.readShortcut(`${slug}[${index}]`, directory, entry) ?? []);
+    return value.flatMap((entry, index) => this.readShortcut(`${slug}[${index}]`, owner, entry) ?? []);
   }
 
   /**
-   * Reads one shortcut of a directory, `integration:<slug>`, `command:<slug>`, `files:<slug>` or
+   * Reads one shortcut, `integration:<slug>`, `command:<slug>`, `files:<slug>` or
    * `service:<slug>[:<host index>]`.
    * @param slug Names the setting in warnings.
-   * @param directory The directory, its integrations, commands, files and services already read.
+   * @param owner The directory, or the project offering its integrations only, all already read.
    * @param value The raw shortcut.
-   * @returns The shortcut, null when it names nothing of the directory.
+   * @returns The shortcut, null when it names nothing of its owner.
    */
-  private readShortcut(slug: string, directory: DirectoryDefinition, value: unknown): DirectoryShortcut | null {
+  private readShortcut(slug: string, owner: ShortcutOwner, value: unknown): DirectoryShortcut | null {
     if (typeof value !== "string") {
       this.addWarning(slug, "must be <type>:<slug>");
       return null;
@@ -1219,12 +1288,12 @@ export class DevtoolConfigure {
     const [type, target = "", hostIndex = "0"] = value.split(":");
     const shortcut = { type, slug: target, index: Number(hostIndex) } as DirectoryShortcut;
     const exists =
-      (type === "integration" && directory.integrations.some((integration) => integration.slug === target)) ||
-      (type === "command" && target in directory.extras) ||
-      (type === "files" && target in directory.files) ||
-      (type === "service" && Number.isInteger(shortcut.index) && directory.loadBalancer[target]?.hosts[shortcut.index] !== undefined);
+      (type === "integration" && owner.integrations.some((integration) => integration.slug === target)) ||
+      (type === "command" && owner.extras !== undefined && target in owner.extras) ||
+      (type === "files" && owner.files !== undefined && target in owner.files) ||
+      (type === "service" && Number.isInteger(shortcut.index) && owner.loadBalancer?.[target]?.hosts[shortcut.index] !== undefined);
     if (!exists) {
-      this.addWarning(slug, `${value} names no integration, command, files or service host of the directory`);
+      this.addWarning(slug, owner.extras === undefined ? `${value} names no integration of the section` : `${value} names no integration, command, files or service host of the directory`);
       return null;
     }
     return shortcut;
@@ -1321,14 +1390,14 @@ export class DevtoolConfigure {
           args: settings.args === undefined ? null : this.readCommandArgs(`${slug}[${index}].scripts[${name}].args`, settings.args),
           form: this.readForm(`${slug}[${index}].scripts[${name}].form`, settings.form),
           mcp: this.readMcpRules(`${slug}[${index}].scripts[${name}].mcp`, settings.mcp, mcp, `${from}[${index}].scripts.${name}`),
-          mcpTarget: this.mcpTarget([...folderSetting, "scripts", name, "mcp"]),
+          mcpTarget: this.settingTarget([...folderSetting, "scripts", name, "mcp"]),
         };
       }
       const only = folder.only === undefined ? null : toStringArray(folder.only);
       if (folder.only !== undefined && !only) {
         this.addWarning(`${slug}[${index}].only`, "must be an array of glob patterns");
       }
-      folders.push({ path: folderPath, prompt: folder.prompt === true, form: this.readForm(`${slug}[${index}].form`, folder.form) ?? "inline", only, scripts, mcp, mcpTarget: this.mcpTarget([...folderSetting, "mcp"]) });
+      folders.push({ path: folderPath, prompt: folder.prompt === true, form: this.readForm(`${slug}[${index}].form`, folder.form) ?? "inline", only, scripts, mcp, mcpTarget: this.settingTarget([...folderSetting, "mcp"]) });
     }
     return folders;
   }
@@ -1536,7 +1605,7 @@ export class DevtoolConfigure {
         restore,
         commands: commands.filter((command) => command in directory.extras),
         mcp: this.readMcpRules(`${slug}[${filesSlug}].mcp`, entry.mcp, inherited, `projects.${directory.slug}.files.${filesSlug}`),
-        mcpTarget: this.mcpTarget(["projects", directory.slug, "files", filesSlug, "mcp"]),
+        mcpTarget: this.settingTarget(["projects", directory.slug, "files", filesSlug, "mcp"]),
       };
     }
     return files;

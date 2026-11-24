@@ -88,23 +88,12 @@ function removeSetting(document: Document, keys: (string | number)[]): void {
  * @param level The new level, null to remove it so that it is inherited.
  */
 export async function writeMcpLevel(file: string, settingPath: string[], action: McpAction | null, level: McpLevel | null): Promise<void> {
-  const text = await fs.readFile(file, "utf8").catch((error: NodeJS.ErrnoException) => {
-    if (error.code === "ENOENT") {
-      return "";
-    }
-    throw error;
-  });
-  const document = parseDocument(text);
-  const keys = documentPath(settingPath);
-
   if (action === null) {
-    if (level === null) {
-      removeSetting(document, keys);
-    } else {
-      ensureLists(document, keys);
-      document.setIn(keys, level);
-    }
-  } else {
+    await writeSetting(file, settingPath, level);
+    return;
+  }
+  await editConfigFile(file, (document) => {
+    const keys = documentPath(settingPath);
     const current = document.getIn(keys);
     const declared = mcpLevelsOf(isMap(current) ? current.toJSON() : current, isMcpFilesSetting(settingPath)).levels;
     const next = { ...declared, [action]: level ?? undefined };
@@ -121,8 +110,46 @@ export async function writeMcpLevel(file: string, settingPath: string[], action:
       ensureLists(document, keys);
       document.setIn(keys, document.createNode(Object.fromEntries(remaining)));
     }
-  }
+  });
+}
 
+/**
+ * Sets or removes a setting of a YAML configuration file, keeping its comments and layout; a list is
+ * written on one line.
+ * @param file The configuration file, created when missing.
+ * @param settingPath The keys leading to the setting.
+ * @param value The new value, null to remove the setting.
+ */
+export async function writeSetting(file: string, settingPath: string[], value: unknown): Promise<void> {
+  await editConfigFile(file, (document) => {
+    const keys = documentPath(settingPath);
+    if (value === null) {
+      removeSetting(document, keys);
+      return;
+    }
+    ensureLists(document, keys);
+    const node = document.createNode(value);
+    if (isSeq(node)) {
+      node.flow = true;
+    }
+    document.setIn(keys, node);
+  });
+}
+
+/**
+ * Changes a YAML configuration file through its document, keeping its comments and layout.
+ * @param file The configuration file, created when missing.
+ * @param edit Changes the document.
+ */
+async function editConfigFile(file: string, edit: (document: Document) => void): Promise<void> {
+  const text = await fs.readFile(file, "utf8").catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") {
+      return "";
+    }
+    throw error;
+  });
+  const document = parseDocument(text);
+  edit(document);
   await fs.mkdir(path.dirname(file), { recursive: true });
   await fs.writeFile(file, document.toString({ lineWidth: 0 }));
 }

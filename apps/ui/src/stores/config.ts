@@ -5,7 +5,7 @@ import { CommandStreamStore } from "./command-stream";
 import { CommandStreamOutputStore } from "./command-stream-output";
 import type { WsConfigPayload } from "@/types";
 
-const HIDDEN_SIDEBAR: SidebarSettings = { environment: false, configs: false, login: false };
+const HIDDEN_SIDEBAR: SidebarSettings = { environment: false, configs: false, login: false, sort: "config", order: [], sections: [] };
 
 class ConfigStore {
   /** The identifier of the devtool, such as the name of its MCP server, kept while disconnected. */

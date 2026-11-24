@@ -11,7 +11,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import type { CommandArg, DirectoryDefaultAction, DirectoryDefinition, ProjectRestore } from "@appsys/devtool-shared";
 import ShortcutLine from "@/components/ShortcutLine.vue";
-import { defaultShortcut, directoryShortcuts, integrationShortcut, type SidebarShortcut } from "@/lib/shortcuts";
+import { defaultShortcut, directoryShortcuts, integrationShortcut, projectShortcuts, type SidebarShortcut } from "@/lib/shortcuts";
 import { iconFromMeta, startSection, stopSection } from "@/lib/directory-commands";
 import bookmarkStore from "@/stores/bookmark";
 import commandRunsStore from "@/stores/command-runs";
@@ -43,12 +43,19 @@ interface SidebarDirectory {
   meta?: unknown;
 }
 
+/** A row under the header of a project: one of its own shortcuts, or one of its directories. */
+type SidebarContent = { key: string; line: SidebarShortcut; directory?: undefined } | { key: string; line?: undefined; directory: SidebarDirectory };
+
 interface SidebarProject {
   slug: string;
   name: string;
   missing: boolean;
   restore: ProjectRestore | null;
   directories: SidebarDirectory[];
+  /** Shortcuts shown as icons in the header of the project. */
+  icons: SidebarShortcut[];
+  /** Its shortcuts shown as rows and its directories, in the order shown. */
+  content: SidebarContent[];
   streams: CommandStream[];
   /** Whether a command of the section starts with it. */
   startable: boolean;
@@ -109,7 +116,8 @@ const sidebarData = computed(() => {
   const configProjects = configStore.projects.value;
 
   if (configProjects) {
-    for (const [projectSlug, project] of Object.entries(configProjects)) {
+    for (const project of configStore.sidebar.value.sections.flatMap((slug) => configProjects[slug] ?? [])) {
+      const projectSlug = project.slug;
       const directories: SidebarDirectory[] = [];
 
       for (const [directorySlug, directory] of Object.entries(project.directories)) {
@@ -152,6 +160,8 @@ const sidebarData = computed(() => {
         missing: project.missing,
         restore: project.restore,
         directories,
+        icons: projectShortcuts(project, project.icons),
+        content: projectContent(project.content, projectShortcuts(project, project.lines), directories),
         streams: [],
         startable: Object.values(project.directories).some((directory) => Object.values(directory.extras).some((command) => command.startWithSection)),
         running: allStreams.value.some((stream) => stream.projectSlug === projectSlug && stream.status === "RUNNING"),
@@ -197,17 +207,37 @@ const projects = computed(() => {
       const slug = `${project.slug}/${directory.slug}`;
       return Boolean(directory.stream) || directory.streams.length > 0 || bookmarks.has(slug);
     });
+    const content = project.content.filter((item) => item.line !== undefined || directories.includes(item.directory));
 
-    if (directories.length > 0 || project.streams.length > 0) {
+    if (content.length > 0 || project.streams.length > 0) {
       filtered.push({
         ...project,
         directories,
+        content,
       });
     }
   }
 
   return filtered;
 });
+
+/**
+ * Lists the rows under the header of a project in the order the server gives.
+ * @param order Its shortcuts and directories in order, a shortcut by `<type>:<slug>`, a directory by its slug.
+ * @param lines Its shortcuts shown as rows.
+ * @param directories Its directories.
+ * @returns The rows, without the keys naming nothing.
+ */
+function projectContent(order: string[], lines: SidebarShortcut[], directories: SidebarDirectory[]): SidebarContent[] {
+  return order.flatMap((key): SidebarContent[] => {
+    const line = lines.find((shortcut) => shortcut.key === key);
+    if (line) {
+      return [{ key: `line/${key}`, line }];
+    }
+    const directory = directories.find((item) => item.slug === key);
+    return directory ? [{ key: `directory/${key}`, directory }] : [];
+  });
+}
 
 function streamUpdate(streamSlug: string, action: "start" | "stop" | "restart" | "close"): void {
   wsStore.updateCommandStream(streamSlug, action);
@@ -450,6 +480,12 @@ function resolveStreamIcon(directory: SidebarDirectory, stream: CommandStream): 
                 <Square class="size-3" />
               </Button>
             </div>
+            <ShortcutLine
+              v-for="shortcut in project.icons"
+              :key="shortcut.key"
+              :shortcut="shortcut"
+              compact
+            />
           </RouterLink>
 
           <div class="space-y-1 pl-2">
@@ -465,9 +501,16 @@ function resolveStreamIcon(directory: SidebarDirectory, stream: CommandStream): 
               @close="streamUpdate($event, 'close')"
             />
 
+            <template
+              v-for="{ key, line, directory } in project.content"
+              :key="`project/${project.slug}/${key}`"
+            >
+            <ShortcutLine
+              v-if="line"
+              :shortcut="line"
+            />
             <div
-              v-for="directory in project.directories"
-              :key="`project/${project.slug}/directory/${directory.slug}`"
+              v-else-if="directory"
               class="space-y-1"
             >
               <div
@@ -583,6 +626,7 @@ function resolveStreamIcon(directory: SidebarDirectory, stream: CommandStream): 
                 />
               </div>
             </div>
+            </template>
           </div>
         </div>
       </div>

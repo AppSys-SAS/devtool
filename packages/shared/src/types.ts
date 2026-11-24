@@ -119,6 +119,25 @@ export interface SidebarSettings {
   configs: boolean;
   /** The sign-in state of the CDN. */
   login: boolean;
+  /** How the sections are ordered. */
+  sort: SortMode;
+  /** The sections in the order chosen by hand, by slug. */
+  order: string[];
+  /** The sections in the order shown, by slug. */
+  sections: string[];
+}
+
+/** How a list of the sidebar is ordered: as the configuration declares it, by name, or by hand. */
+export type SortMode = "config" | "name" | "manual";
+
+/** How a list of the sidebar is ordered, changed from an interface and written to the personal override or the file declaring it. */
+export interface SidebarOrderChange {
+  /** The project whose rows and directories are ordered, null for the projects themselves. */
+  section: string | null;
+  sort: SortMode;
+  /** The keys in the order chosen by hand, null to remove the order. */
+  order: string[] | null;
+  file: "local" | "declared";
 }
 
 /** Names the local DNS answers itself. */
@@ -265,7 +284,7 @@ export interface PullRequestPayload {
 
 /** The open pull requests of an integration. */
 export interface PullRequestsPayload {
-  /** The integration, `<section>/<project>/<slug>`. */
+  /** The integration, `<section>[/<project>]/<slug>`. */
   key: string;
   items: PullRequestPayload[];
   /** The username the token belongs to, null when unknown. */
@@ -478,6 +497,18 @@ export interface ProjectDefinition {
   mcpTarget: McpTarget;
   /** The rule of running its restore, a command of the configuration. */
   restoreRule: McpRule;
+  /** The integrations of the project itself, in the order of the configuration. */
+  integrations: IntegrationDefinition[];
+  /** Shown as icons in the header of the project, in order. */
+  icons: DirectoryShortcut[];
+  /** Shown as rows under the header of the project, in order. */
+  lines: DirectoryShortcut[];
+  /** How its rows and directories are ordered. */
+  sort: SortMode;
+  /** Its rows and directories in the order chosen by hand: a directory by its slug, a row by its shortcut. */
+  order: string[];
+  /** Its rows and directories in the order shown, named like in `order`. */
+  content: string[];
   meta?: unknown;
 }
 

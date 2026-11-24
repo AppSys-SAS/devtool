@@ -1,5 +1,6 @@
 import type { RouteLocationRaw } from "vue-router";
-import type { DirectoryDefinition, DirectoryShortcut, IntegrationDefinition } from "@appsys/devtool-shared";
+import type { DirectoryDefinition, DirectoryShortcut, IntegrationDefinition, ProjectDefinition } from "@appsys/devtool-shared";
+import { integrationKey } from "@appsys/devtool-shared";
 import router from "@/router";
 import { commandName, iconFromMeta, runDirectoryCommand, startDefaultCommand } from "@/lib/directory-commands";
 import pullRequestsStore from "@/stores/pull-requests";
@@ -22,13 +23,16 @@ export interface SidebarShortcut {
 /**
  * Gives the page of the devtool showing an integration.
  * @param integration The integration.
- * @param projectSlug The project of the directory declaring it, if any.
+ * @param projectSlug The project declaring it, or holding the directory declaring it, if any.
  * @param directorySlug The directory declaring it, if any.
- * @returns Its route, under the directory declaring it when there is one.
+ * @returns Its route, under the project or the directory declaring it when there is one.
  */
 export function integrationRoute(integration: IntegrationDefinition, projectSlug?: string, directorySlug?: string): RouteLocationRaw {
   if (projectSlug && directorySlug) {
     return { name: "directory-integration", params: { projectSlug, directorySlug, integration: integration.slug } };
+  }
+  if (projectSlug) {
+    return { name: "project-integration", params: { projectSlug, integration: integration.slug } };
   }
   return { name: "integration", params: { integration: integration.slug } };
 }
@@ -46,13 +50,14 @@ export function hasIntegrationPage(integration: IntegrationDefinition): boolean 
  * Gives the shortcut opening an integration: its page when embedded or listing pull requests, else its
  * URL in a new tab; pull requests count those waiting for a review of the person, unless `badge` is off.
  * @param integration The integration.
- * @param projectSlug The project of the directory declaring it, if any.
+ * @param projectSlug The project declaring it, or holding the directory declaring it, if any.
  * @param directorySlug The directory declaring it, if any.
  * @returns The shortcut.
  */
 export function integrationShortcut(integration: IntegrationDefinition, projectSlug?: string, directorySlug?: string): SidebarShortcut {
   const route = hasIntegrationPage(integration) ? integrationRoute(integration, projectSlug, directorySlug) : null;
-  const waiting = integration.badge ? (pullRequestsStore.get(`${projectSlug}/${directorySlug}/${integration.slug}`)?.items.filter((item) => item.reviewRequested).length ?? 0) : 0;
+  const state = integration.badge && projectSlug ? pullRequestsStore.get(integrationKey(projectSlug, directorySlug ?? null, integration.slug)) : null;
+  const waiting = state?.items.filter((item) => item.reviewRequested).length ?? 0;
   return {
     key: `integration:${integration.slug}`,
     name: integration.name,
@@ -89,6 +94,19 @@ export function directoryShortcuts(projectSlug: string, directory: DirectoryDefi
     }
     const host = directory.loadBalancer[shortcut.slug]?.hosts[shortcut.index];
     return host ? [{ key, name: host, icon: "lucide:globe", route: null, open: () => openTab(`https://${host}`) }] : [];
+  });
+}
+
+/**
+ * Turns the shortcuts a project declares, its integrations only, into what the sidebar shows.
+ * @param project The project.
+ * @param shortcuts Its icons or lines.
+ * @returns The shortcuts, in order, without those naming nothing.
+ */
+export function projectShortcuts(project: ProjectDefinition, shortcuts: DirectoryShortcut[]): SidebarShortcut[] {
+  return shortcuts.flatMap((shortcut) => {
+    const integration = shortcut.type === "integration" ? project.integrations.find((item) => item.slug === shortcut.slug) : undefined;
+    return integration ? [integrationShortcut(integration, project.slug)] : [];
   });
 }
 

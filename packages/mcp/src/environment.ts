@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import net from "node:net";
 import { SHARED_CONFIG_PATH } from "@appsys/devtool-cdn";
-import { environmentRules, logger, MCP_LEVELS, type McpAction, type McpRule, type McpRules } from "@appsys/devtool-shared";
+import { environmentRules, integrationKey, logger, MCP_LEVELS, type McpAction, type McpRule, type McpRules } from "@appsys/devtool-shared";
 import { z } from "zod";
 import { maskValues } from "./files.js";
 import type { McpHost } from "./host.js";
@@ -271,22 +271,22 @@ export function environmentTools(host: McpHost): McpTool[] {
       name: "list_pull_requests",
       title: "List pull requests",
       description:
-        "Lists the open pull requests of the repositories of the projects, as last read from their forge: number, title, link, author, branches, draft, checks, review, whether a review of the user is requested and whether the user wrote it.",
+        "Lists the open pull requests of the repositories of the sections (project null) and projects, as last read from their forge: number, title, link, author, branches, draft, checks, review, whether a review of the user is requested and whether the user wrote it.",
       input: {},
       readOnly: true,
       run: async () => {
         const states = new Map(host.pullRequests.state().map((state) => [state.key, state]));
         return Object.values(host.config.projects).flatMap((section) =>
-          Object.values(section.directories)
-            .filter((project) => project.mcp.read.level !== "deny")
-            .flatMap((project) =>
-              project.integrations
+          [{ slug: null, mcp: section.mcp, integrations: section.integrations }, ...Object.values(section.directories)]
+            .filter((owner) => owner.mcp.read.level !== "deny")
+            .flatMap((owner) =>
+              owner.integrations
                 .filter((integration) => integration.type === "pullRequests")
                 .map((integration) => {
-                  const state = states.get(`${section.slug}/${project.slug}/${integration.slug}`);
+                  const state = states.get(integrationKey(section.slug, owner.slug, integration.slug));
                   return {
                     section: section.slug,
-                    project: project.slug,
+                    project: owner.slug,
                     integration: integration.slug,
                     repository: integration.url,
                     forge: integration.provider?.label ?? null,

@@ -2,11 +2,11 @@
 import { computed, shallowRef } from "vue";
 import { Check, Pencil, X } from "@lucide/vue";
 import { MCP_ACTIONS, type McpAction, type McpLevel, type McpPatterns, type McpRules, type McpTarget } from "@appsys/devtool-shared";
+import ConfigFileChoice from "@/components/ConfigFileChoice.vue";
 import McpRulesRow from "@/components/mcp/McpRulesRow.vue";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { cn } from "@/lib/utils";
-import { changeKey, shortPath, type McpEditMode, type McpLevelChange } from "@/lib/mcp";
+import { changeKey, type McpEditMode, type McpLevelChange } from "@/lib/mcp";
 import configStore from "@/stores/config";
 import mcpStore from "@/stores/mcp";
 
@@ -184,39 +184,12 @@ const settingRows = computed<SettingRow[]>(() => {
       </Button>
     </CardHeader>
     <CardContent class="space-y-3">
-      <div
-        v-if="edit"
-        class="flex flex-wrap items-center gap-3 rounded-md border bg-muted/40 px-3 py-2 text-xs"
-      >
-        <span class="text-muted-foreground">Write changes to</span>
-        <div class="flex rounded-md border bg-background p-0.5">
-          <button
-            v-for="option in [
-              { file: 'local' as const, label: 'Personal', hint: settings.localFile ? shortPath(settings.localFile) : 'no personal override loaded' },
-              { file: 'declared' as const, label: 'Shared', hint: 'the file declaring each setting' },
-            ]"
-            :key="option.file"
-            type="button"
-            :disabled="option.file === 'local' && !settings.localFile"
-            :class="cn(
-              'rounded px-2.5 py-1 transition-colors disabled:cursor-not-allowed disabled:opacity-50',
-              editFile === option.file ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground',
-            )"
-            :title="option.hint"
-            @click="editFile = option.file"
-          >
-            {{ option.label }}
-          </button>
-        </div>
-        <span class="text-muted-foreground">
-          <template v-if="editFile === 'local'">
-            <code>{{ settings.localFile ? shortPath(settings.localFile) : "" }}</code>, loaded last: it prevails over every other file, for you only.
-          </template>
-          <template v-else>
-            Each row shows the file it changes, shared with the others once pushed or committed.
-          </template>
-        </span>
-      </div>
+      <ConfigFileChoice
+        v-if="editFile"
+        v-model="editFile"
+        :local-file="settings.localFile"
+        shared-hint="Each row shows the file it changes, shared with the others once pushed or committed."
+      />
 
       <div class="space-y-1">
         <McpRulesRow
