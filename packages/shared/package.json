@@ -14,10 +14,12 @@
   "exports": {
     ".": {
       "types": "./lib/index.d.ts",
+      "development": "./src/index.ts",
       "import": "./lib/index.js"
     },
     "./logger": {
       "types": "./lib/logger.d.ts",
+      "development": "./src/logger.ts",
       "import": "./lib/logger.js"
     }
   },
