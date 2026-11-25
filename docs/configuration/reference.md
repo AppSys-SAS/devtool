@@ -68,7 +68,7 @@ The schema is also published with the npm package, as `@appsys/devtool-config/sc
 | `adt.mcp.timeout` | integer | `120` | [Agent permissions](/configuration/mcp) |
 | `adt.mcp.ownTerminals` | `allow`, `ask` | `allow` | [Agent permissions](/configuration/mcp#agents-and-shell-commands) |
 | `adt.mcp.default` | rules | read allow, others ask | [Agent permissions](/configuration/mcp#from-general-to-precise) |
-| `adt.mcp.commands`, `.scripts`, `.files`, `.terminals`, `.certificates`, `.devtool` | rules | `adt.mcp.default` | [Agent permissions](/configuration/mcp#from-general-to-precise) |
+| `adt.mcp.commands`, `.scripts`, `.files`, `.terminals`, `.certificates`, `.devtool`, `.integrations` | rules | `adt.mcp.default` | [Agent permissions](/configuration/mcp#from-general-to-precise) |
 | `adt.mcp.clients.level`, `.allow`, `.deny` | level, lists | `ask` | [Agent permissions](/configuration/mcp#agents-and-shell-commands) |
 | `adt.mcp.shell.level`, `.allow`, `.deny` | level, lists | `deny` | [Agent permissions](/configuration/mcp#agents-and-shell-commands) |
 

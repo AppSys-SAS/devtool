@@ -100,7 +100,7 @@ export function maskValues (value: unknown): unknown {
 function keysOf (filePath: string, content: string): unknown {
   const format = configFormatOf(filePath)
   if (!format) {
-    throw new McpToolError(`${filePath} is not a file read key by key (YAML, JSON or .env)`)
+    throw new McpToolError(`${filePath} is not a file read key by key (YAML, JSON, TOML, XML or .env)`)
   }
   return maskValues(format.read(content, filePath))
 }
@@ -220,7 +220,7 @@ export function fileTools (host: McpHost): McpTool[] {
     defineTool({
       name: 'read_file',
       title: 'Read a file',
-      description: 'Reads a file of a space. `keys` gives the keys of a YAML, JSON or .env file with the type of each value in place of the value, allowed where only keys may be read.',
+      description: 'Reads a file of a space. `keys` gives the keys of a YAML, JSON, TOML, XML or .env file with the type of each value in place of the value, allowed where only keys may be read.',
       input: {
         space: z.string().describe('Identifier of the space'),
         path: z.string().describe('Path of the file in the space'),
@@ -267,7 +267,7 @@ export function fileTools (host: McpHost): McpTool[] {
     defineTool({
       name: 'update_keys',
       title: 'Change keys of a file',
-      description: 'Sets or removes keys of a YAML, JSON or .env file, keeping its comments and layout, allowed where only keys may be written. Gives the keys afterwards, values replaced by their type.',
+      description: 'Sets or removes keys of a YAML, JSON, TOML, XML or .env file, keeping its comments and layout, allowed where only keys may be written. Gives the keys afterwards, values replaced by their type.',
       input: {
         space: z.string().describe('Identifier of the space'),
         path: z.string().describe('Path of the file in the space'),
@@ -287,7 +287,7 @@ export function fileTools (host: McpHost): McpTool[] {
         refuseDevtoolConfig(host, target, filePath)
         const format = configFormatOf(filePath)
         if (!format) {
-          throw new McpToolError(`${filePath} is not a file changed key by key (YAML, JSON or .env)`)
+          throw new McpToolError(`${filePath} is not a file changed key by key (YAML, JSON, TOML, XML or .env)`)
         }
         const current = await readText(target, filePath)
         await authorizeWrite(call, target, filePath, `Change keys of ${filePath}`, {

@@ -45,7 +45,7 @@ export interface McpRule {
 export type McpRules = Record<McpAction, McpRule>
 
 /** The categories of `adt.mcp` refining `adt.mcp.default` for one kind of thing. */
-export type McpCategory = 'commands' | 'scripts' | 'files' | 'terminals' | 'certificates' | 'devtool'
+export type McpCategory = 'commands' | 'scripts' | 'files' | 'terminals' | 'certificates' | 'devtool' | 'integrations'
 
 /** The global MCP settings an interface may change. */
 export type McpSettingName = 'default' | McpCategory | 'ownTerminals' | 'shell' | 'clients' | 'environment'
@@ -90,6 +90,8 @@ export interface McpSettings {
   certificates: McpRules
   /** The rules of the tools about the devtool itself: the holders of a port (read), reloading the configuration (control). */
   devtool: McpRules
+  /** The rules of the pull requests and issues of the integrations, refined by their sections, projects and integrations. */
+  integrations: McpRules
   /** The agents accepted or refused by their name, before any rule. */
   clients: McpPatterns
   /** The level of typing into and stopping the terminals an agent started itself. */
@@ -251,6 +253,9 @@ export interface IntegrationDefinition {
   badge: boolean
   /** Minutes between two reads of the items, 0 to read them on demand only. */
   refresh: number
+  /** What agents may do with its items, null for a web page, which shows nothing to agents. */
+  mcp: McpRules | null
+  mcpTarget: McpTarget | null
 }
 
 /** An AI agent started with a prompt: a command run in a terminal, or a link opened by the interface. */

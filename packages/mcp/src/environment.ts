@@ -5,7 +5,7 @@ import { environmentRules, type ForgeKind, integrationKey, logger, MCP_LEVELS, t
 import { z } from 'zod'
 import { maskValues } from './files.js'
 import type { McpHost } from './host.js'
-import { defineTool, McpToolError, type McpTool } from './tool.js'
+import { type McpCall, defineTool, McpToolError, type McpTool } from './tool.js'
 
 const LOCAL_HOSTNAMES = new Set(['127.0.0.1', 'localhost', '[::1]'])
 const PORT_CHECK_MS = 300
@@ -44,35 +44,48 @@ async function describeTargets (targets: string[]): Promise<{ url: string, liste
 }
 
 /**
- * Lists the items of one kind of the integrations of the sections and projects an agent may see, as last read.
+ * Lists the items of one kind of the integrations of the sections and projects an agent may read, as
+ * last read, asking a person once for all the integrations whose rule asks.
  * @param host The server.
  * @param kind The pull requests or the issues.
+ * @param call The call of the tool.
  * @returns For each integration, where it is declared, its repository and its items.
  */
-function listForgeItems (host: McpHost, kind: ForgeKind) {
-  const states = new Map(host.forgeItems.state().map(state => [state.key, state]))
-  return Object.values(host.config.projects).flatMap(section =>
-    [{ slug: null, mcp: section.mcp, integrations: section.integrations }, ...Object.values(section.directories)]
-      .filter(owner => owner.mcp.read.level !== 'deny')
-      .flatMap(owner =>
-        owner.integrations
-          .filter(integration => integration.type === kind)
-          .map(integration => {
-            const state = states.get(integrationKey(section.slug, owner.slug, integration.slug))
-            return {
-              section: section.slug,
-              project: owner.slug,
-              integration: integration.slug,
-              repository: integration.url,
-              forge: integration.provider?.label ?? null,
-              viewer: state?.viewer ?? null,
-              updatedAt: state?.updatedAt ?? null,
-              error: state?.error ?? null,
-              [kind]: state?.items ?? []
-            }
-          })
-      )
+async function listForgeItems (host: McpHost, kind: ForgeKind, call: McpCall) {
+  const label = kind === 'pullRequests' ? 'pull requests' : 'issues'
+  const listed = Object.values(host.config.projects).flatMap(section =>
+    [{ slug: null, integrations: section.integrations }, ...Object.values(section.directories)].flatMap(owner =>
+      owner.integrations
+        .filter(integration => integration.type === kind && integration.mcp?.read.level !== 'deny')
+        .map(integration => ({ section: section.slug, project: owner.slug, integration }))
+    )
   )
+  const asked = listed.flatMap(({ integration }) => (integration.mcp?.read.level === 'ask' ? [{ name: integration.name, rule: integration.mcp.read }] : []))
+  if (asked.length > 0) {
+    await call.authorize({
+      action: 'read',
+      rule: asked[0].rule,
+      title: `See the ${label} of ${asked.map(({ name }) => name).join(', ')}`,
+      grantKey: `read:${kind}`,
+      grantLabel: `See the ${label}`
+    })
+  }
+
+  const states = new Map(host.forgeItems.state().map(state => [state.key, state]))
+  return listed.map(({ section, project, integration }) => {
+    const state = states.get(integrationKey(section, project, integration.slug))
+    return {
+      section,
+      project,
+      integration: integration.slug,
+      repository: integration.url,
+      forge: integration.provider?.label ?? null,
+      viewer: state?.viewer ?? null,
+      updatedAt: state?.updatedAt ?? null,
+      error: state?.error ?? null,
+      [kind]: state?.items ?? []
+    }
+  })
 }
 
 /**
@@ -306,7 +319,7 @@ export function environmentTools (host: McpHost): McpTool[] {
         'Lists the open pull requests of the repositories of the sections (project null) and projects, as last read from their forge: number, title, link, author, description, labels, branches, draft, checks, review, whether a review of the user is requested and whether the user wrote it.',
       input: {},
       readOnly: true,
-      run: () => listForgeItems(host, 'pullRequests')
+      run: (_input, call) => listForgeItems(host, 'pullRequests', call)
     }),
     defineTool({
       name: 'list_issues',
@@ -315,7 +328,7 @@ export function environmentTools (host: McpHost): McpTool[] {
         'Lists the open issues of the repositories of the sections (project null) and projects, as last read from their forge: number, title, link, author, description, labels, assignees, number of comments, whether it is assigned to the user and whether the user wrote it.',
       input: {},
       readOnly: true,
-      run: () => listForgeItems(host, 'issues')
+      run: (_input, call) => listForgeItems(host, 'issues', call)
     }),
     defineTool({
       name: 'notify_user',

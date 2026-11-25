@@ -187,6 +187,7 @@ describe('defaults', () => {
       terminals: rules,
       certificates: rules,
       devtool: rules,
+      integrations: rules,
       clients: { level: 'ask', allow: [], deny: [] },
       ownTerminals: 'allow',
       shell: { level: 'deny', allow: [], deny: [] },
@@ -748,8 +749,8 @@ describe('integrations', () => {
     })
     expect(configure.warnings).toEqual([])
     expect(configure.integrations).toEqual([
-      { slug: 'mail', name: 'Mail', type: 'web', icon: 'lucide:app-window', url: 'https://mail.example.dev', embed: true, provider: null, agentActions: [], agentPrompts: {}, badge: false, refresh: 0 },
-      { slug: 'docs', name: 'Docs', type: 'web', icon: 'mdi:book', url: 'http://docs.example.dev/path', embed: false, provider: null, agentActions: [], agentPrompts: {}, badge: false, refresh: 0 }
+      { slug: 'mail', name: 'Mail', type: 'web', icon: 'lucide:app-window', url: 'https://mail.example.dev', embed: true, provider: null, agentActions: [], agentPrompts: {}, badge: false, refresh: 0, mcp: null, mcpTarget: null },
+      { slug: 'docs', name: 'Docs', type: 'web', icon: 'mdi:book', url: 'http://docs.example.dev/path', embed: false, provider: null, agentActions: [], agentPrompts: {}, badge: false, refresh: 0, mcp: null, mcpTarget: null }
     ])
     expect(configure.getForClient('1.0.0').integrations).toBe(configure.integrations)
   })
@@ -816,9 +817,23 @@ describe('pull requests and issues', () => {
       agentActions: [],
       agentPrompts: { review: DEFAULT_AGENT_PROMPTS.review },
       badge: true,
-      refresh: 5
+      refresh: 5,
+      mcp: configure.adt.mcp.integrations,
+      mcpTarget: { path: ['sections', 'main', 'integrations', 'pulls', 'mcp'], declaredIn: null }
     }])
     expect(configure.integrationTokens).toEqual({})
+  })
+
+  it('refines the rules of agents from adt.mcp.integrations through the section to the integration', async () => {
+    const configure = await loadIntegrations(
+      { pulls: { name: 'Pulls', type: 'pullRequests', url: 'https://github.com/example/api' }, issues: { name: 'Issues', type: 'issues', url: 'https://github.com/example/api', mcp: 'deny' } },
+      { adt: { mcp: { integrations: { read: 'ask' } } } }
+    )
+    expect(configure.warnings).toEqual([])
+    const [pulls, issues] = configure.projects.main.integrations
+    expect(pulls.mcp?.read).toEqual({ level: 'ask', from: 'adt.mcp.integrations' })
+    expect(issues.mcp?.read).toEqual({ level: 'deny', from: 'sections.main.integrations.issues' })
+    expect(configure.findMcpTarget(['sections', 'main', 'integrations', 'issues', 'mcp'])).toEqual(issues.mcpTarget)
   })
 
   it('reads the issues of a GitLab repository from an SSH remote with the actions of agents', async () => {
@@ -1867,7 +1882,7 @@ describe('setting targets', () => {
     const configure = await load({}, origin())
     const { mcp } = configure.getForClient('2.0.0')
     expect(mcp.localFile).toBe(local)
-    expect(Object.keys(mcp.targets)).toEqual(['default', 'commands', 'scripts', 'files', 'terminals', 'certificates', 'devtool', 'ownTerminals', 'shell', 'clients', 'environment'])
+    expect(Object.keys(mcp.targets)).toEqual(['default', 'commands', 'scripts', 'files', 'terminals', 'certificates', 'devtool', 'integrations', 'ownTerminals', 'shell', 'clients', 'environment'])
     expect(mcp.targets.default).toEqual({ path: ['adt', 'mcp', 'default'], declaredIn: sections })
     expect(mcp.targets.shell).toEqual({ path: ['adt', 'mcp', 'shell', 'level'], declaredIn: sections })
     expect(mcp.targets.environment).toEqual({ path: ['environment', 'mcp'], declaredIn: shared })

@@ -1,6 +1,6 @@
 ---
 name: devtool-files-environment
-description: Reads and changes the files the devtool exposes (folders of files of projects, configurations of the environment) through its MCP server, including key-only access to YAML, JSON and .env files that hides secret values, and follows the environment synchronized with its backends, such as a CDN, S3, SFTP or git (status, differing keys, pull, push) and the certificates of its load balancer. Use when a task needs a configuration value, a settings file, a database copy or a certificate managed by the devtool.
+description: Reads and changes the files the devtool exposes (folders of files of projects, configurations of the environment) through its MCP server, including key-only access to YAML, JSON, TOML, XML and .env files that hides secret values, and follows the environment synchronized with its backends, such as a CDN, S3, SFTP or git (status, differing keys, pull, push) and the certificates of its load balancer. Use when a task needs a configuration value, a settings file, a database copy or a certificate managed by the devtool.
 ---
 
 # Devtool files, configuration keys and environment
@@ -16,7 +16,7 @@ description: Reads and changes the files the devtool exposes (folders of files o
   header is not a YAML map is refused; `change_files { action: create, kind: directory }` at the root
   creates a skill with its `SKILL.md`.
 - `read_file { space, path }` gives the content and its `updatedAt`.
-- `read_file { space, path, mode: "keys" }` gives the keys of a YAML, JSON or .env file with the type of
+- `read_file { space, path, mode: "keys" }` gives the keys of a YAML, JSON, TOML, XML or .env file with the type of
   each value (`<string>`, `<number>`, `<boolean>`, `<list:3>`, `""` for an empty string) instead of the
   value. Where a space is `read: keys`, this is the only way to read it: use it to know which settings
   exist without seeing secrets.
@@ -58,5 +58,6 @@ An encrypted file may need a password the user types in the interface: a sync th
 - `list_pull_requests` and `list_issues`: the open pull requests and issues of the repositories of the
   sections and projects, as last read from their forge (author, description, labels, branches, checks and
   review, or assignees and comments; review requested from or assigned to the user, written by the user).
+  Integrations the user keeps from agents are left out; a call may wait for the user to accept it.
 - `reload_config` reloads the devtool configuration after its files changed; agents never write the
   devtool configuration itself.

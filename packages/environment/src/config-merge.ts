@@ -1,5 +1,7 @@
 import { isDeepStrictEqual } from 'node:util'
+import { parse as parseToml, patch as patchToml } from '@decimalturn/toml-patch'
 import { parseDocument } from 'yaml'
+import { XML_FORMAT } from './xml-format.js'
 
 /** A key whose value differs between two copies of a configuration file; `undefined` stands for an absent key. */
 export interface KeyDifference {
@@ -18,7 +20,7 @@ export interface KeyChoice {
 }
 
 /** The new value of a key, `undefined` to remove it. */
-interface KeyChange {
+export interface KeyChange {
   path: string[]
   value: unknown
 }
@@ -33,13 +35,17 @@ const DOTENV_LINE = /^(\s*(?:export\s+)?)([A-Za-z_][A-Za-z0-9_.-]*)\s*=(.*)$/
 const DOTENV_PLAIN_VALUE = /^[\w./:@,+=-]*$/
 
 /**
- * Tells whether a value is a map.
+ * Tells whether a value is a map, a plain object: lists, dates and other objects are values.
  *
  * @param value - The value.
  * @returns True for a map.
  */
 function isMap (value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
+  if (typeof value !== 'object' || value === null) {
+    return false
+  }
+  const prototype: unknown = Object.getPrototypeOf(value)
+  return prototype === Object.prototype || prototype === null
 }
 
 /**
@@ -287,6 +293,32 @@ const JSON_FORMAT: ConfigFormat = {
   }
 }
 
+const TOML_FORMAT: ConfigFormat = {
+  read (text, label) {
+    let value: unknown
+    try {
+      value = text.trim() ? parseToml(text) : {}
+    } catch (error) {
+      throw new Error(`${label} is not valid TOML: ${error instanceof Error ? error.message.split('\n')[0] : String(error)}`, { cause: error })
+    }
+    return isMap(value) ? value : {}
+  },
+  /**
+   * Changes the keys of a TOML file, keeping its comments and layout.
+   *
+   * @param baseText - The TOML text.
+   * @param changes - The new value of each key, `undefined` to remove it.
+   * @returns The new text.
+   */
+  write (baseText, changes) {
+    const root = TOML_FORMAT.read(baseText, 'the file')
+    for (const change of changes) {
+      applyChange(root, change)
+    }
+    return patchToml(baseText, root)
+  }
+}
+
 const DOTENV_FORMAT: ConfigFormat = {
   read (text) {
     const values: Record<string, unknown> = {}
@@ -342,6 +374,8 @@ const DOTENV_FORMAT: ConfigFormat = {
 const FORMATS: [RegExp, ConfigFormat][] = [
   [/\.ya?ml$/, YAML_FORMAT],
   [/\.json$/, JSON_FORMAT],
+  [/\.toml$/, TOML_FORMAT],
+  [/\.xml$/, XML_FORMAT],
   [/\.env$/, DOTENV_FORMAT]
 ]
 

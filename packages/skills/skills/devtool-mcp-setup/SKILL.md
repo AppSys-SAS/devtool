@@ -85,7 +85,7 @@ configurations, the sessions, the history of every call, the grants and the effe
    - `control`: stop, restart, close, resize a terminal, free a port, reload the configuration
    - `write`: change files
 3. Levels: `allow` (no question), `ask` (a request in the interface, with a browser notification when
-   `adt.mcp.notifications` is on), `keys` (keys of YAML / JSON / .env files without their values; `read`
+   `adt.mcp.notifications` is on), `keys` (keys of YAML / JSON / TOML / XML / .env files without their values; `read`
    and `write` of `adt.mcp.files`, of the folders of files, of `environment.mcp` and of the files of the
    environment only), `deny` (refused, and hidden from listings when it is `read`).
 4. A grant given from a request or from the history ("This session", "Always") turns `ask` into `allow`

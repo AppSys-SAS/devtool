@@ -161,7 +161,7 @@ function readIgnoredKeys (itemPath: string, value: unknown): IgnoredKeys | null 
     throw new Error(`invalid ignore of ${itemPath} in the environment: must be a list of key paths, such as connections.*.lastUsedAt`)
   }
   if (!configFormatOf(itemPath)) {
-    throw new Error(`invalid ignore of ${itemPath} in the environment: needs a YAML, JSON or .env file`)
+    throw new Error(`invalid ignore of ${itemPath} in the environment: needs a YAML, JSON, TOML, XML or .env file`)
   }
   return value.length > 0 ? new IgnoredKeys(value) : null
 }
@@ -628,7 +628,7 @@ export class Environment {
   private async readBothCopies (item: EnvironmentItem): Promise<{ format: ConfigFormat, local: string, remote: string }> {
     const format = configFormatOf(item.path)
     if (!format) {
-      throw new Error(`${item.path} cannot be merged key by key: YAML, JSON and .env files only`)
+      throw new Error(`${item.path} cannot be merged key by key: YAML, JSON, TOML, XML and .env files only`)
     }
 
     const localPath = localPathOf(this._options.folder, item.path)

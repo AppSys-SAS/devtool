@@ -284,6 +284,7 @@
         "terminals": { "$ref": "#/$defs/mcpRules", "description": "Terminals a person opened without a command." },
         "certificates": { "$ref": "#/$defs/mcpRules" },
         "devtool": { "$ref": "#/$defs/mcpRules", "description": "port_owners (read) and reload_config (control)." },
+        "integrations": { "$ref": "#/$defs/mcpRules", "description": "list_pull_requests and list_issues (read), refined by the sections, projects and integrations." },
         "clients": { "$ref": "#/$defs/mcpList", "description": "Which agents may connect. Default level: ask." },
         "shell": { "$ref": "#/$defs/mcpList", "description": "Shell commands of run_shell. Default level: deny." }
       }
@@ -403,7 +404,8 @@
           "type": "object",
           "additionalProperties": false,
           "properties": { "review": { "type": "string" }, "analyze": { "type": "string" }, "fix": { "type": "string" } }
-        }
+        },
+        "mcp": { "$ref": "#/$defs/mcpRules", "description": "pullRequests and issues: whether agents may read its items (read). Default: adt.mcp.integrations, then the section and the project." }
       },
       "if": { "properties": { "type": { "const": "web" } } },
       "then": { "required": ["url"] }
@@ -712,7 +714,7 @@
                   "ignore": {
                     "type": "array",
                     "items": { "type": "string", "minLength": 1 },
-                    "description": "Keys of a YAML, JSON or .env file left out of its synchronization, each copy keeping its own values: dotted paths where * stands for one key or list index and ** for any depth.",
+                    "description": "Keys of a YAML, JSON, TOML, XML or .env file left out of its synchronization, each copy keeping its own values: dotted paths where * stands for one key or list index and ** for any depth.",
                     "examples": [["connections.*.lastUsedAt"]]
                   },
                   "pull": { "$ref": "#/$defs/pull" },

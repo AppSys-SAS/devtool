@@ -63,6 +63,9 @@ everything:
   command follows its command)
 - **certificates:** `adt.mcp.default` > `adt.mcp.certificates` > `loadBalancers.<name>.mcp`
 - **`port_owners` (read) and `reload_config` (control):** `adt.mcp.default` > `adt.mcp.devtool`
+- **pull requests and issues (`list_pull_requests`, `list_issues`, read):** `adt.mcp.default` >
+  `adt.mcp.integrations` > section > project > integration. A call asks you once for all the
+  integrations whose level is `ask`, and leaves out those at `deny`.
 - **the files of Configs and the `environment_*` tools:** `adt.mcp.default` > `environment.mcp` > the `mcp`
   of each item of `environment.files`, `databases`, `buckets` and `redis` (a `.local.yml` override follows
   its file; a pull or push of several items takes the strictest of them)
@@ -115,6 +118,8 @@ adt:
 ## What no setting changes
 
 - `notify_user` is always allowed.
+- The [skills served over MCP](/agents/skills#serve-them-over-mcp) are readable by every connected agent,
+  without asking: serving them is already your choice.
 - A push to a backend of the environment and the pull of the shared configuration are always confirmed
   by you.
 - Agents never write the devtool configuration.
@@ -149,6 +154,8 @@ writes every change at once, keeping comments and layout, then reloads the confi
 | `terminals` | rules | `default` | Terminals opened without a command. |
 | `certificates` | rules | `default` | Certificates. |
 | `devtool` | rules | `default` | `port_owners` and `reload_config`. |
+| `integrations` | rules | `default` | Pull requests and issues of the integrations (read). |
+| `skills` | boolean | `true` | Serve the skills of the devtool over MCP. |
 | `clients` | `{ level, allow, deny }` | `{ level: ask }` | Agents that may connect. |
 | `shell` | `{ level, allow, deny }` | `{ level: deny }` | Command lines of `run_shell`. |
 
@@ -163,6 +170,7 @@ Rules (a level, or levels by action) are accepted on:
 | `projects.<slug>.commands.<slug>.mcp` | `adt.mcp.commands`, section, project |
 | `projects.<slug>.scripts[].mcp`, `...scripts[].scripts.<file>.mcp` | `adt.mcp.scripts`, section, project |
 | `projects.<slug>.files.<slug>.mcp` | `adt.mcp.files`, section, project; `keys` allowed |
+| `sections.<slug>.integrations.<slug>.mcp`, `projects.<slug>.integrations.<slug>.mcp` | `adt.mcp.integrations`, section, project (pull requests and issues) |
 | `loadBalancers.<name>.mcp` | `adt.mcp.certificates` |
 | `environment.mcp` | `adt.mcp.default`; `keys` allowed |
 | `environment.files[].mcp` | `environment.mcp`; `keys` allowed |
