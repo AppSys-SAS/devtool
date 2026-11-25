@@ -1283,8 +1283,14 @@ describe('commands', () => {
     expect(configure.warnings).toEqual([
       `${API}.commands.default: is replaced by default: { action: command:<slug> }.`,
       `${API}.extras[broken].args: must be an array of strings, numbers or inputs.`,
-      `${API}.extras[form].form: must be dialog or inline.`
+      `${API}.extras[form].form: must be dialog, inline or inlineExpanded.`
     ])
+  })
+
+  it('reads a form unfolded from the start', async () => {
+    const configure = await loadApi({ extras: { form: { name: 'Form', args: ['x'], form: 'inlineExpanded' } } })
+    expect(apiOf(configure).extras.form.form).toBe('inlineExpanded')
+    expect(configure.warnings).toEqual([])
   })
 
   it('keeps what the server does around a command', async () => {
@@ -1615,9 +1621,9 @@ describe('scripts', () => {
     expect(hasWarning(configure, /^projects\[main\]\.directories\[api\]\.scripts\[1\]: ENOENT/)).toBe(true)
     expect(configure.warnings.slice(2)).toEqual([
       `${API}.scripts[2].scripts[deploy.sh].args: must be an array of strings, numbers or inputs.`,
-      `${API}.scripts[2].scripts[deploy.sh].form: must be dialog or inline.`,
+      `${API}.scripts[2].scripts[deploy.sh].form: must be dialog, inline or inlineExpanded.`,
       `${API}.scripts[2].only: must be an array of glob patterns.`,
-      `${API}.scripts[2].form: must be dialog or inline.`
+      `${API}.scripts[2].form: must be dialog, inline or inlineExpanded.`
     ])
   })
 

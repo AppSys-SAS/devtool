@@ -496,8 +496,8 @@ export interface CommandChoice {
   value: string
 }
 
-/** Where the page of a directory asks for the inputs of a command: in a dialog, or in its row. */
-export type CommandForm = 'dialog' | 'inline'
+/** Where the page of a directory asks for the inputs of a command: in a dialog, in its row unfolded on click, or in its row unfolded from the start. */
+export type CommandForm = 'dialog' | 'inline' | 'inlineExpanded'
 
 /** An argument of a command: a fixed value, or an input typed when it starts. */
 export type CommandArg = string | CommandInput
