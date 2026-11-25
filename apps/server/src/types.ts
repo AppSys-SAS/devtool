@@ -8,6 +8,8 @@ import type { EnvironmentTarget } from './environment.js'
 export interface ServerBootstrapOptions {
   serverPort?: number
   loadBalancerPort?: number
+  /** Port of the DNS, replacing `dns.port` of the configuration. */
+  dnsPort?: number
   ssl?: string | null
   uiPath?: string | null
   configPaths?: string[]

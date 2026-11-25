@@ -371,6 +371,7 @@ async function main (): Promise<void> {
     .option('-s, --ssl <domain>', 'enable SSL for the domain given')
     .option('-g, --server-port <port>', 'server port')
     .option('-l, --load-balancer-port <port>', 'load balancer port')
+    .option('--dns-port <port>', 'DNS port, instead of dns.port of the configuration')
     .option('--log-level <level>', 'set log level (error|warn|info|debug)', 'info')
     .action(async (configurations: string[], options: Record<string, string | undefined>) => {
       const invocationCwd = process.env.INIT_CWD?.length ? process.env.INIT_CWD : process.cwd()
@@ -385,6 +386,7 @@ async function main (): Promise<void> {
       await runServer({
         serverPort: parseOptionalPort(options.serverPort, 'server port'),
         loadBalancerPort: parseOptionalPort(options.loadBalancerPort, 'load balancer port'),
+        dnsPort: parseOptionalPort(options.dnsPort, 'DNS port'),
         ssl: options.ssl ?? null,
         uiPath: UI_PATH,
         configPaths

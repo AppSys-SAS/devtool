@@ -35,6 +35,7 @@ devtool server ./config.yml ./config.local.yml
 | `-s`, `--ssl <domain>` | none | Serve the interface on this host through the load balancer (sets `adt.host`). |
 | `-g`, `--server-port <port>` | `adt.ports.server`, `6730` | Port of the server and the interface. |
 | `-l`, `--load-balancer-port <port>` | `adt.ports.loadBalancer`, `6731` | Port of the load balancer. |
+| `--dns-port <port>` | `dns.port`, `53` | Port of the [DNS](/configuration/network#the-local-dns), for this run. |
 | `--log-level <level>` | `info` | `error`, `warn`, `info` or `debug`. |
 
 On macOS, the server runs again under an application named after `adt.displayName`, so system prompts

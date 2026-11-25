@@ -169,7 +169,7 @@ authority, such as one renewed with ACME, works out of the box.
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
 | `enabled` | boolean | `true` | Run the DNS. |
-| `port` | number | `53` | Port of the DNS, UDP and TCP. |
+| `port` | number | `53` | Port of the DNS, UDP and TCP. `devtool server --dns-port <port>` replaces it for one run. |
 | `access` | `local` or `network` | `local` | Who may query it. |
 | `upstream` | `<host>[:<port>]` | the system | Server resolving the names without a record. |
 | `records.<slug>.names` | list | required | Host names or `*.<domain>`. |
