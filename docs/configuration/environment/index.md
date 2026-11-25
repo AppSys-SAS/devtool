@@ -194,9 +194,10 @@ A bucket is saved as a snapshot, media types kept, and emptied before a pull res
 where your local S3 server is; `region` defaults to `us-east-1`.
 
 With `format: native`, the snapshot is a `tar.gz` of the objects, the path of each file in the archive
-being its key, without the `./` the tar command writes before it. A pull empties the bucket, then
-stores every file with the media type of its extension; a push writes the objects of the bucket to the
-archive, each behind `./`, as `tar -czf uploads.tar.gz -C <folder> .` does.
+being its key, without the `./` the tar command writes before it. A pull reads the whole archive first,
+so a truncated or corrupted one leaves the bucket as it is, then empties the bucket and stores every
+file with the media type of its extension; a push writes the objects of the bucket to the archive, each
+behind `./`, as `tar -czf uploads.tar.gz -C <folder> .` does.
 
 ```yaml [config.yml]
 environment:
@@ -429,6 +430,8 @@ Environment page shows the error and `devtool env` stops.
 - `invalid ignore of <path> in the environment: must be a list of key paths, such as
   connections.*.lastUsedAt`, `... needs a YAML, JSON, TOML, XML or .env file`: see [Ignored keys](#ignored-keys).
 - `invalid format of <path> in the environment: must be devtool or native`
+- `invalid path of <path> in the environment: write it <canonical path>`: a path without `./`, leading
+  `/` or `..` segments; `<path> is declared twice in the environment`: each item has its own path.
 - `invalid groups of <path> in the environment: ...`: `pull` and `push` take a non-empty list of groups,
   or `false`.
 

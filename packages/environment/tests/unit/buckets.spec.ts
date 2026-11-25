@@ -7,7 +7,9 @@ import { createGzip, gzipSync } from 'node:zlib'
 import { DeleteObjectsCommand, GetObjectCommand, ListObjectsV2Command, PutObjectCommand, type S3Client } from '@aws-sdk/client-s3'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { transformed } from '../../src/archive.js'
-import { type BucketObject, objectsOfTar, restoreBucket, snapshotBucketTar } from '../../src/buckets.js'
+import type { BackendContext, EnvironmentBackend } from '../../src/backends/backend.js'
+import { type BucketObject, checkTar, objectsOfTar, restoreBucket, snapshotBucketTar } from '../../src/buckets.js'
+import { Environment, type EnvironmentItem } from '../../src/environment.js'
 import { writeTar } from '../../src/tar.js'
 import { paxRecord, rawEntry, TAR_END } from './tar-fixtures.js'
 
@@ -116,5 +118,27 @@ describe('native bucket archives', () => {
     const archive = gzipSync(Buffer.concat([rawEntry('PaxHeader', 'x', paxRecord('size', '0.5')), rawEntry('a.txt', '0', 'a'), TAR_END]))
     await expect(restoreBucket(memoryClient(target), 'uploads', objectsOfTar(Readable.from([archive])))).rejects.toThrow('invalid size 0.5')
     expect([...target.keys()]).toEqual(['kept.txt'])
+  })
+
+  it('finds an archive cut in the body of a later entry incomplete', async () => {
+    const whole = Buffer.concat([rawEntry('a.txt', '0', 'a'), rawEntry('b.bin', '0', 'x'.repeat(2000)), TAR_END])
+    await expect(checkTar(Readable.from([gzipSync(whole)]))).resolves.toBeUndefined()
+    await expect(checkTar(Readable.from([gzipSync(whole.subarray(0, 1536))]))).rejects.toThrow()
+  })
+
+  it('refuses a truncated native bucket archive before reaching the S3 server', async () => {
+    const whole = Buffer.concat([rawEntry('a.txt', '0', 'a'), rawEntry('b.bin', '0', 'x'.repeat(2000)), TAR_END])
+    const item: EnvironmentItem = { kind: 'bucket', path: 'api/uploads.tar.gz', backend: 'team', encryption: null, groups: { pull: null, push: null }, bucket: 'uploads', format: 'native' }
+    const backend: EnvironmentBackend = {
+      list: async () => [],
+      download: async () => Readable.from([gzipSync(whole.subarray(0, 1536))]),
+      upload: async () => undefined,
+      remove: async () => undefined,
+      close: async () => undefined
+    }
+    const context: BackendContext = { resolve: async text => text, askSecret: async () => '', cacheDir: folder, configFolder: folder, auth: null }
+    const environment = new Environment(new Map([['team', backend]]), { folder, backends: [], defaultBackend: 'team', items: [item], configFiles: [], autoPulls: [], s3: null }, context)
+
+    await expect(environment.pull({ item, tables: null })).rejects.toThrow('api/uploads.tar.gz is not a complete tar.gz archive')
   })
 })

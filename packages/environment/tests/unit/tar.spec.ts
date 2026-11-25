@@ -109,6 +109,11 @@ describe('tar archives', () => {
     await expect(filesOf(Readable.from([archive]))).rejects.toThrow('a.txt is an entry of an invalid size 0.5')
   })
 
+  it('refuses a size beyond the safe integers before yielding the entry', async () => {
+    const archive = Buffer.concat([rawEntry('PaxHeader', 'x', paxRecord('size', '9007199254740992')), rawEntry('a.txt', '0', 'a'), TAR_END])
+    await expect(filesOf(Readable.from([archive]))).rejects.toThrow('a.txt is an entry of an invalid size')
+  })
+
   it('refuses what is not a tar archive', async () => {
     await expect(filesOf(Readable.from([Buffer.alloc(512, 'x')]))).rejects.toThrow()
   })

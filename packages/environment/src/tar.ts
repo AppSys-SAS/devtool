@@ -37,6 +37,9 @@ function unsupported (header: Header): string | null {
   if (pax.size !== undefined && !(typeof pax.size === 'string' && /^\d+$/.test(pax.size))) {
     return `an entry of an invalid size ${typeof pax.size === 'string' ? pax.size : JSON.stringify(pax.size)}`
   }
+  if (!Number.isSafeInteger(header.size) || header.size < 0) {
+    return `an entry of an invalid size ${String(header.size)}`
+  }
   return Object.keys(pax).some(key => key.startsWith('GNU.sparse.')) ? 'a sparse file' : null
 }
 

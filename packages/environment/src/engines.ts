@@ -434,9 +434,9 @@ interface MongoNamespace {
 function bsonFields (document: Buffer): Map<string, string | boolean> {
   const fixedSizes: Record<number, number> = { 0x01: 8, 0x07: 12, 0x09: 8, 0x0a: 0, 0x10: 4, 0x11: 8, 0x12: 8, 0x13: 16 }
   const fields = new Map<string, string | boolean>()
-  const lengthAt = (at: number, minimum: number): number => {
+  const lengthAt = (at: number, minimum: number, prefix: number): number => {
     const length = at + 4 <= document.length ? document.readInt32LE(at) : -1
-    if (length < minimum || at + length > document.length) {
+    if (length < minimum || at + prefix + length > document.length) {
       throw new Error('not a mongodump archive: one of its documents is corrupted')
     }
     return length
@@ -451,16 +451,16 @@ function bsonFields (document: Buffer): Map<string, string | boolean> {
     const name = document.toString('utf-8', offset + 1, nameEnd)
     offset = nameEnd + 1
     if (type === 0x02) {
-      const length = lengthAt(offset, 1)
+      const length = lengthAt(offset, 1, 4)
       fields.set(name, document.toString('utf-8', offset + 4, offset + 4 + length - 1))
       offset += 4 + length
     } else if (type === 0x08) {
       fields.set(name, document[offset] === 1)
       offset += 1
     } else if (type === 0x03 || type === 0x04) {
-      offset += lengthAt(offset, BSON_MIN_DOCUMENT_BYTES)
+      offset += lengthAt(offset, BSON_MIN_DOCUMENT_BYTES, 0)
     } else if (type === 0x05) {
-      offset += 5 + lengthAt(offset, 0)
+      offset += 5 + lengthAt(offset, 0, 5)
     } else if (type in fixedSizes) {
       offset += fixedSizes[type]
     } else {
@@ -528,6 +528,9 @@ async function readPrelude (records: AsyncIterator<Buffer | null>): Promise<Mong
     const record = await records.next()
     if (record.done) {
       throw new Error('not a mongodump archive: no complete list of collections')
+    }
+    if (record.value === null && index === 0) {
+      throw new Error('not a mongodump archive: no header')
     }
     if (record.value === null) {
       return namespaces
