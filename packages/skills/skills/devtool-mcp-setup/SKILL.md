@@ -147,9 +147,9 @@ projects:
 environment:
   mcp: { read: keys, run: ask }
   files:
-    - { path: helpdesk/helpdesk.env, mcp: { write: deny } }
+    - { path: api/api.env, mcp: { write: deny } }
   databases:
-    - { path: account/db.gz, engine: postgres, container: postgres, mcp: { run: deny } }
+    - { path: api/db.gz, engine: postgres, container: postgres, mcp: { run: deny } }
 ```
 
 Agents never write the configuration of the devtool itself (`devtool/config.yml` and its `.local.yml`).
