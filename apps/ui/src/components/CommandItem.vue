@@ -12,7 +12,7 @@ const props = defineProps<{
   command: DirectoryExtra
 }>()
 
-const opened = shallowRef(false)
+const opened = shallowRef(props.command.form === 'inlineExpanded')
 
 const description = computed(() => (props.command.script ? props.command.script.summary : commandLine(props.command.args)))
 
@@ -20,7 +20,7 @@ const description = computed(() => (props.command.script ? props.command.script.
  * Shows or hides the form of a command asking for its inputs in its row, else runs it.
  */
 function activate (): void {
-  if (props.command.form === 'inline') {
+  if (props.command.form !== 'dialog') {
     opened.value = !opened.value
     return
   }

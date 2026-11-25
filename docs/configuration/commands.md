@@ -83,7 +83,8 @@ value passed to the command.
 ### When the inputs are asked
 
 - From the project page, a command asks in a **dialog** by default. With `form: inline`, its row unfolds
-  with the fields and its description instead.
+  with the fields and its description instead, when you click it. With `form: inlineExpanded`, the row
+  is unfolded from the start, and a click folds it.
 - From the sidebar, the devtool always asks in a dialog.
 - Every field starts with its `default` value.
 - When a command starts **on its own** (as the `default` of its project, or with its section), it runs
@@ -204,7 +205,7 @@ call it.
 | `detached` | boolean | `false` | Start outside of any terminal, without output. |
 | `prompt` | boolean | `false` | Run in the background, its questions in a dialog. |
 | `startWithSection` | boolean | `false` | Start with the section, from its header. |
-| `form` | `dialog` or `inline` | `dialog` | Where the project page asks for the inputs. |
+| `form` | `dialog`, `inline` or `inlineExpanded` | `dialog` | Where the project page asks for the inputs. |
 | `notifications` | boolean | the project's | Notify when the command ends. |
 | `opAccount`, `unless`, `answers` | | | See [Automation and secrets](/configuration/automation). |
 | `mcp` | level or levels | inherited | What agents may do with it, see [Agent permissions](/configuration/mcp). |
@@ -230,7 +231,7 @@ When `choices` is not empty, the input is a choice even if it also says `flag` o
 | --- | --- | --- | --- |
 | `path` | string | required | Folder of executables, relative to the project. |
 | `prompt` | boolean | `false` | Run its scripts in the background, questions in a dialog. |
-| `form` | `dialog` or `inline` | `inline` | Where the project page asks for the inputs. |
+| `form` | `dialog`, `inline` or `inlineExpanded` | `inline` | Where the project page asks for the inputs. |
 | `only` | list of globs | all files | File names to keep. |
 | `scripts.<file>` | map | | `prompt`, `args`, `form` and `mcp` of one file. |
 | `mcp` | level or levels | inherited | What agents may do with its scripts. |
@@ -239,7 +240,7 @@ When `choices` is not empty, the input is a choice even if it also says `flag` o
 
 - `args: must be an array of strings, numbers or inputs`: the command is dropped.
 - `is replaced by default: { action: command:<slug> }`: a command is named `default`.
-- `form: must be dialog or inline`.
+- `form: must be dialog, inline or inlineExpanded`.
 - `killSignal: must match SIG* format (example: SIGTERM, SIGKILL)`.
 - `must be a string, a number, or an input with choices, flag: true or text: true`: an item of `args`.
 - `display: must be buttons or dropdown`, `must be a value or { label, value }` (a choice).

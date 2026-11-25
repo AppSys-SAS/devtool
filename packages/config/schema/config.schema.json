@@ -485,7 +485,7 @@
         "detached": { "type": "boolean", "default": false, "description": "Run without a terminal; value blocks and unless are not read." },
         "prompt": { "type": "boolean", "default": false, "description": "Run in the background and show its questions in a dialog, instead of opening its terminal." },
         "startWithSection": { "type": "boolean", "default": false, "description": "Start when the section is started from its header." },
-        "form": { "type": "string", "enum": ["dialog", "inline"], "default": "dialog", "description": "Where the inputs are asked on the project page." },
+        "form": { "$ref": "#/$defs/commandForm", "default": "dialog" },
         "notifications": { "type": "boolean" },
         "mcp": { "$ref": "#/$defs/mcpRules" },
         "meta": { "$ref": "#/$defs/meta" }
@@ -497,9 +497,14 @@
       "properties": {
         "prompt": { "type": "boolean" },
         "args": { "$ref": "#/$defs/args" },
-        "form": { "type": "string", "enum": ["dialog", "inline"] },
+        "form": { "$ref": "#/$defs/commandForm" },
         "mcp": { "$ref": "#/$defs/mcpRules" }
       }
+    },
+    "commandForm": {
+      "type": "string",
+      "enum": ["dialog", "inline", "inlineExpanded"],
+      "description": "Where the inputs are asked on the project page: in a dialog, in the row unfolded on click, or in the row unfolded from the start."
     },
     "scriptFolder": {
       "anyOf": [
@@ -511,7 +516,7 @@
           "properties": {
             "path": { "type": "string", "description": "Folder of executables, relative to the project." },
             "prompt": { "type": "boolean", "default": false },
-            "form": { "type": "string", "enum": ["dialog", "inline"], "default": "inline" },
+            "form": { "$ref": "#/$defs/commandForm", "default": "inline" },
             "only": { "type": "array", "items": { "type": "string" }, "description": "Glob patterns of the file names kept." },
             "mcp": { "$ref": "#/$defs/mcpRules" },
             "scripts": { "type": "object", "additionalProperties": { "$ref": "#/$defs/scriptSettings" }, "description": "Settings by file name." }
