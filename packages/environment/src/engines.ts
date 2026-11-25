@@ -49,8 +49,8 @@ export interface DatabaseEngine {
 const STDERR_TAIL_BYTES = 4096
 const PG_DUMP_MAGIC = Buffer.from('PGDMP')
 const MONGODUMP_MAGIC = Buffer.from([0x6d, 0xe2, 0x99, 0x81])
-const MONGODUMP_PRELUDE_END = -1
-const MAX_PRELUDE_BYTES = 16 * 1024 * 1024
+const MONGODUMP_TERMINATOR = -1
+const BSON_MIN_DOCUMENT_BYTES = 5
 const SQL_SCRIPT_STARTS = ['--', '/*']
 
 /**
@@ -270,7 +270,7 @@ pg_restore -l "$work/archive" > /dev/null
 empty="$1"; shift
 : > "$work/list"
 while [ $# -gt 0 ]; do
-  pg_restore -l -n "$1" -t "$2" "$work/archive" | grep -v '^;' | grep -F ' TABLE DATA ' > "$work/entry" || true
+  pg_restore -l -n "$1" -t "$2" "$work/archive" | grep -E '^[0-9]+; [0-9]+ [0-9]+ TABLE DATA ' > "$work/entry" || true
   [ -s "$work/entry" ] || { echo "$1.$2 is not in the archive" >&2; exit 1; }
   cat "$work/entry" >> "$work/list"
   shift 2
@@ -426,74 +426,160 @@ interface MongoNamespace {
 }
 
 /**
- * Reads the string fields at the top level of a BSON document.
+ * Reads the string and boolean fields at the top level of a BSON document.
  *
  * @param document - The document.
- * @returns The values of its string fields, by name.
+ * @returns The values of its string and boolean fields, by name.
  */
-function bsonStrings (document: Buffer): Map<string, string> {
-  const fixedSizes: Record<number, number> = { 0x01: 8, 0x07: 12, 0x08: 1, 0x09: 8, 0x0a: 0, 0x10: 4, 0x11: 8, 0x12: 8, 0x13: 16 }
-  const strings = new Map<string, string>()
+function bsonFields (document: Buffer): Map<string, string | boolean> {
+  const fixedSizes: Record<number, number> = { 0x01: 8, 0x07: 12, 0x09: 8, 0x0a: 0, 0x10: 4, 0x11: 8, 0x12: 8, 0x13: 16 }
+  const fields = new Map<string, string | boolean>()
+  const lengthAt = (at: number, minimum: number): number => {
+    const length = at + 4 <= document.length ? document.readInt32LE(at) : -1
+    if (length < minimum || at + length > document.length) {
+      throw new Error('not a mongodump archive: one of its documents is corrupted')
+    }
+    return length
+  }
   let offset = 4
   while (offset < document.length - 1) {
     const type = document[offset]
     const nameEnd = document.indexOf(0, offset + 1)
+    if (nameEnd < 0) {
+      break
+    }
     const name = document.toString('utf-8', offset + 1, nameEnd)
     offset = nameEnd + 1
     if (type === 0x02) {
-      const length = document.readInt32LE(offset)
-      strings.set(name, document.toString('utf-8', offset + 4, offset + 4 + length - 1))
+      const length = lengthAt(offset, 1)
+      fields.set(name, document.toString('utf-8', offset + 4, offset + 4 + length - 1))
       offset += 4 + length
+    } else if (type === 0x08) {
+      fields.set(name, document[offset] === 1)
+      offset += 1
     } else if (type === 0x03 || type === 0x04) {
-      offset += document.readInt32LE(offset)
+      offset += lengthAt(offset, BSON_MIN_DOCUMENT_BYTES)
     } else if (type === 0x05) {
-      offset += 5 + document.readInt32LE(offset)
+      offset += 5 + lengthAt(offset, 0)
     } else if (type in fixedSizes) {
       offset += fixedSizes[type]
     } else {
       break
     }
   }
-  return strings
+  return fields
 }
 
 /**
- * Reads the collections listed in the prelude of an archive of `mongodump --archive --gzip`: its
- * magic number, a header document, then one document per collection up to a -1 terminator.
+ * Reads the records of an archive of `mongodump --archive --gzip`, after its magic number: BSON
+ * documents, and null for each -1 terminator ending a list of documents.
+ *
+ * @param archive - The archive.
+ * @returns The records, in their order in the archive.
+ */
+async function* mongodumpRecords (archive: AsyncIterable<Buffer>): AsyncGenerator<Buffer | null> {
+  let buffer: Buffer = Buffer.alloc(0)
+  let started = false
+  for await (const chunk of transformed(archive, createGunzip())) {
+    buffer = buffer.length > 0 ? Buffer.concat([buffer, chunk as Buffer]) : chunk as Buffer
+    if (!started) {
+      if (buffer.length < MONGODUMP_MAGIC.length) {
+        continue
+      }
+      if (!buffer.subarray(0, MONGODUMP_MAGIC.length).equals(MONGODUMP_MAGIC)) {
+        throw new Error('not a mongodump archive')
+      }
+      buffer = buffer.subarray(MONGODUMP_MAGIC.length)
+      started = true
+    }
+    while (buffer.length >= 4) {
+      const size = buffer.readInt32LE(0)
+      if (size === MONGODUMP_TERMINATOR) {
+        buffer = buffer.subarray(4)
+        yield null
+        continue
+      }
+      if (size < BSON_MIN_DOCUMENT_BYTES) {
+        throw new Error('not a mongodump archive: one of its documents is corrupted')
+      }
+      if (buffer.length < size) {
+        break
+      }
+      const document = buffer.subarray(0, size)
+      buffer = buffer.subarray(size)
+      yield document
+    }
+  }
+  if (!started || buffer.length > 0) {
+    throw new Error('not a mongodump archive: it ends in the middle of a document')
+  }
+}
+
+/**
+ * Reads the collections listed in the prelude of a mongodump archive: a header document, then one
+ * document per collection up to a terminator.
+ *
+ * @param records - The records of the archive, read up to the end of the prelude.
+ * @returns The collections, with the database they were dumped from.
+ */
+async function readPrelude (records: AsyncIterator<Buffer | null>): Promise<MongoNamespace[]> {
+  const namespaces: MongoNamespace[] = []
+  for (let index = 0; ; index += 1) {
+    const record = await records.next()
+    if (record.done) {
+      throw new Error('not a mongodump archive: no complete list of collections')
+    }
+    if (record.value === null) {
+      return namespaces
+    }
+    const fields = bsonFields(record.value)
+    const db = fields.get('db')
+    const collection = fields.get('collection')
+    if (index > 0 && typeof db === 'string' && typeof collection === 'string') {
+      namespaces.push({ db, collection })
+    }
+  }
+}
+
+/**
+ * Reads the collections listed in the prelude of an archive of `mongodump --archive --gzip`.
  *
  * @param archive - The archive.
  * @returns The collections, with the database they were dumped from.
  */
 async function mongodumpNamespaces (archive: AsyncIterable<Buffer>): Promise<MongoNamespace[]> {
-  const chunks: Buffer[] = []
-  let length = 0
-  for await (const chunk of transformed(archive, createGunzip())) {
-    chunks.push(chunk as Buffer)
-    length += (chunk as Buffer).length
-    const prelude = Buffer.concat(chunks)
-    let offset = MONGODUMP_MAGIC.length
-    const namespaces: MongoNamespace[] = []
-    for (let index = 0; offset + 4 <= prelude.length; index += 1) {
-      const size = prelude.readInt32LE(offset)
-      if (size === MONGODUMP_PRELUDE_END) {
-        return namespaces
+  const records = mongodumpRecords(archive)
+  try {
+    return await readPrelude(records)
+  } finally {
+    await records.return(undefined)
+  }
+}
+
+/**
+ * Reads a whole archive of `mongodump --archive --gzip`, failing unless every collection of its
+ * prelude reaches its end-of-file segment and the archive ends between two segments.
+ *
+ * @param archive - The archive.
+ */
+async function checkMongodump (archive: AsyncIterable<Buffer>): Promise<void> {
+  const records = mongodumpRecords(archive)
+  const pending = new Set((await readPrelude(records)).map(namespace => `${namespace.db}.${namespace.collection}`))
+  let inSegment = false
+  for await (const record of { [Symbol.asyncIterator]: () => records }) {
+    if (record === null) {
+      inSegment = false
+    } else if (!inSegment) {
+      const fields = bsonFields(record)
+      if (fields.get('EOF') === true) {
+        pending.delete(`${String(fields.get('db'))}.${String(fields.get('collection'))}`)
       }
-      if (offset + size > prelude.length) {
-        break
-      }
-      const fields = bsonStrings(prelude.subarray(offset, offset + size))
-      const db = fields.get('db')
-      const collection = fields.get('collection')
-      if (index > 0 && db !== undefined && collection !== undefined) {
-        namespaces.push({ db, collection })
-      }
-      offset += size
-    }
-    if (length > MAX_PRELUDE_BYTES) {
-      break
+      inSegment = true
     }
   }
-  throw new Error('not a mongodump archive: no complete list of collections')
+  if (inSegment || pending.size > 0) {
+    throw new Error(`not a complete mongodump archive: ${pending.size > 0 ? `${[...pending].join(', ')} never ends` : 'its last segment never ends'}`)
+  }
 }
 
 /**
@@ -544,7 +630,7 @@ const mongodb: DatabaseEngine = {
     return head.subarray(0, MONGODUMP_MAGIC.length).equals(MONGODUMP_MAGIC)
   },
   checkNative (_target, archive) {
-    return uncompressWhole(archive)
+    return checkMongodump(archive)
   },
   dumpNative (target) {
     return scriptOutput(target, `${MONGODB_SETUP}auth mongodump --quiet --archive --gzip --db "$DB"`)

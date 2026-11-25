@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import fs from 'node:fs/promises'
 import path from 'node:path'
@@ -355,6 +356,20 @@ export function parseTargets (options: EnvironmentOptions, targets: string[]): E
 }
 
 /**
+ * Gives the canonical form of the path of a file in a backend, the one items are declared with.
+ *
+ * @param filePath - The path, possibly with `./`, a leading `/`, repeated or `..` segments.
+ * @returns The canonical path.
+ */
+export function canonicalBackendPath (filePath: string): string {
+  const canonical = path.posix.normalize(filePath).replace(/^(?:\.?\/)+/, '')
+  if (canonical === '' || canonical === '.' || canonical === '..' || canonical.startsWith('../')) {
+    throw new Error(`${filePath} is not a path inside the backend`)
+  }
+  return canonical
+}
+
+/**
  * Tells whether some tables of a database, or key groups of a Redis database, can be transferred
  * alone in a direction: never in a native archive pushed, nor in a native mariadb archive.
  *
@@ -662,7 +677,8 @@ export class Environment {
 
   /**
    * Restores a local database from an archive of the engine's own tools, read whole first so that an
-   * archive of another engine, truncated or corrupted, leaves the database untouched.
+   * archive of another engine, truncated or corrupted, leaves the database untouched; the bytes checked
+   * are those restored, from a private copy of the archive.
    *
    * @param item - The database item.
    * @param localPath - The archive.
@@ -671,20 +687,26 @@ export class Environment {
    */
   private async restoreNative (item: Extract<EnvironmentItem, { kind: 'database' }>, localPath: string, tables: string[] | null): Promise<TransferResult> {
     const engine = databaseEngine(item.engine)
-    if (!engine.isNativeHead(await readHead(localPath, engine.nativeGzipped))) {
-      throw new Error(`${item.path} is not a native ${item.engine} archive`)
-    }
-    await engine.checkNative(item, createReadStream(localPath)).catch((error: unknown) => {
-      throw new Error(`${item.path} is not a complete native ${item.engine} archive: ${error instanceof Error ? error.message : String(error)}`)
-    })
+    const copyPath = `${localPath}.${randomUUID()}.restore`
+    await fs.copyFile(localPath, copyPath)
+    try {
+      if (!engine.isNativeHead(await readHead(copyPath, engine.nativeGzipped))) {
+        throw new Error(`${item.path} is not a native ${item.engine} archive`)
+      }
+      await engine.checkNative(item, createReadStream(copyPath)).catch((error: unknown) => {
+        throw new Error(`${item.path} is not a complete native ${item.engine} archive: ${error instanceof Error ? error.message : String(error)}`)
+      })
 
-    if (tables === null) {
-      await engine.reset(item)
-    } else {
-      assertKnownTables(tables, await engine.listTables(item), databaseNameOf(item))
+      if (tables === null) {
+        await engine.reset(item)
+      } else {
+        assertKnownTables(tables, await engine.listTables(item), databaseNameOf(item))
+      }
+      await engine.restoreNative(item, () => createReadStream(copyPath), tables)
+      await engine.finish(item)
+    } finally {
+      await fs.rm(copyPath, { force: true })
     }
-    await engine.restoreNative(item, () => createReadStream(localPath), tables)
-    await engine.finish(item)
 
     return { done: true, detail: tables === null ? `database restored in ${databaseNameOf(item)}` : `tables restored: ${tables.join(', ')}` }
   }

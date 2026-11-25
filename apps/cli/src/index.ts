@@ -23,6 +23,7 @@ import {
   readEnvironmentOptions,
   redisDatabaseName,
   SHARED_CONFIG_PATH,
+  canonicalBackendPath,
   sharedConfigItem,
   transfersParts,
   type TransferDirection,
@@ -112,13 +113,13 @@ async function closeBackends (backends: Map<string, EnvironmentBackend>): Promis
 /**
  * Runs a task on a file of a backend of the environment, when the groups of the item stored there,
  * or else of the backend, let the developer transfer in the direction of the task, then closes the
- * backends.
+ * backends. The task receives the path in its canonical form, the one the groups were checked for.
  * @param name The name of the backend, the default one when missing.
  * @param filePath The path of the file in the backend.
  * @param direction Whether the task reads the file, or writes or deletes it.
- * @param task Uses the backend.
+ * @param task Uses the backend on the canonical path.
  */
-async function withBackend (name: string | undefined, filePath: string, direction: TransferDirection, task: (backend: EnvironmentBackend) => Promise<void>): Promise<void> {
+async function withBackend (name: string | undefined, filePath: string, direction: TransferDirection, task: (backend: EnvironmentBackend, filePath: string) => Promise<void>): Promise<void> {
   const { options, backends, environment } = await openEnvironment(resolveDefaultConfigPaths(), false)
   try {
     const slug = name ?? options.defaultBackend!
@@ -127,12 +128,13 @@ async function withBackend (name: string | undefined, filePath: string, directio
     if (!backend || !settings) {
       throw new Error(`no backend named ${slug} in environment.backends (${[...backends.keys()].join(', ')})`)
     }
-    const item = options.items.find(candidate => candidate.path === filePath && candidate.backend === slug)
+    const canonical = canonicalBackendPath(filePath)
+    const item = options.items.find(candidate => candidate.path === canonical && candidate.backend === slug)
     const refusal = await environment.refusal(item ?? settings, direction)
     if (refusal !== null) {
-      throw new Error(`${filePath} on ${slug}: ${refusal}`)
+      throw new Error(`${canonical} on ${slug}: ${refusal}`)
     }
-    await task(backend)
+    await task(backend, canonical)
   } finally {
     await closeBackends(backends)
   }
@@ -472,8 +474,8 @@ async function main (): Promise<void> {
     .command('pull <path> [destination]')
     .description('Download a file; `-` as destination writes it to the standard output')
     .option('-b, --backend <name>', 'backend of environment.backends, the default one when omitted')
-    .action(async (filePath: string, destination: string | undefined, flags: { backend?: string }) => {
-      await withBackend(flags.backend, filePath, 'pull', async backend => {
+    .action(async (given: string, destination: string | undefined, flags: { backend?: string }) => {
+      await withBackend(flags.backend, given, 'pull', async (backend, filePath) => {
         const content = await backend.download(filePath)
         if (!content) {
           throw new Error(`no such file: ${filePath}`)
@@ -500,8 +502,8 @@ async function main (): Promise<void> {
     .description('Upload a file, replacing the stored one')
     .option('-b, --backend <name>', 'backend of environment.backends, the default one when omitted')
     .option('-t, --type <mediaType>', 'media type of the file, guessed from its name when omitted')
-    .action(async (filePath: string, localFile: string, flags: { backend?: string, type?: string }) => {
-      await withBackend(flags.backend, filePath, 'push', async backend => {
+    .action(async (given: string, localFile: string, flags: { backend?: string, type?: string }) => {
+      await withBackend(flags.backend, given, 'push', async (backend, filePath) => {
         await backend.upload(filePath, path.resolve(localFile), flags.type ?? mediaTypeOf(filePath))
         logger.info('CLI', 'Push', `${localFile} -> ${filePath}`)
       })
@@ -511,8 +513,8 @@ async function main (): Promise<void> {
     .command('rm <path>')
     .description('Delete a file')
     .option('-b, --backend <name>', 'backend of environment.backends, the default one when omitted')
-    .action(async (filePath: string, flags: { backend?: string }) => {
-      await withBackend(flags.backend, filePath, 'push', async backend => {
+    .action(async (given: string, flags: { backend?: string }) => {
+      await withBackend(flags.backend, given, 'push', async (backend, filePath) => {
         await backend.remove(filePath)
         logger.info('CLI', 'Remove', filePath)
       })

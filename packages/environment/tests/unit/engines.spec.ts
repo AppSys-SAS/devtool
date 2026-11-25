@@ -2,7 +2,7 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { Readable } from 'node:stream'
-import { gzipSync } from 'node:zlib'
+import { gunzipSync, gzipSync } from 'node:zlib'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BackendContext, EnvironmentBackend } from '../../src/backends/backend.js'
 import { databaseEngine, splitPostgresName } from '../../src/engines.js'
@@ -45,12 +45,15 @@ describe('splitPostgresName', () => {
 })
 
 /**
- * Builds a BSON document of string fields.
+ * Builds a BSON document of string and boolean fields.
  * @param fields - The fields.
  * @returns The document.
  */
-function bsonDocument (fields: Record<string, string>): Buffer {
+function bsonDocument (fields: Record<string, string | boolean>): Buffer {
   const elements = Object.entries(fields).map(([name, value]) => {
+    if (typeof value === 'boolean') {
+      return Buffer.concat([Buffer.from([0x08]), Buffer.from(`${name}\0`), Buffer.from([value ? 1 : 0])])
+    }
     const text = Buffer.from(`${value}\0`)
     const length = Buffer.alloc(4)
     length.writeInt32LE(text.length)
@@ -61,6 +64,23 @@ function bsonDocument (fields: Record<string, string>): Buffer {
   return Buffer.concat([size, ...elements, Buffer.from([0])])
 }
 
+const TERMINATOR = Buffer.from([0xff, 0xff, 0xff, 0xff])
+
+/**
+ * Builds the uncompressed beginning of a `mongodump --archive` archive listing collections of a database.
+ * @param db - The database the collections were dumped from.
+ * @param collections - The collections.
+ * @returns The magic number, the header and the list of collections.
+ */
+function mongodumpPreludeBytes (db: string, collections: string[]): Buffer {
+  return Buffer.concat([
+    Buffer.from([0x6d, 0xe2, 0x99, 0x81]),
+    bsonDocument({ version: '0.1', server_version: '7.0.0' }),
+    ...collections.map(collection => bsonDocument({ db, collection, metadata: '{}' })),
+    TERMINATOR
+  ])
+}
+
 /**
  * Builds the beginning of a `mongodump --archive --gzip` archive listing collections of a database.
  * @param db - The database the collections were dumped from.
@@ -68,13 +88,22 @@ function bsonDocument (fields: Record<string, string>): Buffer {
  * @returns The gzip-compressed prelude.
  */
 function mongodumpPrelude (db: string, collections: string[]): Buffer {
-  const terminator = Buffer.alloc(4)
-  terminator.writeInt32LE(-1)
+  return gzipSync(mongodumpPreludeBytes(db, collections))
+}
+
+/**
+ * Builds a whole `mongodump --archive --gzip` archive, one document per collection.
+ * @param db - The database the collections were dumped from.
+ * @param collections - The collections.
+ * @returns The gzip-compressed archive.
+ */
+function mongodumpArchive (db: string, collections: string[]): Buffer {
   return gzipSync(Buffer.concat([
-    Buffer.from([0x6d, 0xe2, 0x99, 0x81]),
-    bsonDocument({ version: '0.1', server_version: '7.0.0' }),
-    ...collections.map(collection => bsonDocument({ db, collection, metadata: '{}' })),
-    terminator
+    mongodumpPreludeBytes(db, collections),
+    ...collections.flatMap(collection => [
+      bsonDocument({ db, collection, EOF: false }), bsonDocument({ value: collection }), TERMINATOR,
+      bsonDocument({ db, collection, EOF: true }), TERMINATOR
+    ])
   ]))
 }
 
@@ -92,6 +121,28 @@ describe('database targets', () => {
     expect(named.slice(-2)).toEqual(['--nsInclude', 'production.users'])
     expect(unnamed.slice(0, 3)).toEqual(['exec', '-i', 'mongo'])
     expect(unnamed[unnamed.length - 1]).toBe('sh')
+  })
+
+  it('accepts a whole mongodb archive and refuses a complete gzip stream holding an incomplete one', async () => {
+    const check = async (archive: Buffer): Promise<void> => databaseEngine('mongodb').checkNative({ container: 'mongo', database: null }, Readable.from([archive]))
+    await expect(check(mongodumpArchive('production', ['users', 'orders']))).resolves.toBeUndefined()
+    await expect(check(gzipSync(Buffer.from([0x6d, 0xe2, 0x99, 0x81])))).rejects.toThrow('no complete list of collections')
+    await expect(check(mongodumpPrelude('production', ['users']))).rejects.toThrow('production.users never ends')
+    const whole = gunzipSync(mongodumpArchive('production', ['users']))
+    await expect(check(gzipSync(whole.subarray(0, whole.length - 10)))).rejects.toThrow('not a mongodump archive: it ends in the middle of a document')
+    expect(await dockerCalls()).toEqual([])
+  })
+
+  it('refuses a mongodb archive whose list of collections is corrupted, before running anything', async () => {
+    const header = Buffer.concat([Buffer.from([0x6d, 0xe2, 0x99, 0x81]), bsonDocument({ version: '0.1' })])
+    const zeroSize = gzipSync(Buffer.concat([header, Buffer.alloc(4)]))
+    const badLength = bsonDocument({ db: 'production', collection: 'users' })
+    badLength.writeInt32LE(1_000_000, 4 + 1 + 'db'.length + 1)
+    const outOfDocument = gzipSync(Buffer.concat([header, badLength]))
+    for (const archive of [zeroSize, outOfDocument]) {
+      await expect(databaseEngine('mongodb').restoreNative({ container: 'mongo', database: 'catalog' }, () => Readable.from([archive]), ['users'])).rejects.toThrow('not a mongodump archive')
+    }
+    expect(await dockerCalls()).toEqual([])
   })
 
   it('refuses to restore mongodb collections the archive does not hold, before running anything', async () => {
@@ -112,6 +163,7 @@ describe('database targets', () => {
     const script = call.find(arg => arg.includes('pg_restore'))
     expect(script).toContain('is not in the archive')
     expect(script).toContain('pg_restore -l -n "$1" -t "$2"')
+    expect(script).toContain(`grep -E '^[0-9]+; [0-9]+ [0-9]+ TABLE DATA '`)
     expect(script).toContain('pg_restore --data-only -L')
   })
 
@@ -169,6 +221,22 @@ describe('database targets', () => {
     const environment = new Environment(new Map([['team', backend]]), { folder, backends: [], defaultBackend: 'team', items: [item], configFiles: [], autoPulls: [], s3: null }, context)
 
     await expect(environment.pull({ item, tables: null })).rejects.toThrow(`api/db.dump is not a native ${engine} archive`)
+    expect(await dockerCalls()).toEqual([])
+  })
+
+  it('leaves a mongodb database untouched when the pulled archive is complete gzip but an incomplete mongodump', async () => {
+    const item: EnvironmentItem = { kind: 'database', path: 'api/db.archive.gz', backend: 'team', encryption: null, groups: { pull: null, push: null }, engine: 'mongodb', container: 'mongo', database: 'shop', format: 'native' }
+    const backend: EnvironmentBackend = {
+      list: async () => [],
+      download: async () => Readable.from([mongodumpPrelude('production', ['users'])]),
+      upload: async () => undefined,
+      remove: async () => undefined,
+      close: async () => undefined
+    }
+    const context: BackendContext = { resolve: async text => text, askSecret: async () => '', cacheDir: folder, configFolder: folder, auth: null }
+    const environment = new Environment(new Map([['team', backend]]), { folder, backends: [], defaultBackend: 'team', items: [item], configFiles: [], autoPulls: [], s3: null }, context)
+
+    await expect(environment.pull({ item, tables: null })).rejects.toThrow('api/db.archive.gz is not a complete native mongodb archive')
     expect(await dockerCalls()).toEqual([])
   })
 })

@@ -1,7 +1,7 @@
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { type EnvironmentItem, type EnvironmentOptions, overwritesLocalData, parseTargets, readEnvironmentOptions, SHARED_CONFIG_PATH, transfersParts } from '../../src/environment.js'
+import { canonicalBackendPath, type EnvironmentItem, type EnvironmentOptions, overwritesLocalData, parseTargets, readEnvironmentOptions, SHARED_CONFIG_PATH, transfersParts } from '../../src/environment.js'
 
 const open = { groups: { pull: null, push: null } }
 const fileItem: EnvironmentItem = { kind: 'file', path: 'api/config.yml', backend: null, encryption: null, ...open, ignore: null }
@@ -555,6 +555,20 @@ describe('readEnvironmentOptions', () => {
       expect(() => readEnvironmentOptions({ encryption: [{ paths: ['*'] }] })).toThrow('environment.encryption[0] needs paths and must be')
       expect(() => readEnvironmentOptions({ files: [{ path: 'api/config.yml', encryption: { prompt: 'yes' } }] })).toThrow('invalid encryption of api/config.yml')
     })
+  })
+})
+
+describe('canonicalBackendPath', () => {
+  it('gives every spelling of a path the form items are declared with', () => {
+    for (const spelling of ['shop/orders.gz', './shop/orders.gz', '/shop/orders.gz', 'shop//orders.gz', 'shop/./orders.gz', 'tmp/../shop/orders.gz']) {
+      expect(canonicalBackendPath(spelling)).toBe('shop/orders.gz')
+    }
+  })
+
+  it('refuses a path outside the backend or naming its root', () => {
+    for (const spelling of ['', '.', './', '..', '../shop/orders.gz', 'shop/../../orders.gz']) {
+      expect(() => canonicalBackendPath(spelling)).toThrow('is not a path inside the backend')
+    }
   })
 })
 
