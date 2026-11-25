@@ -34,6 +34,7 @@ import pkg from '../package.json' with { type: 'json' }
 import { agentSkillFolders, distinctFolders, foreignSkills, type SkillInstallMode, syncSkills, wasSynced } from './skills.js'
 
 const UI_PATH = fileURLToPath(new URL(process.env.DEVTOOL_UI_FOLDER ?? '../../ui/dist', import.meta.url))
+const MAX_PORT = 65535
 
 /**
  * Reads the identity provider of the configuration of the devtool installation.
@@ -331,14 +332,26 @@ async function syncAgentSkills (flags: { target?: string[], copy?: boolean, link
   }
 }
 
+/**
+ * Reads a port given on the command line.
+ * @param input The value given.
+ * @param label What the port is for, in the error message.
+ * @returns The port, between 1 and 65535.
+ */
 function parsePort (input: string, label: string): number {
   const parsed = Number(input)
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    throw new Error(`Invalid ${label}: ${input}`)
+  if (!Number.isInteger(parsed) || parsed <= 0 || parsed > MAX_PORT) {
+    throw new Error(`Invalid ${label}: ${input}, must be between 1 and ${MAX_PORT}`)
   }
   return parsed
 }
 
+/**
+ * Reads a port given on the command line, when one is.
+ * @param input The value given, undefined when the option is left out.
+ * @param label What the port is for, in the error message.
+ * @returns The port, undefined when none is given.
+ */
 function parseOptionalPort (input: string | undefined, label: string): number | undefined {
   if (typeof input !== 'string') {
     return undefined
