@@ -1521,17 +1521,17 @@ export class DevtoolConfigure {
   }
 
   /**
-   * Reads where the page of a directory asks for the inputs of a command, `dialog` or `inline`.
+   * Reads where the page of a directory asks for the inputs of a command, `dialog`, `inline` or `inlineExpanded`.
    * @param slug Names the setting in warnings.
    * @param value The raw setting.
    * @returns The form, null when the setting is missing or invalid.
    */
   private readForm (slug: string, value: unknown): CommandForm | null {
-    if (value === 'dialog' || value === 'inline') {
+    if (value === 'dialog' || value === 'inline' || value === 'inlineExpanded') {
       return value
     }
     if (value !== undefined) {
-      this.addWarning(slug, 'must be dialog or inline')
+      this.addWarning(slug, 'must be dialog, inline or inlineExpanded')
     }
     return null
   }

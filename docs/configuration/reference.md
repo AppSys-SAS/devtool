@@ -115,7 +115,7 @@ The schema is also published with the npm package, as `@appsys-sas/devtool/dist/
 | `commands.<slug>.detached` | boolean | `false` | [Commands and scripts](/configuration/commands) |
 | `commands.<slug>.prompt` | boolean | `false` | [Commands and scripts](/configuration/commands) |
 | `commands.<slug>.startWithSection` | boolean | `false` | [Commands and scripts](/configuration/commands) |
-| `commands.<slug>.form` | `dialog`, `inline` | `dialog` | [Commands and scripts](/configuration/commands) |
+| `commands.<slug>.form` | `dialog`, `inline`, `inlineExpanded` | `dialog` | [Commands and scripts](/configuration/commands) |
 | `commands.<slug>.notifications` | boolean | project | [Commands and scripts](/configuration/commands) |
 | `commands.<slug>.opAccount`, `.unless`, `.answers` | | | [Automation](/configuration/automation) |
 | `commands.<slug>.mcp` | rules | `adt.mcp.commands` | [Agent permissions](/configuration/mcp) |
