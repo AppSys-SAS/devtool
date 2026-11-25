@@ -97,6 +97,12 @@ pull request that bumps that version in every `package.json` and writes the chan
 - each package is signed with an npm provenance statement linking it to the workflow run, which needs
   the `repository` field of its `package.json` to point at this repository.
 
+release-please acts as a GitHub App of the organization, not with the default `GITHUB_TOKEN`: GitHub
+starts no workflow for a pull request opened with that token, so the release pull request would never get
+its CI checks. The App needs the repository permissions "Contents" and "Pull requests" (read and write)
+and must be installed on this repository; the workflow reads its Client ID from the `RELEASE_APP_CLIENT_ID`
+repository variable and its private key from the `RELEASE_APP_PRIVATE_KEY` repository secret.
+
 The job reads an npm token from the `NPM_TOKEN` repository secret: a granular access token of an npm
 account that can publish to the `@appsys` scope, with read and write permission on its packages and
 "bypass two-factor authentication" enabled. Once the packages exist, they can move to
