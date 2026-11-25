@@ -35,6 +35,7 @@ in one local web interface.
 - [Install](#install)
 - [Quick start](#quick-start)
 - [Documentation](#documentation)
+- [Built with](#built-with)
 - [Contributing](#contributing)
 - [Security](#security)
 - [License](#license)
@@ -114,6 +115,21 @@ builds these files from forms.
 | [Environment](https://appsys-sas.github.io/devtool/configuration/environment) | share files and databases with the team |
 | [Agents](https://appsys-sas.github.io/devtool/agents/mcp-server) | connect a coding agent and decide what it may do |
 | [CLI](https://appsys-sas.github.io/devtool/reference/cli) | every `devtool` command |
+
+## Built with
+
+The devtool stands on the shoulders of these open-source projects. Thanks to their authors and
+contributors.
+
+| Area | Projects |
+|---|---|
+| Interface | [Vue](https://vuejs.org), [Vue Router](https://router.vuejs.org), [VueUse](https://vueuse.org), [Vite](https://vite.dev), [Tailwind CSS](https://tailwindcss.com), [Reka UI](https://reka-ui.com), [shadcn-vue](https://www.shadcn-vue.com), [Lucide](https://lucide.dev), [Iconify](https://iconify.design) |
+| Terminals and editor | [xterm.js](https://xtermjs.org), [node-pty](https://github.com/microsoft/node-pty), [Monaco Editor](https://microsoft.github.io/monaco-editor), [markdown-it](https://github.com/markdown-it/markdown-it), [DOMPurify](https://github.com/cure53/DOMPurify) |
+| Server | [ws](https://github.com/websockets/ws), [YAML](https://eemeli.org/yaml), [Croner](https://croner.56k.guru), [dns-packet](https://github.com/mafintosh/dns-packet) |
+| Agents | [Model Context Protocol TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk), [Zod](https://zod.dev) |
+| Environment | [AWS SDK for JavaScript](https://github.com/aws/aws-sdk-js-v3), [ioredis](https://github.com/redis/ioredis), [ssh2-sftp-client](https://github.com/theophilusx/ssh2-sftp-client), [xmldom](https://github.com/xmldom/xmldom), [toml-patch](https://github.com/DecimalTurn/toml-patch) |
+| Sign-in and CLI | [oauth4webapi](https://github.com/panva/oauth4webapi), [Commander.js](https://github.com/tj/commander.js), [Inquirer](https://github.com/SBoudrias/Inquirer.js) |
+| Documentation | [VitePress](https://vitepress.dev), [Ajv](https://ajv.js.org) |
 
 ## Contributing
 

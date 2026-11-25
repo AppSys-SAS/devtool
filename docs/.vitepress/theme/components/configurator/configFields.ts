@@ -148,6 +148,7 @@ export const FILES_FIELDS: FieldDefinition[] = [
   { path: ['name'], label: 'Name' },
   { path: ['path'], label: 'Folder' },
   { path: ['type'], label: 'Type', type: 'select', options: ['files', 'agentSkills'], defaultValue: 'files' },
+  { path: ['showHidden'], label: 'Show hidden files', type: 'checkbox', hint: 'Names starting with a dot, .git aside.' },
   { path: ['mcpSkills'], label: 'Skills served over MCP', type: 'list', placeholder: 'review, deploy-*', hint: 'agentSkills only.' }
 ]
 

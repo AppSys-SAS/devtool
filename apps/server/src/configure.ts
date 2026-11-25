@@ -1726,10 +1726,25 @@ export class DevtoolConfigure {
         commands: commands.filter(command => command in directory.extras),
         mcp: this.readMcpRules(`${slug}[${filesSlug}].mcp`, entry.mcp, inherited, ['projects', directory.slug, 'files', filesSlug]),
         mcpTarget: this.settingTarget(['projects', directory.slug, 'files', filesSlug, 'mcp']),
-        mcpSkills: this.readMcpSkills(`${slug}[${filesSlug}].mcpSkills`, entry.mcpSkills, type)
+        mcpSkills: this.readMcpSkills(`${slug}[${filesSlug}].mcpSkills`, entry.mcpSkills, type),
+        showHidden: this.readFlag(`${slug}[${filesSlug}].showHidden`, entry.showHidden, false)
       }
     }
     return files
+  }
+
+  /**
+   * Reads a setting being true or false, warning about any other value.
+   * @param slug Names the setting in warnings.
+   * @param value The raw setting.
+   * @param fallback The value when the setting is missing or invalid.
+   * @returns The value.
+   */
+  private readFlag (slug: string, value: unknown, fallback: boolean): boolean {
+    if (value !== undefined && typeof value !== 'boolean') {
+      this.addWarning(slug, 'must be true or false')
+    }
+    return typeof value === 'boolean' ? value : fallback
   }
 
   /**

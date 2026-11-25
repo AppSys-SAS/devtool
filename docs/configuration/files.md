@@ -23,6 +23,9 @@ projects:
 `config` is the slug of the folder, `path` is relative to the project. The folder may not exist yet:
 the devtool still lists it, and `restore` (below) can bring it back.
 
+Files and folders whose name starts with a dot (`.env`, `.github`) are hidden. `showHidden: true` shows
+them, for you and for the agents; `.git` stays hidden in any case.
+
 The page of a folder lists its files and edits them. A Markdown file (`.md`, `.markdown`) shows a
 **Preview** button that renders it next to the editor; its YAML front matter is left out of the
 preview. The preview is off until you turn it on.
@@ -136,12 +139,14 @@ projects:
 | `restore` | command slug | | Command of the project restoring the folder when it is missing. |
 | `commands` | list of command slugs | | Commands of the project shown on the page. |
 | `mcp` | level or levels | inherited | What agents may do; `keys` is allowed. |
+| `showHidden` | boolean | `false` | Show the files and folders whose name starts with a dot (`.env`, `.github`...). `.git` is never shown. |
 | `mcpSkills` | `true` or list of globs | `false` | `agentSkills` only: [serve its skills over MCP](/agents/skills#serve-them-over-mcp). |
 
 ### Warnings
 
 - `is replaced by default: { action: files:<slug> }`: a folder of files is named `default`.
 - `type: must be files or agentSkills`: the folder is dropped.
+- `showHidden: must be true or false`: hidden files stay hidden.
 - `mcpSkills: only applies to files of type agentSkills`,
   `mcpSkills: must be true or a list of skill folders, such as [ review, "deploy-*" ]`: no skill is served.
 - `restore: must name a command of the directory`.
