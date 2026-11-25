@@ -23,7 +23,7 @@ environment synchronization):
 
 | File | Holds | Shared |
 |---|---|---|
-| `config.yml` | The configuration of the team: sections, projects, environment, agents. | Yes, often through a [backend](/configuration/backends) of the environment |
+| `config.yml` | The configuration of the team: sections, projects, environment, agents. | Yes, often through a [backend](/configuration/environment/backends) of the environment |
 | `config.local.yml` | Your own settings and overrides: `workspace`, extra DNS names, a different port. | Never |
 
 A missing file is skipped, so a fresh machine can start with `config.local.yml` alone.
@@ -237,8 +237,8 @@ nothing. The schema catches those, in your editor and in the configurator.
 | `integrations` | map | | Web tools of the whole devtool: see [Integrations](/configuration/integrations). |
 | `loadBalancers` | map | | Certificates by domain: see [Certificates](/configuration/certificates). |
 | `passthrough` | list | | See [Network and DNS](/configuration/network). |
-| `dns` | map | | See [Network and DNS](/configuration/network#local-dns). |
-| `environment` | map | | See [Environment](/configuration/environment), [Backends](/configuration/backends) and [Encryption](/configuration/encryption). |
+| `dns` | map | | See [Network and DNS](/configuration/network#the-local-dns). |
+| `environment` | map | | See [Environment](/configuration/environment/), [Backends](/configuration/environment/backends) and [Encryption](/configuration/environment/encryption). |
 | `auth` | map | | See [Sign-in](/configuration/auth). |
 
 ### Errors when loading

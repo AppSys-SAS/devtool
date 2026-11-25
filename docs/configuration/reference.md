@@ -31,7 +31,7 @@ The schema is also published with the npm package, as `@appsys/devtool-config/sc
 | `loadBalancers` | map | | [Certificates](/configuration/certificates) |
 | `passthrough` | list | | [Network and DNS](/configuration/network) |
 | `dns` | map | | [Network and DNS](/configuration/network) |
-| `environment` | map | | [Environment](/configuration/environment) |
+| `environment` | map | | [Environment](/configuration/environment/) |
 | `auth` | map | | [Sign-in](/configuration/auth) |
 
 ## adt
@@ -188,30 +188,30 @@ Also under `sections.<slug>.integrations` and `projects.<slug>.integrations`.
 
 | Key | Type | Default | Page |
 |---|---|---|---|
-| `environment.folder` | path | parent of the configuration folder | [Environment](/configuration/environment#the-environment-folder) |
-| `environment.backends.<name>.type` | `cdn`, `s3`, `sftp`, `git`, `scripts` | required | [Backends](/configuration/backends) |
-| `environment.backends.<name>.default` | boolean | `false` | [Backends](/configuration/backends#the-default-backend) |
-| `environment.backends.<name>.encryption` | `{ key }`, `{ password }`, `{ prompt: true }` | none | [Encryption](/configuration/encryption) |
-| `environment.backends.<name>.url` (cdn) | string | required | [CDN](/configuration/cdn) |
-| `environment.backends.<name>.bucket`, `.prefix`, `.endpoint`, `.region`, `.accessKeyId`, `.secretAccessKey`, `.pathStyle` (s3) | | `bucket` required | [Backends](/configuration/backends#s3) |
-| `environment.backends.<name>.host`, `.port`, `.username`, `.path`, `.privateKey`, `.passphrase`, `.password` (sftp) | | `host`, `username` required | [Backends](/configuration/backends#sftp) |
-| `environment.backends.<name>.url`, `.branch`, `.path` (git) | | `url` required | [Backends](/configuration/backends#git) |
-| `environment.backends.<name>.list`, `.download`, `.upload`, `.remove`, `.cwd`, `.env` (scripts) | | commands required | [Backends](/configuration/backends#scripts) |
-| `environment.encryption[].paths` | list of globs | required | [Encryption](/configuration/encryption#encrypt-files-by-path) |
-| `environment.encryption[].key`, `.password`, `.prompt` | | one required | [Encryption](/configuration/encryption#encrypt-files-by-path) |
+| `environment.folder` | path | parent of the configuration folder | [Environment](/configuration/environment/#the-environment-folder) |
+| `environment.backends.<name>.type` | `cdn`, `s3`, `sftp`, `git`, `scripts` | required | [Backends](/configuration/environment/backends) |
+| `environment.backends.<name>.default` | boolean | `false` | [Backends](/configuration/environment/backends#the-default-backend) |
+| `environment.backends.<name>.encryption` | `{ key }`, `{ password }`, `{ prompt: true }` | none | [Encryption](/configuration/environment/encryption) |
+| `environment.backends.<name>.url` (cdn) | string | required | [CDN](/configuration/environment/cdn) |
+| `environment.backends.<name>.bucket`, `.prefix`, `.endpoint`, `.region`, `.accessKeyId`, `.secretAccessKey`, `.pathStyle` (s3) | | `bucket` required | [S3](/configuration/environment/s3) |
+| `environment.backends.<name>.host`, `.port`, `.username`, `.path`, `.privateKey`, `.passphrase`, `.password` (sftp) | | `host`, `username` required | [SFTP](/configuration/environment/sftp) |
+| `environment.backends.<name>.url`, `.branch`, `.path` (git) | | `url` required | [Git](/configuration/environment/git) |
+| `environment.backends.<name>.list`, `.download`, `.upload`, `.remove`, `.cwd`, `.env` (scripts) | | commands required | [Scripts](/configuration/environment/scripts) |
+| `environment.encryption[].paths` | list of globs | required | [Encryption](/configuration/environment/encryption#encrypt-files-by-path) |
+| `environment.encryption[].key`, `.password`, `.prompt` | | one required | [Encryption](/configuration/environment/encryption#encrypt-files-by-path) |
 | `environment.mcp` | rules | `adt.mcp.default` | [Agent permissions](/configuration/mcp) |
-| `environment.files[]` | path or map | none | [Environment](/configuration/environment#files) |
-| `environment.files[].path`, `.display`, `.local`, `.sync` | | `true` | [Environment](/configuration/environment#files) |
-| `environment.files[].ignore` | list of key paths | none | [Environment](/configuration/environment#ignored-keys) |
-| `environment.databases[].path`, `.engine`, `.container` | | required | [Environment](/configuration/environment#databases) |
-| `environment.buckets[].path`, `.bucket` | | required | [Environment](/configuration/environment#buckets-and-s3) |
-| `environment.redis[].path`, `.url` | | required | [Environment](/configuration/environment#redis) |
-| `environment.<list>[].pull.cron`, `.pull.startup` | string, boolean | none | [Environment](/configuration/environment#pull-on-a-schedule) |
-| `environment.<list>[].backend` | string | the default backend | [Backends](/configuration/backends#choose-the-backend-of-an-item) |
-| `environment.<list>[].encryption` | `{ key }`, `{ password }`, `{ prompt: true }` | `environment.encryption` | [Encryption](/configuration/encryption) |
+| `environment.files[]` | path or map | none | [Environment](/configuration/environment/#files) |
+| `environment.files[].path`, `.display`, `.local`, `.sync` | | `true` | [Environment](/configuration/environment/#files) |
+| `environment.files[].ignore` | list of key paths | none | [Environment](/configuration/environment/#ignored-keys) |
+| `environment.databases[].path`, `.engine`, `.container` | | required | [Environment](/configuration/environment/#databases) |
+| `environment.buckets[].path`, `.bucket` | | required | [Environment](/configuration/environment/#buckets-and-s3) |
+| `environment.redis[].path`, `.url` | | required | [Environment](/configuration/environment/#redis) |
+| `environment.<list>[].pull.cron`, `.pull.startup` | string, boolean | none | [Environment](/configuration/environment/#pull-on-a-schedule) |
+| `environment.<list>[].backend` | string | the default backend | [Backends](/configuration/environment/backends#choose-the-backend-of-an-item) |
+| `environment.<list>[].encryption` | `{ key }`, `{ password }`, `{ prompt: true }` | `environment.encryption` | [Encryption](/configuration/environment/encryption) |
 | `environment.<list>[].mcp` | rules | `environment.mcp` | [Agent permissions](/configuration/mcp) |
-| `environment.s3.endpoint`, `.accessKeyId`, `.secretAccessKey` | string | required | [Environment](/configuration/environment#buckets-and-s3) |
-| `environment.s3.region` | string | `us-east-1` | [Environment](/configuration/environment#buckets-and-s3) |
+| `environment.s3.endpoint`, `.accessKeyId`, `.secretAccessKey` | string | required | [Environment](/configuration/environment/#buckets-and-s3) |
+| `environment.s3.region` | string | `us-east-1` | [Environment](/configuration/environment/#buckets-and-s3) |
 
 ## auth
 

@@ -109,7 +109,7 @@ If a setting is wrong, the devtool keeps going and lists a warning on the Server
 
 `web.example.dev` must point to your machine and reach the load balancer. Two pieces do that:
 
-- the [local DNS](/configuration/network#local-dns) answers your names with your address;
+- the [local DNS](/configuration/network#the-local-dns) answers your names with your address;
 - the load balancer listens on port `6731`, and `devtool proxy` forwards the HTTPS port `443` to it.
 
 Read [Services](/configuration/services) and [Network and DNS](/configuration/network) to set them up,
@@ -118,7 +118,7 @@ and [Certificates](/configuration/certificates) to serve HTTPS.
 ## Share the environment with your team
 
 When a team shares configuration files and data, a new developer adds where the team stores them, its
-default [backend](/configuration/backends), to their personal file. With a CDN, the identity provider
+default [backend](/configuration/environment/backends), to their personal file. With a CDN, the identity provider
 of the team comes along:
 
 ```yaml [config.local.yml]
@@ -141,8 +141,8 @@ devtool server
 
 `devtool env pull` downloads the shared `config.yml` first, from the default backend, so the team keeps
 one copy of it. The backend can also be an S3 bucket, an SFTP server, a git repository or your own
-scripts, with no sign-in needed. Read [Environment](/configuration/environment),
-[Backends](/configuration/backends), [Sign-in](/configuration/auth) and [CDN](/configuration/cdn) to set
+scripts, with no sign-in needed. Read [Environment](/configuration/environment/),
+[Backends](/configuration/environment/backends), [Sign-in](/configuration/auth) and [CDN](/configuration/environment/cdn) to set
 this up.
 
 ## Next steps

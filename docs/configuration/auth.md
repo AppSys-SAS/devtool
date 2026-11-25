@@ -5,7 +5,7 @@ description: Sign developers in once with your identity provider, for the CDN ba
 # Sign-in (auth)
 
 The `auth` section names the identity provider your team signs in with. You sign in once, and the
-devtool reuses that session everywhere it needs to know who you are: the [CDN](/configuration/cdn)
+devtool reuses that session everywhere it needs to know who you are: the [CDN](/configuration/environment/cdn)
 backends of the environment get your access token, and your commands can read your token, user name and groups with
 [value blocks](#values-of-the-signed-in-developer).
 

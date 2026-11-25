@@ -67,7 +67,7 @@ it needs an `auth` section. `logout` forgets the session of the identity provide
 
 ## devtool env
 
-Synchronizes the [environment](/configuration/environment) with its [backends](/configuration/backends).
+Synchronizes the [environment](/configuration/environment/) with its [backends](/configuration/environment/backends).
 It needs at least one backend in `environment.backends`.
 
 ```bash
@@ -85,7 +85,7 @@ A target is a path (`api/config.yml`), tables of a database (`api/db.gz:public.u
 key groups of a Redis database (`api/redis.gz:session:*`). Without target, every item is synchronized.
 
 When the configuration declares no item yet, `devtool env` first downloads the shared
-`devtool/config.yml` from the default backend. A file [encrypted](/configuration/encryption) with
+`devtool/config.yml` from the default backend. A file [encrypted](/configuration/environment/encryption) with
 `prompt: true` has its password asked in the terminal; without a terminal, the command stops.
 
 ## devtool env file

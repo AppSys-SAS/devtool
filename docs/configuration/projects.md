@@ -126,7 +126,7 @@ name, or `own` for the icon of the integration it opens.
 
 `env` gives environment variables to everything that runs in the project: its commands, its scripts and
 the terminals you open on it. It is a map, or a list of maps merged in order. A command adds its own
-[`env`](/configuration/commands#environment) on top, its values winning over those of the project.
+[`env`](/configuration/commands#environment-shell-and-stop-signal) on top, its values winning over those of the project.
 
 ```yaml [config.yml]
 projects:

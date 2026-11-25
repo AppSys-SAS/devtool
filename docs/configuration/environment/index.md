@@ -6,7 +6,7 @@ description: Share configuration files, database copies, buckets and Redis data 
 
 The environment is everything a project needs locally besides its code: configuration files, a copy of
 its database, the files of its bucket, its Redis data. The devtool keeps it in one folder on your machine
-and mirrors that folder on one or more [backends](/configuration/backends): a CDN, a bucket, an SFTP
+and mirrors that folder on one or more [backends](/configuration/environment/backends): a CDN, a bucket, an SFTP
 server, a git repository or your own scripts. A new developer gets a working setup with one command,
 and anyone can share a fresh database copy with a push.
 
@@ -63,8 +63,8 @@ environment:
     - { path: api/db.gz, engine: postgres, container: postgres, backend: archive }
 ```
 
-[Backends](/configuration/backends) describes each kind of storage and how to choose one, and
-[Encryption](/configuration/encryption) the secrets and the rules.
+[Backends](/configuration/environment/backends) describes each kind of storage and how to choose one, and
+[Encryption](/configuration/environment/encryption) the secrets and the rules.
 
 ## Files
 
@@ -212,7 +212,7 @@ encrypted. `devtool server` never
 downloads anything on its own: pulls are manual, or scheduled with `pull`. When the devtool configuration
 itself is missing, the Environment page offers to pull it.
 
-When a file is [encrypted](/configuration/encryption) with `prompt: true`, `devtool env` asks its password
+When a file is [encrypted](/configuration/environment/encryption) with `prompt: true`, `devtool env` asks its password
 in the terminal, and the server in a dialog of the interface.
 
 To read or change a single file of a backend, outside the items, use
@@ -221,9 +221,9 @@ To read or change a single file of a backend, outside the items, use
 ## First start of a developer
 
 1. Write `config.local.yml` in `~/.config/appsys/devtool` with your `workspace` and the default
-   [backend](/configuration/backends) of the team in `environment.backends`, plus the
+   [backend](/configuration/environment/backends) of the team in `environment.backends`, plus the
    [`auth`](/configuration/auth) section of your identity provider when that backend is a
-   [CDN](/configuration/cdn).
+   [CDN](/configuration/environment/cdn).
 2. `devtool login`, to sign in with the identity provider, when there is one
 3. `devtool env pull --yes`: it downloads the shared `devtool/config.yml` from the default backend
    first, then everything it declares
@@ -235,8 +235,8 @@ To read or change a single file of a backend, outside the items, use
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `backends` | map | none | Where the files are stored, by name. See [Backends](/configuration/backends). |
-| `encryption` | list | none | Encryption rules by path pattern. See [Encryption](/configuration/encryption). |
+| `backends` | map | none | Where the files are stored, by name. See [Backends](/configuration/environment/backends). |
+| `encryption` | list | none | Encryption rules by path pattern. See [Encryption](/configuration/environment/encryption). |
 | `folder` | string | parent of the configuration folder | Local mirror of the files of the backends, relative to the configuration folder. |
 | `files` | list | none | Files synchronized and shown in Configs. |
 | `databases` | list | none | Databases saved as archives. |
@@ -322,8 +322,8 @@ Environment page shows the error and `devtool env` stops.
 - "the environment declares buckets without `s3` server": `s3` is missing, or lacks `endpoint`,
   `accessKeyId` or `secretAccessKey`.
 - `invalid backend in the environment: ...`, `<path>: backend "<name>" is not declared in
-  environment.backends`: see [Backends](/configuration/backends#errors).
+  environment.backends`: see [Backends](/configuration/environment/backends#errors).
 - `invalid encryption rule in the environment: ...`, `invalid encryption of <path> in the environment:
-  ...`: see [Encryption](/configuration/encryption#warnings-and-errors).
+  ...`: see [Encryption](/configuration/environment/encryption#warnings-and-errors).
 - `invalid ignore of <path> in the environment: must be a list of key paths, such as
   connections.*.lastUsedAt`, `... needs a YAML, JSON, TOML, XML or .env file`: see [Ignored keys](#ignored-keys).
