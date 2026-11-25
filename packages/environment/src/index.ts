@@ -26,8 +26,10 @@ export {
   parseTargets,
   readEnvironmentOptions,
   SHARED_CONFIG_PATH,
+  sharedConfigItem,
   type TransferResult
 } from './environment.js'
+export type { TransferDirection } from './access.js'
 export { redisDatabaseName } from './redis.js'
 export type { SyncRecord } from './sync-journal.js'
 export { configFormatOf, type CopySide, diffConfig, IgnoredKeys, type KeyChoice, type KeyDifference, mergeConfig, readMap as readYamlMap, readYaml } from './config-merge.js'

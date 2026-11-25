@@ -7,7 +7,7 @@ import type { BackendContext, EnvironmentBackend, RemoteFile } from '../../src/b
 import { IgnoredKeys } from '../../src/config-merge.js'
 import { Environment, type EnvironmentItem } from '../../src/environment.js'
 
-const ITEM: EnvironmentItem = { kind: 'file', path: 'db/connections.json', backend: 'memory', encryption: null, ignore: new IgnoredKeys(['connections.*.lastUsedAt']) }
+const ITEM: EnvironmentItem = { kind: 'file', path: 'db/connections.json', backend: 'memory', encryption: null, groups: { pull: null, push: null }, ignore: new IgnoredKeys(['connections.*.lastUsedAt']) }
 
 let folder: string
 let files: Map<string, { content: Buffer, version: number }>

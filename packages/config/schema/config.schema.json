@@ -586,11 +586,34 @@
       ]
     },
     "backendName": { "type": "string", "description": "Name of a backend of environment.backends; the default backend when omitted." },
+    "transferGroup": {
+      "description": "Groups of the identity provider of the auth section, the developer needing one of them; false lets nobody.",
+      "oneOf": [
+        { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 }, "examples": [["developers"]] },
+        { "const": false }
+      ]
+    },
+    "transferGroups": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Who may pull and who may push; a direction left out lets everyone.",
+      "properties": {
+        "pull": { "$ref": "#/$defs/transferGroup" },
+        "push": { "$ref": "#/$defs/transferGroup" }
+      }
+    },
+    "archiveFormat": {
+      "type": "string",
+      "enum": ["devtool", "native"],
+      "default": "devtool",
+      "description": "devtool: the framed archive of the devtool. native: the archive of the engine's own tools (mongodump --archive --gzip, pg_dump -Fc, gzipped mariadb-dump), or a tar.gz of the objects for a bucket."
+    },
     "backendShared": {
       "type": "object",
       "properties": {
         "default": { "type": "boolean", "default": false, "description": "Items naming no backend, and the shared configuration, use this one; the first backend when none is marked." },
-        "encryption": { "$ref": "#/$defs/encryption" }
+        "encryption": { "$ref": "#/$defs/encryption" },
+        "groups": { "$ref": "#/$defs/transferGroups", "description": "Who may pull and push the items of the backend, unless an item names its own groups." }
       }
     },
     "backend": {
@@ -654,14 +677,18 @@
           "type": "object",
           "allOf": [{ "$ref": "#/$defs/backendShared" }],
           "unevaluatedProperties": false,
-          "required": ["type", "list", "download", "upload", "remove"],
+          "required": ["type", "list", "download"],
+          "anyOf": [
+            { "required": ["upload", "remove"] },
+            { "required": ["groups"], "properties": { "groups": { "required": ["push"], "properties": { "push": { "const": false } } } } }
+          ],
           "properties": {
             "type": { "const": "scripts", "description": "Your own commands, for any storage the other backends do not reach." },
             "cwd": { "type": "string", "default": ".", "description": "Folder the commands run in, relative to the configuration folder." },
             "list": { "$ref": "#/$defs/plainArgs", "description": "Prints { \"files\": [ { \"path\", \"size\", \"updatedAt\", \"version\" } ] }." },
             "download": { "$ref": "#/$defs/plainArgs", "description": "Writes %{ADT:PATH} to %{ADT:FILE}; exits 2 when the file does not exist." },
-            "upload": { "$ref": "#/$defs/plainArgs", "description": "Stores %{ADT:FILE} as %{ADT:PATH}." },
-            "remove": { "$ref": "#/$defs/plainArgs", "description": "Deletes %{ADT:PATH}." },
+            "upload": { "$ref": "#/$defs/plainArgs", "description": "Stores %{ADT:FILE} as %{ADT:PATH}; optional when groups.push is false." },
+            "remove": { "$ref": "#/$defs/plainArgs", "description": "Deletes %{ADT:PATH}; optional when groups.push is false." },
             "env": { "$ref": "#/$defs/stringMap", "description": "Environment variables of the commands; value blocks are read." }
           }
         }
@@ -719,6 +746,7 @@
                     "examples": [["connections.*.lastUsedAt"]]
                   },
                   "pull": { "$ref": "#/$defs/pull" },
+                  "groups": { "$ref": "#/$defs/transferGroups", "description": "Who may pull and push it, replacing the groups of its backend direction by direction." },
                   "mcp": { "$ref": "#/$defs/mcpRules" }
                 }
               }
@@ -735,9 +763,12 @@
               "path": { "type": "string", "description": "Archive of the database in the environment folder." },
               "engine": { "type": "string", "enum": ["postgres", "mariadb", "mongodb"] },
               "container": { "type": "string", "description": "Docker container running the database." },
+              "database": { "type": "string", "pattern": "\\S", "description": "Database of the container; the one the image creates when omitted (POSTGRES_DB, MARIADB_DATABASE, MONGO_INITDB_DATABASE)." },
+              "format": { "$ref": "#/$defs/archiveFormat" },
               "backend": { "$ref": "#/$defs/backendName" },
               "encryption": { "$ref": "#/$defs/encryption" },
               "pull": { "$ref": "#/$defs/pull" },
+              "groups": { "$ref": "#/$defs/transferGroups", "description": "Who may pull and push it, replacing the groups of its backend direction by direction." },
               "mcp": { "$ref": "#/$defs/mcpRules" }
             }
           }
@@ -751,9 +782,11 @@
             "properties": {
               "path": { "type": "string", "description": "Snapshot of the bucket in the environment folder." },
               "bucket": { "type": "string" },
+              "format": { "$ref": "#/$defs/archiveFormat" },
               "backend": { "$ref": "#/$defs/backendName" },
               "encryption": { "$ref": "#/$defs/encryption" },
               "pull": { "$ref": "#/$defs/pull" },
+              "groups": { "$ref": "#/$defs/transferGroups", "description": "Who may pull and push it, replacing the groups of its backend direction by direction." },
               "mcp": { "$ref": "#/$defs/mcpRules" }
             }
           }
@@ -770,6 +803,7 @@
               "backend": { "$ref": "#/$defs/backendName" },
               "encryption": { "$ref": "#/$defs/encryption" },
               "pull": { "$ref": "#/$defs/pull" },
+              "groups": { "$ref": "#/$defs/transferGroups", "description": "Who may pull and push it, replacing the groups of its backend direction by direction." },
               "mcp": { "$ref": "#/$defs/mcpRules" }
             }
           }

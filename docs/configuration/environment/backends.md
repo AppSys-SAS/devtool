@@ -146,6 +146,7 @@ Every backend takes these keys, on top of those of its type:
 | `type` | `cdn`, `s3`, `sftp`, `git`, `scripts` | required | Kind of backend. |
 | `default` | boolean | `false` | Items naming no backend, and the shared configuration, use this one. The first backend when none is marked. |
 | `encryption` | map | none | Encrypt every file stored here: `{ key }`, `{ password }` or `{ prompt: true }`. See [Encryption](/configuration/environment/encryption). |
+| `groups` | map | everyone | `{ pull, push }`: who may pull and push its items, each a list of groups or `false`. An item naming its own groups replaces them. See [Who may pull and push](/configuration/environment/#who-may-pull-and-push). |
 
 The keys of each type are listed on its page: [cdn](/configuration/environment/cdn),
 [s3](/configuration/environment/s3), [sftp](/configuration/environment/sftp),
@@ -166,6 +167,7 @@ The Server page lists these problems. Except for the last three, each one also s
 - `environment.backends.<name>.type: must be one of cdn, s3, sftp, git, scripts`
 - `environment.backends.<name>.default: must be true or false`
 - `environment.backends.<name>.encryption: must be { key } (32 bytes in base64), { password } or { prompt: true }`
+- `environment.backends.<name>.groups: <direction> must be a non-empty list of groups, or false`
 - the warnings of each type, listed on its page: [cdn](/configuration/environment/cdn#warnings-and-errors),
   [s3](/configuration/environment/s3#warnings), [sftp](/configuration/environment/sftp#warnings),
   [git](/configuration/environment/git#warnings), [scripts](/configuration/environment/scripts#warnings)

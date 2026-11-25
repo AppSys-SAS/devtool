@@ -256,6 +256,11 @@ export function environmentTools (host: McpHost): McpTool[] {
           throw new McpToolError('A pull or push is already running')
         }
         const paths = targets.map(target => target.path)
+        const items = host.environment.state().items
+        const refused = paths.filter(path => items.find(item => item.path === path)?.allowed[direction] === false)
+        if (refused.length > 0) {
+          throw new McpToolError(`The groups of the user do not let them ${direction} ${refused.join(', ')}`)
+        }
         call.describe(`environment ${direction}`)
         await call.authorize({
           action: 'run',

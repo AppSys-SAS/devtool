@@ -1,10 +1,12 @@
+import { createReadStream } from 'node:fs'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import type { S3Client } from '@aws-sdk/client-s3'
+import { mergeTransferGroups, OPEN_ACCESS, type TransferAccess, type TransferDirection, TransferGate, readTransferGroups } from './access.js'
 import { ArchiveWriter, readArchive, type RecordHeader } from './archive.js'
 import { type BackendContext, type BackendOptions, encrypted, EncryptionSecret, type EncryptionSettings, type EnvironmentBackend, readBackends, readEncryption } from './backends/index.js'
 import { plainLengthOf } from './backends/encryption.js'
-import { createS3Client, restoreBucket, type S3Options, snapshotBucket } from './buckets.js'
+import { createS3Client, objectsOfArchive, objectsOfTar, restoreBucket, type S3Options, snapshotBucket, snapshotBucketTar } from './buckets.js'
 import { defaultEnvironmentFolder, localPathOf, writeLocalFile } from './directory.js'
 import { databaseEngine, type DatabaseEngineName, isDatabaseEngineName } from './engines.js'
 import { listRedisGroups, redisDatabaseName, redisRecordGroup, restoreRedis, snapshotRedis } from './redis.js'
@@ -29,13 +31,20 @@ interface ItemBase {
   backend: string | null
   /** The secret encrypting the file before it reaches its backend, null to send it as it is. */
   encryption: EncryptionSettings | null
+  /** Who may pull and push it, its own groups replacing those of its backend. */
+  groups: TransferAccess
 }
+
+/** Format of the archive of a database or a bucket: the framed archive of the devtool, or the format of the engine's own tools. */
+export type ArchiveFormat = 'devtool' | 'native'
+
+const ARCHIVE_FORMATS: ArchiveFormat[] = ['devtool', 'native']
 
 /** A file of the environment: a configuration, a database archive, a bucket or a Redis database snapshot. */
 export type EnvironmentItem
   = | ItemBase & { kind: 'file', ignore: IgnoredKeys | null }
-    | ItemBase & { kind: 'database', engine: DatabaseEngineName, container: string }
-    | ItemBase & { kind: 'bucket', bucket: string }
+    | ItemBase & { kind: 'database', engine: DatabaseEngineName, container: string, database: string | null, format: ArchiveFormat }
+    | ItemBase & { kind: 'bucket', bucket: string, format: ArchiveFormat }
     | ItemBase & { kind: 'redis', url: string }
 
 /** What the environment is made of, as declared in the `environment` section of the configuration. */
@@ -167,6 +176,23 @@ function readIgnoredKeys (itemPath: string, value: unknown): IgnoredKeys | null 
 }
 
 /**
+ * Reads the archive format of a database or a bucket, `format: devtool | native`.
+ *
+ * @param itemPath - The path of the item.
+ * @param value - The raw `format` setting.
+ * @returns The format, `devtool` when the setting is missing.
+ */
+function readFormat (itemPath: string, value: unknown): ArchiveFormat {
+  if (value === undefined) {
+    return 'devtool'
+  }
+  if (!ARCHIVE_FORMATS.includes(value as ArchiveFormat)) {
+    throw new Error(`invalid format of ${itemPath} in the environment: must be ${ARCHIVE_FORMATS.join(' or ')}`)
+  }
+  return value as ArchiveFormat
+}
+
+/**
  * Gives the keys an item leaves out of its synchronization.
  *
  * @param item - The item.
@@ -179,8 +205,8 @@ function ignoredKeysOf (item: EnvironmentItem): IgnoredKeys | undefined {
 /**
  * Reads the `environment` section of the devtool configuration: its `backends`, its `folder` being the
  * parent of the configuration folder when it names none, each of its `files` a path or
- * `{ path, display, local, sync, pull, backend, ignore }`, its databases, buckets and Redis databases taking a
- * `pull` and a `backend` too, an item naming no backend using the default one.
+ * `{ path, display, local, sync, pull, backend, ignore, groups }`, its databases, buckets and Redis databases taking a
+ * `pull`, a `backend` and `groups` too, an item naming no backend using the default one.
  *
  * @param section - The raw section.
  * @returns The environment, or null when the section is missing.
@@ -223,6 +249,15 @@ export function readEnvironmentOptions (section: unknown): EnvironmentOptions | 
     }
     return value
   }
+  const baseOf = (itemPath: string, entry: Record<string, unknown>): ItemBase => {
+    const backend = backendOf(itemPath, entry.backend)
+    const { groups, problems: groupProblems } = readTransferGroups(entry.groups)
+    if (groupProblems.length > 0) {
+      throw new Error(`invalid groups of ${itemPath} in the environment: ${groupProblems[0]}`)
+    }
+    const backendGroups = backends.find(candidate => candidate.slug === backend)?.groups ?? OPEN_ACCESS
+    return { path: itemPath, backend, encryption: encryptionOf(itemPath, entry.encryption), groups: mergeTransferGroups(groups, backendGroups) }
+  }
   const addItem = (item: EnvironmentItem, pull: unknown): void => {
     items.push(item)
     const autoPull = readAutoPull(item.path, pull)
@@ -238,26 +273,34 @@ export function readEnvironmentOptions (section: unknown): EnvironmentOptions | 
     }
     configFiles.push({ path: entry.path, display: entry.display !== false, local: entry.local !== false })
     if (entry.sync !== false) {
-      addItem({ kind: 'file', path: entry.path, backend: backendOf(entry.path, entry.backend), encryption: encryptionOf(entry.path, entry.encryption), ignore: readIgnoredKeys(entry.path, entry.ignore) }, entry.pull)
+      addItem({ kind: 'file', ...baseOf(entry.path, entry), ignore: readIgnoredKeys(entry.path, entry.ignore) }, entry.pull)
     }
   }
   for (const database of recordsOf(record.databases)) {
-    if (typeof database.path !== 'string' || !isDatabaseEngineName(database.engine) || typeof database.container !== 'string') {
+    const name = database.database
+    if (typeof database.path !== 'string' || !isDatabaseEngineName(database.engine) || typeof database.container !== 'string' || (name !== undefined && (typeof name !== 'string' || name.trim() === ''))) {
       throw new Error(`invalid database in the environment: ${JSON.stringify(database)}`)
     }
-    addItem({ kind: 'database', path: database.path, backend: backendOf(database.path, database.backend), encryption: encryptionOf(database.path, database.encryption), engine: database.engine, container: database.container }, database.pull)
+    addItem({
+      kind: 'database',
+      ...baseOf(database.path, database),
+      engine: database.engine,
+      container: database.container,
+      database: typeof name === 'string' ? name : null,
+      format: readFormat(database.path, database.format)
+    }, database.pull)
   }
   for (const bucket of recordsOf(record.buckets)) {
     if (typeof bucket.path !== 'string' || typeof bucket.bucket !== 'string') {
       throw new Error(`invalid bucket in the environment: ${JSON.stringify(bucket)}`)
     }
-    addItem({ kind: 'bucket', path: bucket.path, backend: backendOf(bucket.path, bucket.backend), encryption: encryptionOf(bucket.path, bucket.encryption), bucket: bucket.bucket }, bucket.pull)
+    addItem({ kind: 'bucket', ...baseOf(bucket.path, bucket), bucket: bucket.bucket, format: readFormat(bucket.path, bucket.format) }, bucket.pull)
   }
   for (const redis of recordsOf(record.redis)) {
     if (typeof redis.path !== 'string' || typeof redis.url !== 'string') {
       throw new Error(`invalid Redis database in the environment: ${JSON.stringify({ path: redis.path })}`)
     }
-    addItem({ kind: 'redis', path: redis.path, backend: backendOf(redis.path, redis.backend), encryption: encryptionOf(redis.path, redis.encryption), url: redis.url }, redis.pull)
+    addItem({ kind: 'redis', ...baseOf(redis.path, redis), url: redis.url }, redis.pull)
   }
 
   const s3 = recordOf(record.s3)
@@ -309,13 +352,34 @@ export function parseTargets (options: EnvironmentOptions, targets: string[]): E
 }
 
 /**
+ * Gives the shared devtool configuration as an item of the default backend.
+ *
+ * @param options - The environment.
+ * @returns The item, null when the environment declares no backend.
+ */
+export function sharedConfigItem (options: EnvironmentOptions): EnvironmentItem | null {
+  const backend = options.backends.find(candidate => candidate.slug === options.defaultBackend)
+  return backend ? { kind: 'file', path: SHARED_CONFIG_PATH, backend: backend.slug, encryption: null, groups: backend.groups, ignore: null } : null
+}
+
+/**
  * Lists the tables of the local database of an item, or the key groups of its local Redis database.
  *
  * @param item - The database or Redis item.
  * @returns The tables or key groups.
  */
 export async function listTables (item: Extract<EnvironmentItem, { kind: 'database' | 'redis' }>): Promise<string[]> {
-  return item.kind === 'redis' ? listRedisGroups(item.url) : databaseEngine(item.engine).listTables(item.container)
+  return item.kind === 'redis' ? listRedisGroups(item.url) : databaseEngine(item.engine).listTables(item)
+}
+
+/**
+ * Names the local database of an item, for the messages.
+ *
+ * @param item - The database item.
+ * @returns Its container, followed by its database when the item names one.
+ */
+function databaseNameOf (item: Extract<EnvironmentItem, { kind: 'database' }>): string {
+  return item.database === null ? item.container : `${item.container}/${item.database}`
 }
 
 /**
@@ -361,17 +425,45 @@ function assertKnownTables (tables: string[], known: Iterable<string>, where: st
 export class Environment {
   private _s3: S3Client | null = null
   private readonly _encrypted = new Map<string, EnvironmentBackend>()
+  private readonly _gate: TransferGate
 
   /**
    * @param _backends - The backends of the environment, by name.
    * @param _options - The environment.
-   * @param _context - Reads the value blocks and asks the developer for the secrets of encrypted items.
+   * @param _context - Reads the value blocks, asks the developer for the secrets of encrypted items and names the identity provider.
    */
   constructor (
     private readonly _backends: ReadonlyMap<string, EnvironmentBackend>,
     private readonly _options: EnvironmentOptions,
     private readonly _context: BackendContext
-  ) {}
+  ) {
+    this._gate = new TransferGate(_context.auth)
+  }
+
+  /**
+   * Explains why the developer may not transfer an item, or a file of a backend, in a direction.
+   *
+   * @param target - The item or the settings of the backend.
+   * @param target.groups - Who may pull and push it.
+   * @param direction - The direction.
+   * @returns Why the transfer is refused, null when it is allowed.
+   */
+  async refusal ({ groups }: { groups: TransferAccess }, direction: TransferDirection): Promise<string | null> {
+    return this._gate.refusal(groups[direction], direction)
+  }
+
+  /**
+   * Fails when the developer may not transfer an item in a direction.
+   *
+   * @param item - The item.
+   * @param direction - The direction.
+   */
+  private async assertAllowed (item: EnvironmentItem, direction: TransferDirection): Promise<void> {
+    const refusal = await this.refusal(item, direction)
+    if (refusal !== null) {
+      throw new Error(`${item.path}: ${refusal}`)
+    }
+  }
 
   /**
    * Describes every item with its local copy and its copy on its backend. The local copies are
@@ -446,6 +538,7 @@ export class Environment {
    */
   async pull (selection: EnvironmentSelection): Promise<TransferResult> {
     const { item, tables } = selection
+    await this.assertAllowed(item, 'pull')
     if (item.kind === 'file' && (selection.keys || await this.mergesWhole(item))) {
       return this.pullKeys(item, selection.keys ?? null)
     }
@@ -461,7 +554,8 @@ export class Environment {
     }
 
     if (item.kind === 'bucket') {
-      const count = await restoreBucket(this.s3(), item.bucket, readArchive(localPath))
+      const objects = item.format === 'native' ? objectsOfTar(createReadStream(localPath)) : objectsOfArchive(readArchive(localPath))
+      const count = await restoreBucket(this.s3(), item.bucket, objects)
       return { done: true, detail: `${count} objects restored in ${item.bucket}` }
     }
 
@@ -482,6 +576,18 @@ export class Environment {
       }
     }
 
+    return item.format === 'native' ? this.restoreNative(item, localPath, tables) : this.restoreDatabase(item, localPath, tables)
+  }
+
+  /**
+   * Restores a local database from an archive of the devtool.
+   *
+   * @param item - The database item.
+   * @param localPath - The archive.
+   * @param tables - The tables to restore, or null for the whole database.
+   * @returns What was done.
+   */
+  private async restoreDatabase (item: Extract<EnvironmentItem, { kind: 'database' }>, localPath: string, tables: string[] | null): Promise<TransferResult> {
     const engine = databaseEngine(item.engine)
     const records = readArchive(localPath)
     const first = await records.next()
@@ -490,26 +596,47 @@ export class Environment {
     }
 
     if (tables === null) {
-      await engine.reset(item.container)
+      await engine.reset(item)
     } else {
-      assertKnownTables(tables, await engine.listTables(item.container), item.container)
+      assertKnownTables(tables, await engine.listTables(item), databaseNameOf(item))
     }
 
     const restored: string[] = []
     for await (const { header, body } of records) {
       if (header.type === 'schema' && tables === null) {
-        await engine.importSchema(item.container, body)
+        await engine.importSchema(item, body)
       } else if (header.type === 'table' && typeof header.name === 'string' && (tables === null || tables.includes(header.name))) {
-        await engine.importTable(item.container, header.name, body, tables !== null)
+        await engine.importTable(item, header.name, body, tables !== null)
         restored.push(header.name)
       }
     }
     if (tables !== null) {
       assertKnownTables(tables, restored, item.path)
     }
-    await engine.finish(item.container)
+    await engine.finish(item)
 
     return { done: true, detail: tables === null ? `database restored (${restored.length} tables)` : `tables restored: ${restored.join(', ')}` }
+  }
+
+  /**
+   * Restores a local database from an archive of the engine's own tools.
+   *
+   * @param item - The database item.
+   * @param localPath - The archive.
+   * @param tables - The tables to restore, or null for the whole database.
+   * @returns What was done.
+   */
+  private async restoreNative (item: Extract<EnvironmentItem, { kind: 'database' }>, localPath: string, tables: string[] | null): Promise<TransferResult> {
+    const engine = databaseEngine(item.engine)
+    if (tables === null) {
+      await engine.reset(item)
+    } else {
+      assertKnownTables(tables, await engine.listTables(item), databaseNameOf(item))
+    }
+    await engine.restoreNative(item, createReadStream(localPath), tables)
+    await engine.finish(item)
+
+    return { done: true, detail: tables === null ? `database restored in ${databaseNameOf(item)}` : `tables restored: ${tables.join(', ')}` }
   }
 
   /**
@@ -520,14 +647,23 @@ export class Environment {
    */
   async push (selection: EnvironmentSelection): Promise<TransferResult> {
     const { item, tables } = selection
+    await this.assertAllowed(item, 'push')
     if (item.kind === 'file' && (selection.keys || await this.mergesWhole(item))) {
       return this.pushKeys(item, selection.keys ?? null)
     }
 
     const localPath = localPathOf(this._options.folder, item.path)
     let detail = localPath
-    if (item.kind === 'database') {
+    if (item.kind === 'database' && item.format === 'native') {
+      if (tables !== null) {
+        throw new Error(`${item.path} is a native archive: push the whole database, its tables cannot be replaced one by one`)
+      }
+      await writeLocalFile(localPath, databaseEngine(item.engine).dumpNative(item))
+      detail = `database dumped from ${databaseNameOf(item)}`
+    } else if (item.kind === 'database') {
       detail = await this.writeLocal(localPath, archive => this.dumpDatabase(item, tables, archive))
+    } else if (item.kind === 'bucket' && item.format === 'native') {
+      detail = `${await snapshotBucketTar(this.s3(), item.bucket, localPath)} objects of ${item.bucket}`
     } else if (item.kind === 'bucket') {
       detail = await this.writeLocal(localPath, async archive => `${await snapshotBucket(this.s3(), item.bucket, archive)} objects of ${item.bucket}`)
     } else if (item.kind === 'redis') {
@@ -672,20 +808,20 @@ export class Environment {
    */
   private async dumpDatabase (item: Extract<EnvironmentItem, { kind: 'database' }>, tables: string[] | null, archive: ArchiveWriter): Promise<string> {
     const engine = databaseEngine(item.engine)
-    const localTables = await engine.listTables(item.container)
+    const localTables = await engine.listTables(item)
     if (tables === null) {
       await archive.add({ type: 'database', engine: item.engine })
-      await archive.add({ type: 'schema' }, engine.dumpSchema(item.container))
+      await archive.add({ type: 'schema' }, engine.dumpSchema(item))
       for (const table of localTables) {
-        await archive.add({ type: 'table', name: table }, engine.dumpTable(item.container, table))
+        await archive.add({ type: 'table', name: table }, engine.dumpTable(item, table))
       }
       return `database dumped (${localTables.length} tables)`
     }
 
-    assertKnownTables(tables, localTables, item.container)
+    assertKnownTables(tables, localTables, databaseNameOf(item))
     await this.copyBase(item, archive, header => header.type !== 'table' || typeof header.name !== 'string' || !tables.includes(header.name))
     for (const table of tables) {
-      await archive.add({ type: 'table', name: table }, engine.dumpTable(item.container, table))
+      await archive.add({ type: 'table', name: table }, engine.dumpTable(item, table))
     }
 
     return `tables dumped: ${tables.join(', ')}`

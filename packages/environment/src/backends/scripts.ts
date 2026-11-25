@@ -27,8 +27,10 @@ export interface ScriptsSettings extends BackendSettings {
   /** The command of each operation, `%{ADT:PATH}` and `%{ADT:FILE}` replaced, value blocks not read yet. */
   list: string[]
   download: string[]
-  upload: string[]
-  remove: string[]
+  /** Null when the backend refuses every push. */
+  upload: string[] | null
+  /** Null when the backend refuses every push. */
+  remove: string[] | null
   /** Environment variables of the commands, value blocks not read yet. */
   env: Record<string, string>
 }
@@ -144,7 +146,11 @@ class ScriptsBackend implements EnvironmentBackend {
    * @returns What the command printed and its exit code.
    */
   private async run (operation: Operation, filePath: string, localFile: string, allowAbsent = false): Promise<CommandResult> {
-    const args = await Promise.all(this._settings[operation].map(async arg =>
+    const command = this._settings[operation]
+    if (command === null) {
+      throw new Error(`${this._settings.slug} declares no ${operation} command`)
+    }
+    const args = await Promise.all(command.map(async arg =>
       (await this._context.resolve(arg)).replaceAll('%{ADT:PATH}', filePath).replaceAll('%{ADT:FILE}', localFile)))
     const env: Record<string, string> = { ...process.env as Record<string, string> }
     for (const [key, value] of Object.entries(this._settings.env)) {
@@ -178,8 +184,9 @@ export const scripts: BackendType<ScriptsSettings> = {
   readOptions (section, shared, setting) {
     const problems: BackendProblem[] = []
     const commands = Object.fromEntries(OPERATIONS.map(operation => [operation, readCommand(section[operation])]))
+    const optional = new Set<Operation>(shared.groups.push === false ? ['upload', 'remove'] : [])
     for (const operation of OPERATIONS) {
-      if (commands[operation] === null) {
+      if (commands[operation] === null && !(optional.has(operation) && section[operation] === undefined)) {
         problems.push({ setting: `${setting}.${operation}`, message: 'must be a command: a list of texts' })
       }
     }
@@ -197,8 +204,8 @@ export const scripts: BackendType<ScriptsSettings> = {
         cwd: readText(section.cwd) ?? '.',
         list: commands.list!,
         download: commands.download!,
-        upload: commands.upload!,
-        remove: commands.remove!,
+        upload: commands.upload,
+        remove: commands.remove,
         env: env as Record<string, string>
       },
       problems

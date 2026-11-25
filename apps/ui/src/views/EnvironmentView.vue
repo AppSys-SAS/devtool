@@ -125,9 +125,22 @@ const overwritten = computed(() =>
 
       return target.tables
         ? `${target.path}: tables ${target.tables.join(', ')} emptied and reloaded`
-        : `${target.path}: database of container ${item?.container} dropped and recreated`
+        : `${target.path}: database ${item?.database ? `${item.database} ` : ''}of container ${item?.container} dropped and recreated`
     })
 )
+const selectedItems = computed(() => (state.value?.items ?? []).filter(item => selected.value[item.path]))
+
+/**
+ * Tells whether the groups of the developer let them transfer in a direction: every selected item,
+ * or at least one item while none is selected.
+ * @param direction The direction.
+ * @returns True when the action is shown.
+ */
+function shows (direction: 'pull' | 'push'): boolean {
+  return selectedItems.value.length > 0
+    ? selectedItems.value.every(item => item.allowed[direction])
+    : (state.value?.items ?? []).some(item => item.allowed[direction])
+}
 
 /**
  * Names the backend storing an item.
@@ -186,7 +199,7 @@ function syncStatus (item: EnvironmentItemPayload): SyncStatus | null {
 function describeItem (item: EnvironmentItemPayload): string {
   switch (item.kind) {
     case 'database':
-      return `${item.engine} · container ${item.container}`
+      return `${item.engine} · container ${item.container}${item.database ? ` · ${item.database}` : ''}`
     case 'bucket':
       return `bucket ${item.bucket}`
     case 'redis':
@@ -769,6 +782,7 @@ onMounted(() => wsStore.envRefresh())
         </span>
         <div class="flex items-center gap-2">
           <Button
+            v-if="shows('push')"
             variant="outline"
             class="gap-1.5"
             :disabled="!canRun"
@@ -778,6 +792,7 @@ onMounted(() => wsStore.envRefresh())
             Push
           </Button>
           <Button
+            v-if="shows('pull')"
             class="gap-1.5"
             :disabled="!canRun"
             @click="pull"

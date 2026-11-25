@@ -1,6 +1,6 @@
 import { once } from 'node:events'
 import { createReadStream, createWriteStream } from 'node:fs'
-import { pipeline, type Readable, type Writable } from 'node:stream'
+import { pipeline, Readable, type Transform, type Writable } from 'node:stream'
 import { pipeline as pipelineAsync } from 'node:stream/promises'
 import { createGunzip, createGzip } from 'node:zlib'
 
@@ -79,9 +79,20 @@ export class ArchiveWriter {
 }
 
 /**
+ * Passes a stream through a transform, an error of either side failing the result.
+ *
+ * @param source - The stream.
+ * @param transform - The transform, such as a compression.
+ * @returns The transformed stream.
+ */
+export function transformed (source: AsyncIterable<Buffer>, transform: Transform): Readable {
+  return pipeline(Readable.from(source), transform, () => undefined)
+}
+
+/**
  * Reads lines and exact byte counts from a stream of chunks.
  */
-class BufferedReader {
+export class BufferedReader {
   private _buffer: Buffer = Buffer.alloc(0)
 
   /**
@@ -128,6 +139,15 @@ class BufferedReader {
     const chunk = this._buffer.subarray(0, size)
     this._buffer = this._buffer.subarray(size)
     return chunk
+  }
+
+  /**
+   * Tells whether every byte of the source was read.
+   *
+   * @returns True at the end of the source.
+   */
+  async atEnd (): Promise<boolean> {
+    return this._buffer.length === 0 && !(await this.fill())
   }
 
   /**

@@ -134,10 +134,48 @@ credentials found in the environment of that container. Foreign keys are not che
 loaded, so tables can come back in any order.
 
 - `postgres` and `mariadb`: the official images.
-- `mongodb`: its collections are its tables. The database is `MONGO_INITDB_DATABASE`, and the root
-  credentials `MONGO_INITDB_ROOT_USERNAME` and `MONGO_INITDB_ROOT_PASSWORD` are used when set.
+- `mongodb`: its collections are its tables. The root credentials `MONGO_INITDB_ROOT_USERNAME` and
+  `MONGO_INITDB_ROOT_PASSWORD` are used when set.
 
 A pull drops and recreates the database. A push dumps it, then sends the archive.
+
+### Several databases in one container
+
+The database is the one the image creates (`POSTGRES_DB`, `MARIADB_DATABASE`,
+`MONGO_INITDB_DATABASE`), unless the item names another one with `database`. Several items can then share
+a container:
+
+```yaml [config.yml]
+environment:
+  databases:
+    - { path: shop/catalog.gz, engine: mongodb, container: mongo, database: catalog }
+    - { path: shop/orders.gz, engine: mongodb, container: mongo, database: orders }
+```
+
+Every operation of an item (tables, dump, reset, restore) touches its own database only.
+
+### Native archives
+
+By default the archive is the devtool's own format: the schema, then the rows of each table. With
+`format: native`, it is the archive of the engine's own tools instead, which you can make or read
+without the devtool:
+
+| Engine | Archive | Restored with |
+|---|---|---|
+| `mongodb` | `mongodump --archive --gzip --db <database>` | `mongorestore --archive --gzip --drop` |
+| `postgres` | `pg_dump -Fc <database>` | `pg_restore` |
+| `mariadb` | `mariadb-dump <database>`, gzipped | `mariadb` |
+
+```yaml [config.yml]
+environment:
+  databases:
+    - { path: shop/catalog.archive.gz, engine: mongodb, container: mongo, database: catalog, format: native }
+```
+
+A MongoDB archive dumped from a database of another name is restored into the database of the item.
+A pull of some tables restores only those: their collections replaced for `mongodb`, their rows
+replaced for `postgres`. A native `mariadb` archive is a SQL script, restored whole only. A push always
+dumps the whole database: the tables of a native archive cannot be replaced one by one.
 
 ## Buckets and S3
 
@@ -150,6 +188,47 @@ environment:
 
 A bucket is saved as a snapshot, media types kept, and emptied before a pull restores it. `s3` tells
 where your local S3 server is; `region` defaults to `us-east-1`.
+
+With `format: native`, the snapshot is a `tar.gz` of the objects, the path of each file in the archive
+being its key. A pull empties the bucket, then stores every file with the media type of its extension;
+a push writes the objects of the bucket to the archive.
+
+```yaml [config.yml]
+environment:
+  buckets:
+    - { path: api/uploads.tar.gz, bucket: uploads, format: native }
+```
+
+::: tip
+On macOS, `tar` adds `._*` files holding extended attributes. Make the archive with
+`COPYFILE_DISABLE=1 tar -czf uploads.tar.gz -C <folder> .` so they do not become objects.
+:::
+
+## Who may pull and push
+
+`groups` lets only some developers pull or push, by the groups the [identity provider](/configuration/auth)
+gives them. It goes on a [backend](/configuration/environment/backends), for all its items, or on an
+item, which replaces the groups of its backend direction by direction:
+
+```yaml [config.yml]
+environment:
+  backends:
+    team:
+      type: scripts
+      list: [./dumps.sh, list]
+      download: [./dumps.sh, download, "%{ADT:PATH}", "%{ADT:FILE}"]
+      groups: { pull: [developers], push: false }
+  databases:
+    - { path: shop/orders.gz, engine: mongodb, container: mongo, database: orders, groups: { pull: [admins] } }
+```
+
+- a list of groups: the developer needs one of them, and must be signed in with `devtool login`;
+- `false`: nobody, such as a backend serving archives read-only;
+- left out: everyone.
+
+A refused transfer stops before reaching the backend, from the CLI, the interface or an agent.
+The Environment page hides Pull or Push when they are refused for the selected items, `devtool env`
+without target skips the refused items, and a scheduled pull reports them as skipped.
 
 ## Redis
 
@@ -259,6 +338,7 @@ A path, or:
 | `encryption` | map | `environment.encryption` | `{ key }`, `{ password }` or `{ prompt: true }`. |
 | `ignore` | list | none | [Keys](#ignored-keys) left out of the synchronization, each copy keeping its values. |
 | `pull` | map | none | Scheduled pull. |
+| `groups` | map | the groups of its backend | [Who may pull and push](#who-may-pull-and-push) it. |
 | `mcp` | rules | `environment.mcp` | Agent permissions; `keys` allowed. |
 
 ### environment.databases[]
@@ -268,9 +348,12 @@ A path, or:
 | `path` | string | required | Archive in the environment folder. |
 | `engine` | `postgres`, `mariadb`, `mongodb` | required | Database engine. |
 | `container` | string | required | Docker container running it. |
+| `database` | string | the database of the image | [Database of the container](#several-databases-in-one-container). |
+| `format` | `devtool`, `native` | `devtool` | [Archive format](#native-archives). |
 | `backend` | string | the default backend | Name of the backend storing it. |
 | `encryption` | map | `environment.encryption` | `{ key }`, `{ password }` or `{ prompt: true }`. |
 | `pull` | map | none | Scheduled pull. |
+| `groups` | map | the groups of its backend | [Who may pull and push](#who-may-pull-and-push) it. |
 | `mcp` | rules | `environment.mcp` | Agent permissions. |
 
 ### environment.buckets[]
@@ -279,9 +362,11 @@ A path, or:
 |---|---|---|---|
 | `path` | string | required | Snapshot in the environment folder. |
 | `bucket` | string | required | Name of the bucket. |
+| `format` | `devtool`, `native` | `devtool` | `native`: a `tar.gz` of the objects. |
 | `backend` | string | the default backend | Name of the backend storing it. |
 | `encryption` | map | `environment.encryption` | `{ key }`, `{ password }` or `{ prompt: true }`. |
 | `pull` | map | none | Scheduled pull. |
+| `groups` | map | the groups of its backend | [Who may pull and push](#who-may-pull-and-push) it. |
 | `mcp` | rules | `environment.mcp` | Agent permissions. |
 
 ### environment.redis[]
@@ -293,7 +378,15 @@ A path, or:
 | `backend` | string | the default backend | Name of the backend storing it. |
 | `encryption` | map | `environment.encryption` | `{ key }`, `{ password }` or `{ prompt: true }`. |
 | `pull` | map | none | Scheduled pull. |
+| `groups` | map | the groups of its backend | [Who may pull and push](#who-may-pull-and-push) it. |
 | `mcp` | rules | `environment.mcp` | Agent permissions. |
+
+### groups
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `pull` | list of groups, or `false` | everyone | Groups allowed to pull, the developer needing one of them; `false` for nobody. |
+| `push` | list of groups, or `false` | everyone | Groups allowed to push, the developer needing one of them; `false` for nobody. |
 
 ### environment.s3
 
@@ -327,3 +420,10 @@ Environment page shows the error and `devtool env` stops.
   ...`: see [Encryption](/configuration/environment/encryption#warnings-and-errors).
 - `invalid ignore of <path> in the environment: must be a list of key paths, such as
   connections.*.lastUsedAt`, `... needs a YAML, JSON, TOML, XML or .env file`: see [Ignored keys](#ignored-keys).
+- `invalid format of <path> in the environment: must be devtool or native`
+- `invalid groups of <path> in the environment: ...`: `pull` and `push` take a non-empty list of groups,
+  or `false`.
+
+When a transfer is refused, the item reports why: `<direction> is disabled`, `<direction> needs one of
+the groups <groups>` (followed by `sign in with devtool login` when nobody is signed in), or
+`... is a native archive: push the whole database` for a push of some tables of a native archive.

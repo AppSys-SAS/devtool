@@ -4,7 +4,8 @@ import os from 'node:os'
 import path from 'node:path'
 import type { Readable } from 'node:stream'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { BackendContext, EnvironmentBackend } from '../../src/backends/backend.js'
+import type { TransferAccess } from '../../src/access.js'
+import type { BackendContext, BackendSettings, EnvironmentBackend } from '../../src/backends/backend.js'
 import { scripts } from '../../src/backends/scripts.js'
 
 const FOLDER_SCRIPT = path.resolve(import.meta.dirname, '../../../../docs/examples/scripts-backend/folder.sh')
@@ -29,12 +30,21 @@ function contextOf (): BackendContext {
 }
 
 /**
+ * Builds the settings every backend shares.
+ * @param groups - Who may pull and push.
+ * @returns The shared settings.
+ */
+function sharedOf (groups: TransferAccess = { pull: null, push: null }): BackendSettings {
+  return { type: 'scripts', slug: 'shared', default: true, encryption: null, groups }
+}
+
+/**
  * Creates a scripts backend from raw settings.
  * @param settings - The raw settings of the backend.
  * @returns The backend.
  */
 function backendOf (settings: Record<string, unknown>): EnvironmentBackend {
-  const { options, problems } = scripts.readOptions(settings, { type: 'scripts', slug: 'shared', default: true, encryption: null }, 'environment.backends.shared')
+  const { options, problems } = scripts.readOptions(settings, sharedOf(), 'environment.backends.shared')
   if (!options) {
     throw new Error(JSON.stringify(problems))
   }
@@ -151,8 +161,21 @@ describe.skipIf(!hasBash)('scripts backend commands', () => {
       upload: ['true'],
       remove: ['true'],
       env: { TOKEN: '{{ secret }}' }
-    }, { type: 'scripts', slug: 'shared', default: true, encryption: null }, 'environment.backends.shared')
+    }, sharedOf(), 'environment.backends.shared')
     const files = await scripts.create(options!, context).list()
     expect(files).toEqual([{ path: 's3cr3t-s3cr3t', size: 1, updatedAt: new Date('2026-01-02T03:04:05Z'), version: '2026-01-02T03:04:05.000Z' }])
+  })
+
+  it('needs upload and remove commands unless the backend refuses every push', async () => {
+    const commands = { list: ['true'], download: ['true'] }
+    expect(scripts.readOptions(commands, sharedOf(), 'environment.backends.shared').problems.map(problem => problem.setting)).toEqual([
+      'environment.backends.shared.upload',
+      'environment.backends.shared.remove'
+    ])
+
+    const { options, problems } = scripts.readOptions(commands, sharedOf({ pull: null, push: false }), 'environment.backends.shared')
+    expect(problems).toEqual([])
+    expect(options).toMatchObject({ upload: null, remove: null })
+    await expect(scripts.create(options!, contextOf()).upload('a.yml', '/dev/null', 'application/yaml')).rejects.toThrow('shared declares no upload command')
   })
 })

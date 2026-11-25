@@ -51,12 +51,15 @@ export const ENVIRONMENT_FILE_FIELDS: FieldDefinition[] = [
 export const DATABASE_FIELDS: FieldDefinition[] = [
   { path: ['path'], label: 'Archive' },
   { path: ['engine'], label: 'Engine', type: 'select', options: ['postgres', 'mariadb', 'mongodb'] },
-  { path: ['container'], label: 'Container' }
+  { path: ['container'], label: 'Container' },
+  { path: ['database'], label: 'Database', hint: 'Optional: the database the image creates when empty.' },
+  { path: ['format'], label: 'Archive format', type: 'select', options: ['devtool', 'native'], defaultValue: 'devtool' }
 ]
 
 export const BUCKET_FIELDS: FieldDefinition[] = [
   { path: ['path'], label: 'Snapshot' },
-  { path: ['bucket'], label: 'Bucket' }
+  { path: ['bucket'], label: 'Bucket' },
+  { path: ['format'], label: 'Archive format', type: 'select', options: ['devtool', 'native'], defaultValue: 'devtool', hint: 'native: a tar.gz of the objects.' }
 ]
 
 export const S3_FIELDS: FieldDefinition[] = [
