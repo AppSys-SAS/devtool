@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.0.1](https://github.com/AppSys-SAS/devtool/compare/v1.0.0...v1.0.1) (2026-11-25)
+
+
+### Bug Fixes
+
+* **cli:** serve the workspace interface when run from source ([c083903](https://github.com/AppSys-SAS/devtool/commit/c0839039a3da2094ae8b65b6849730e6ab36b129))
+
+
+### Miscellaneous Chores
+
+* release 1.0.1 ([edba24e](https://github.com/AppSys-SAS/devtool/commit/edba24edb07763b997ceb7961b189bcaaef04225))
+
 ## [1.0.0](https://github.com/AppSys-SAS/devtool/compare/v0.1.1...v1.0.0) (2026-11-25)
 
 
