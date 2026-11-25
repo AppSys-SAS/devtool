@@ -9,7 +9,6 @@ reviews:
     enabled: true
     drafts: false
     ignore_usernames:
-      - 'appsys-devtool-release[bot]'
       - 'dependabot[bot]'
   path_filters:
     - '!pnpm-lock.yaml'
