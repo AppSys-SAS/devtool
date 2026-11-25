@@ -33,7 +33,7 @@ import { logger, type LogLevel } from '@appsys-sas/devtool-shared'
 import pkg from '../package.json' with { type: 'json' }
 import { agentSkillFolders, distinctFolders, foreignSkills, type SkillInstallMode, syncSkills, wasSynced } from './skills.js'
 
-const UI_PATH = fileURLToPath(new URL('../ui', import.meta.url))
+const UI_PATH = fileURLToPath(new URL(process.env.DEVTOOL_UI_FOLDER ?? '../../ui/dist', import.meta.url))
 
 /**
  * Reads the identity provider of the configuration of the devtool installation.
