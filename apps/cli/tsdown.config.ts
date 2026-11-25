@@ -9,6 +9,9 @@ export default defineConfig({
   fixedExtension: false,
   clean: true,
   dts: false,
+  define: {
+    'process.env.DEVTOOL_UI_FOLDER': JSON.stringify('../ui')
+  },
   deps: {
     onlyBundle: []
   }
