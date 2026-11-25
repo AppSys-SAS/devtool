@@ -752,8 +752,8 @@ export interface EnvironmentItemPayload {
   /** The database of the container a database item names, null for the default one of its image or another kind of item. */
   database: string | null
   bucket: string | null
-  /** Archive format of a database or a bucket, null for another kind of item. */
-  format: 'devtool' | 'native' | null
+  /** Whether some tables or key groups of the item can be pulled, or pushed, alone. */
+  parts: { pull: boolean, push: boolean }
   /** Whether the groups of the developer let them pull and push the item. */
   allowed: { pull: boolean, push: boolean }
   /** The Redis server and database number, without credentials. */

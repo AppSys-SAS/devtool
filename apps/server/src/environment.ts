@@ -19,7 +19,8 @@ import {
   readEnvironmentOptions,
   redisDatabaseName,
   SHARED_CONFIG_PATH,
-  sharedConfigItem
+  sharedConfigItem,
+  transfersParts
 } from '@appsys-sas/devtool-environment'
 import { logger } from '@appsys-sas/devtool-shared'
 import { Cron } from 'croner'
@@ -263,7 +264,7 @@ export class DevtoolEnvironment {
             container: item.kind === 'database' ? item.container : null,
             database: item.kind === 'database' ? item.database : null,
             bucket: item.kind === 'bucket' ? item.bucket : null,
-            format: item.kind === 'database' || item.kind === 'bucket' ? item.format : null,
+            parts: { pull: transfersParts(item, 'pull'), push: transfersParts(item, 'push') },
             allowed: { pull: await environment.refusal(item, 'pull') === null, push: await environment.refusal(item, 'push') === null },
             redis: item.kind === 'redis' ? redisDatabaseName(item.url) : null,
             keyed,

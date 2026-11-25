@@ -2,6 +2,7 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { Readable } from 'node:stream'
+import { gzipSync } from 'node:zlib'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BackendContext, EnvironmentBackend } from '../../src/backends/backend.js'
 import { databaseEngine, splitPostgresName } from '../../src/engines.js'
@@ -43,23 +44,64 @@ describe('splitPostgresName', () => {
   })
 })
 
+/**
+ * Builds a BSON document of string fields.
+ * @param fields - The fields.
+ * @returns The document.
+ */
+function bsonDocument (fields: Record<string, string>): Buffer {
+  const elements = Object.entries(fields).map(([name, value]) => {
+    const text = Buffer.from(`${value}\0`)
+    const length = Buffer.alloc(4)
+    length.writeInt32LE(text.length)
+    return Buffer.concat([Buffer.from([0x02]), Buffer.from(`${name}\0`), length, text])
+  })
+  const size = Buffer.alloc(4)
+  size.writeInt32LE(4 + elements.reduce((total, element) => total + element.length, 0) + 1)
+  return Buffer.concat([size, ...elements, Buffer.from([0])])
+}
+
+/**
+ * Builds the beginning of a `mongodump --archive --gzip` archive listing collections of a database.
+ * @param db - The database the collections were dumped from.
+ * @param collections - The collections.
+ * @returns The gzip-compressed prelude.
+ */
+function mongodumpPrelude (db: string, collections: string[]): Buffer {
+  const terminator = Buffer.alloc(4)
+  terminator.writeInt32LE(-1)
+  return gzipSync(Buffer.concat([
+    Buffer.from([0x6d, 0xe2, 0x99, 0x81]),
+    bsonDocument({ version: '0.1', server_version: '7.0.0' }),
+    ...collections.map(collection => bsonDocument({ db, collection, metadata: '{}' })),
+    terminator
+  ]))
+}
+
 describe('database targets', () => {
   it('passes the database of the item to the container, and nothing for the default one of the image', async () => {
     const mongodb = databaseEngine('mongodb')
-    await mongodb.restoreNative({ container: 'mongo', database: 'catalog' }, Readable.from([Buffer.from('archive')]), ['users'])
-    await mongodb.restoreNative({ container: 'mongo', database: null }, Readable.from([Buffer.from('archive')]), null)
+    const archive = (): Readable => Readable.from([mongodumpPrelude('production', ['users', 'fs.users'])])
+    await mongodb.restoreNative({ container: 'mongo', database: 'catalog' }, archive, ['users'])
+    await mongodb.restoreNative({ container: 'mongo', database: null }, archive, null)
 
     const [named, unnamed] = await dockerCalls()
     expect(named.slice(0, 4)).toEqual(['exec', '-i', '-e', 'ADT_DATABASE=catalog'])
     expect(named[4]).toBe('mongo')
     expect(named[7]).toContain('mongorestore --quiet --archive --gzip --drop')
-    expect(named.slice(-2)).toEqual(['--nsInclude', '*.users'])
+    expect(named.slice(-2)).toEqual(['--nsInclude', 'production.users'])
     expect(unnamed.slice(0, 3)).toEqual(['exec', '-i', 'mongo'])
     expect(unnamed[unnamed.length - 1]).toBe('sh')
   })
 
+  it('refuses to restore mongodb collections the archive does not hold, before running anything', async () => {
+    const archive = (): Readable => Readable.from([mongodumpPrelude('production', ['users'])])
+    await expect(databaseEngine('mongodb').restoreNative({ container: 'mongo', database: 'catalog' }, archive, ['users', 'orders'])).rejects.toThrow('not in the archive: orders')
+    expect(await dockerCalls()).toEqual([])
+  })
+
   it('restores some postgres tables from a native archive as rows only, each schema and table paired', async () => {
-    await databaseEngine('postgres').restoreNative({ container: 'pg', database: null }, Readable.from([Buffer.from('archive')]), ['public.users', '"Sales"."Orders"'])
+    await databaseEngine('postgres').restoreNative({ container: 'pg', database: null }, () => Readable.from([Buffer.from('archive')]), ['public.users', '"Sales"."Orders"'])
 
     const [call] = await dockerCalls()
     expect(call.slice(call.indexOf('sh', 4) + 1)).toEqual([
@@ -69,25 +111,36 @@ describe('database targets', () => {
     ])
     const script = call.find(arg => arg.includes('pg_restore'))
     expect(script).toContain('is not in the archive')
+    expect(script).toContain('pg_restore -l -n "$1" -t "$2"')
     expect(script).toContain('pg_restore --data-only -L')
   })
 
-  it('knows the first bytes of the native archives of each engine', () => {
-    expect(databaseEngine('postgres').nativeMagic.toString()).toBe('PGDMP')
-    expect([...databaseEngine('mongodb').nativeMagic]).toEqual([0x1f, 0x8b])
-    expect([...databaseEngine('mariadb').nativeMagic]).toEqual([0x1f, 0x8b])
+  it('tells the native archives of each engine from those of the others', () => {
+    const heads = {
+      postgres: Buffer.from('PGDMP\u0001\u000e'),
+      mongodb: Buffer.from([0x6d, 0xe2, 0x99, 0x81, 0x00]),
+      mariadb: Buffer.from('/*M!999999\\- enable the sandbox mode */\n-- MariaDB dump')
+    }
+    for (const engine of ['postgres', 'mongodb', 'mariadb'] as const) {
+      for (const [other, head] of Object.entries(heads)) {
+        expect(databaseEngine(engine).isNativeHead(head), `${engine} reading a ${other} archive`).toBe(engine === other)
+      }
+    }
+    expect(databaseEngine('mariadb').isNativeHead(Buffer.from('-- MySQL dump 10.13'))).toBe(true)
+    expect([databaseEngine('postgres').nativeGzipped, databaseEngine('mongodb').nativeGzipped, databaseEngine('mariadb').nativeGzipped]).toEqual([false, true, true])
   })
 
   it('refuses to restore some tables of a native mariadb archive', async () => {
-    await expect(databaseEngine('mariadb').restoreNative({ container: 'db', database: null }, Readable.from([]), ['users'])).rejects.toThrow('restores the whole database only')
+    await expect(databaseEngine('mariadb').restoreNative({ container: 'db', database: null }, () => Readable.from([]), ['users'])).rejects.toThrow('restores the whole database only')
     expect(await dockerCalls()).toEqual([])
   })
 
-  it('leaves the database untouched when the pulled file is not a native archive of its engine', async () => {
-    const item: EnvironmentItem = { kind: 'database', path: 'api/db.dump', backend: 'team', encryption: null, groups: { pull: null, push: null }, engine: 'postgres', container: 'pg', database: 'shop', format: 'native' }
+  it('leaves a mariadb database untouched when its native archive is truncated', async () => {
+    const archive = gzipSync(`-- MariaDB dump\n${'INSERT INTO t VALUES (1);\n'.repeat(1000)}`)
+    const item: EnvironmentItem = { kind: 'database', path: 'api/db.sql.gz', backend: 'team', encryption: null, groups: { pull: null, push: null }, engine: 'mariadb', container: 'db', database: 'shop', format: 'native' }
     const backend: EnvironmentBackend = {
       list: async () => [],
-      download: async () => Readable.from([Buffer.from('-- plain SQL dump')]),
+      download: async () => Readable.from([archive.subarray(0, archive.length - 40)]),
       upload: async () => undefined,
       remove: async () => undefined,
       close: async () => undefined
@@ -95,7 +148,27 @@ describe('database targets', () => {
     const context: BackendContext = { resolve: async text => text, askSecret: async () => '', cacheDir: folder, configFolder: folder, auth: null }
     const environment = new Environment(new Map([['team', backend]]), { folder, backends: [], defaultBackend: 'team', items: [item], configFiles: [], autoPulls: [], s3: null }, context)
 
-    await expect(environment.pull({ item, tables: null })).rejects.toThrow('api/db.dump is not a native postgres archive')
+    await expect(environment.pull({ item, tables: null })).rejects.toThrow('api/db.sql.gz is not a complete native mariadb archive')
+    expect(await dockerCalls()).toEqual([])
+  })
+
+  it.each([
+    ['postgres', Buffer.from('-- plain SQL dump')],
+    ['mongodb', gzipSync('-- MariaDB dump 10.19')],
+    ['mariadb', gzipSync(Buffer.from([0x6d, 0xe2, 0x99, 0x81, 0x00, 0x01]))]
+  ] as const)('leaves a %s database untouched when the pulled file is not one of its native archives', async (engine, content) => {
+    const item: EnvironmentItem = { kind: 'database', path: 'api/db.dump', backend: 'team', encryption: null, groups: { pull: null, push: null }, engine, container: 'db', database: 'shop', format: 'native' }
+    const backend: EnvironmentBackend = {
+      list: async () => [],
+      download: async () => Readable.from([content]),
+      upload: async () => undefined,
+      remove: async () => undefined,
+      close: async () => undefined
+    }
+    const context: BackendContext = { resolve: async text => text, askSecret: async () => '', cacheDir: folder, configFolder: folder, auth: null }
+    const environment = new Environment(new Map([['team', backend]]), { folder, backends: [], defaultBackend: 'team', items: [item], configFiles: [], autoPulls: [], s3: null }, context)
+
+    await expect(environment.pull({ item, tables: null })).rejects.toThrow(`api/db.dump is not a native ${engine} archive`)
     expect(await dockerCalls()).toEqual([])
   })
 })

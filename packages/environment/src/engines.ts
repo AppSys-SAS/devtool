@@ -31,16 +31,27 @@ export interface DatabaseEngine {
   importTable(target: DatabaseTarget, table: string, sql: AsyncIterable<Buffer>, replace: boolean): Promise<void>
   /** Brings what depends on loaded rows, such as sequences, in line with them. */
   finish(target: DatabaseTarget): Promise<void>
-  /** First bytes of every archive of the engine's own tools. */
-  readonly nativeMagic: Buffer
+  /** Whether the archives of the engine's own tools are gzip-compressed. */
+  readonly nativeGzipped: boolean
+  /** Tells whether the first bytes of an archive, once uncompressed, are those of an archive of the engine's own tools. */
+  isNativeHead(head: Buffer): boolean
+  /** Reads a whole archive of the engine's own tools without writing anything, failing when it is truncated or corrupted. */
+  checkNative(target: DatabaseTarget, archive: AsyncIterable<Buffer>): Promise<void>
   /** Dumps the whole database in the archive format of the engine's own tools. */
   dumpNative(target: DatabaseTarget): AsyncIterable<Buffer>
-  /** Loads an archive of the engine's own tools: every table into an emptied database, or the rows of some tables, replaced. */
-  restoreNative(target: DatabaseTarget, archive: AsyncIterable<Buffer>, tables: string[] | null): Promise<void>
+  /**
+   * Loads an archive of the engine's own tools: every table into an emptied database, or the rows of
+   * some tables, replaced, each having to be in the archive. `archive` opens the archive, once per read.
+   */
+  restoreNative(target: DatabaseTarget, archive: () => AsyncIterable<Buffer>, tables: string[] | null): Promise<void>
 }
 
 const STDERR_TAIL_BYTES = 4096
-const GZIP_MAGIC = Buffer.from([0x1f, 0x8b])
+const PG_DUMP_MAGIC = Buffer.from('PGDMP')
+const MONGODUMP_MAGIC = Buffer.from([0x6d, 0xe2, 0x99, 0x81])
+const MONGODUMP_PRELUDE_END = -1
+const MAX_PRELUDE_BYTES = 16 * 1024 * 1024
+const SQL_SCRIPT_STARTS = ['--', '/*']
 
 /**
  * Keeps the end of the error output of a process.
@@ -178,6 +189,17 @@ function textStream (text: string): AsyncIterable<Buffer> {
 }
 
 /**
+ * Uncompresses a whole gzip stream, which fails when the stream is truncated or corrupted.
+ *
+ * @param archive - The gzip stream.
+ */
+async function uncompressWhole (archive: AsyncIterable<Buffer>): Promise<void> {
+  for await (const chunk of transformed(archive, createGunzip())) {
+    void chunk
+  }
+}
+
+/**
  * Builds the line of a script setting `$DB`, the database of the target, to the one the image
  * creates when the target names none.
  *
@@ -215,6 +237,7 @@ export function splitPostgresName (name: string): { schema: string, table: strin
 }
 
 const POSTGRES_SETUP = `: "\${POSTGRES_USER:=postgres}"
+: "\${POSTGRES_DB:=$POSTGRES_USER}"
 ${databaseSetup('POSTGRES_DB')}`
 const POSTGRES_CLIENT = 'psql -U "$POSTGRES_USER" -d "$DB" -X -q -v ON_ERROR_STOP=1'
 const POSTGRES_SEQUENCES_SQL = `DO $$
@@ -243,11 +266,11 @@ const POSTGRES_PARTIAL_RESTORE = `set -e
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 cat > "$work/archive"
-pg_restore -l "$work/archive" > "$work/toc"
+pg_restore -l "$work/archive" > /dev/null
 empty="$1"; shift
 : > "$work/list"
 while [ $# -gt 0 ]; do
-  awk -v schema="$1" -v table="$2" '$4 == "TABLE" && $5 == "DATA" && $6 == schema && $7 == table' "$work/toc" > "$work/entry"
+  pg_restore -l -n "$1" -t "$2" "$work/archive" | grep -v '^;' | grep -F ' TABLE DATA ' > "$work/entry" || true
   [ -s "$work/entry" ] || { echo "$1.$2 is not in the archive" >&2; exit 1; }
   cat "$work/entry" >> "$work/list"
   shift 2
@@ -284,13 +307,19 @@ const postgres: DatabaseEngine = {
   async finish (target) {
     await scriptInput(target, `${POSTGRES_SETUP}${POSTGRES_CLIENT}`, textStream(POSTGRES_SEQUENCES_SQL))
   },
-  nativeMagic: Buffer.from('PGDMP'),
+  nativeGzipped: false,
+  isNativeHead (head) {
+    return head.subarray(0, PG_DUMP_MAGIC.length).equals(PG_DUMP_MAGIC)
+  },
+  async checkNative (target, archive) {
+    await scriptInput(target, `${POSTGRES_SETUP}pg_restore -f /dev/null`, archive)
+  },
   dumpNative (target) {
     return scriptOutput(target, `${POSTGRES_SETUP}pg_dump -U "$POSTGRES_USER" -Fc "$DB"`)
   },
   async restoreNative (target, archive, tables) {
     if (tables === null) {
-      await scriptInput(target, `${POSTGRES_SETUP}pg_restore -U "$POSTGRES_USER" -d "$DB" --no-owner --no-privileges --exit-on-error`, archive)
+      await scriptInput(target, `${POSTGRES_SETUP}pg_restore -U "$POSTGRES_USER" -d "$DB" --no-owner --no-privileges --exit-on-error`, archive())
       return
     }
 
@@ -299,7 +328,7 @@ const postgres: DatabaseEngine = {
       const { schema, table: name } = splitPostgresName(table)
       return [schema, name]
     })
-    await scriptInput(target, `${POSTGRES_SETUP}${POSTGRES_PARTIAL_RESTORE}`, archive, [empty, ...selection])
+    await scriptInput(target, `${POSTGRES_SETUP}${POSTGRES_PARTIAL_RESTORE}`, archive(), [empty, ...selection])
   }
 }
 
@@ -334,7 +363,8 @@ const mariadb: DatabaseEngine = {
   async reset (target) {
     await scriptText(
       target,
-      `${MARIADB_SETUP}mariadb -uroot -e "DROP DATABASE IF EXISTS \\\`$DB\\\`; CREATE DATABASE \\\`$DB\\\`;\${MARIADB_USER:+ GRANT ALL PRIVILEGES ON \\\`$DB\\\`.* TO '$MARIADB_USER'@'%'}"`
+      `${MARIADB_SETUP}QUOTED=$(printf '%s' "$DB" | sed 's/\`/\`\`/g')
+mariadb -uroot -e "DROP DATABASE IF EXISTS \\\`$QUOTED\\\`; CREATE DATABASE \\\`$QUOTED\\\`;\${MARIADB_USER:+ GRANT ALL PRIVILEGES ON \\\`$QUOTED\\\`.* TO '$MARIADB_USER'@'%'}"`
     )
   },
   async importSchema (target, sql) {
@@ -347,7 +377,14 @@ const mariadb: DatabaseEngine = {
   finish () {
     return Promise.resolve()
   },
-  nativeMagic: GZIP_MAGIC,
+  nativeGzipped: true,
+  isNativeHead (head) {
+    const text = head.toString('utf-8').trimStart()
+    return !head.includes(0) && SQL_SCRIPT_STARTS.some(start => text.startsWith(start))
+  },
+  checkNative (_target, archive) {
+    return uncompressWhole(archive)
+  },
   dumpNative (target) {
     return transformed(scriptOutput(target, `${MARIADB_SETUP}mariadb-dump -uroot --single-transaction --routines --triggers --events "$DB"`), createGzip())
   },
@@ -355,7 +392,7 @@ const mariadb: DatabaseEngine = {
     if (tables !== null) {
       throw new Error('a native mariadb archive is a SQL script: it restores the whole database only')
     }
-    await scriptInput(target, `${MARIADB_SETUP}mariadb -uroot "$DB"`, transformed(archive, createGunzip()))
+    await scriptInput(target, `${MARIADB_SETUP}mariadb -uroot "$DB"`, transformed(archive(), createGunzip()))
   }
 }
 
@@ -375,11 +412,88 @@ const MONGODB_SETUP = `${databaseSetup('MONGO_INITDB_DATABASE')}auth() {
 /**
  * Escapes the wildcards of a MongoDB namespace pattern.
  *
- * @param name - A collection name.
+ * @param name - A database or collection name.
  * @returns The name, matching itself only.
  */
 function escapeNamespace (name: string): string {
   return name.replace(/[\\*]/g, '\\$&')
+}
+
+/** A collection of a database. */
+interface MongoNamespace {
+  db: string
+  collection: string
+}
+
+/**
+ * Reads the string fields at the top level of a BSON document.
+ *
+ * @param document - The document.
+ * @returns The values of its string fields, by name.
+ */
+function bsonStrings (document: Buffer): Map<string, string> {
+  const fixedSizes: Record<number, number> = { 0x01: 8, 0x07: 12, 0x08: 1, 0x09: 8, 0x0a: 0, 0x10: 4, 0x11: 8, 0x12: 8, 0x13: 16 }
+  const strings = new Map<string, string>()
+  let offset = 4
+  while (offset < document.length - 1) {
+    const type = document[offset]
+    const nameEnd = document.indexOf(0, offset + 1)
+    const name = document.toString('utf-8', offset + 1, nameEnd)
+    offset = nameEnd + 1
+    if (type === 0x02) {
+      const length = document.readInt32LE(offset)
+      strings.set(name, document.toString('utf-8', offset + 4, offset + 4 + length - 1))
+      offset += 4 + length
+    } else if (type === 0x03 || type === 0x04) {
+      offset += document.readInt32LE(offset)
+    } else if (type === 0x05) {
+      offset += 5 + document.readInt32LE(offset)
+    } else if (type in fixedSizes) {
+      offset += fixedSizes[type]
+    } else {
+      break
+    }
+  }
+  return strings
+}
+
+/**
+ * Reads the collections listed in the prelude of an archive of `mongodump --archive --gzip`: its
+ * magic number, a header document, then one document per collection up to a -1 terminator.
+ *
+ * @param archive - The archive.
+ * @returns The collections, with the database they were dumped from.
+ */
+async function mongodumpNamespaces (archive: AsyncIterable<Buffer>): Promise<MongoNamespace[]> {
+  const chunks: Buffer[] = []
+  let length = 0
+  for await (const chunk of transformed(archive, createGunzip())) {
+    chunks.push(chunk as Buffer)
+    length += (chunk as Buffer).length
+    const prelude = Buffer.concat(chunks)
+    let offset = MONGODUMP_MAGIC.length
+    const namespaces: MongoNamespace[] = []
+    for (let index = 0; offset + 4 <= prelude.length; index += 1) {
+      const size = prelude.readInt32LE(offset)
+      if (size === MONGODUMP_PRELUDE_END) {
+        return namespaces
+      }
+      if (offset + size > prelude.length) {
+        break
+      }
+      const fields = bsonStrings(prelude.subarray(offset, offset + size))
+      const db = fields.get('db')
+      const collection = fields.get('collection')
+      if (index > 0 && db !== undefined && collection !== undefined) {
+        namespaces.push({ db, collection })
+      }
+      offset += size
+    }
+    if (length > MAX_PRELUDE_BYTES) {
+      break
+    }
+  }
+  throw new Error('not a mongodump archive: no complete list of collections')
 }
 
 /**
@@ -425,16 +539,33 @@ const mongodb: DatabaseEngine = {
   finish () {
     return Promise.resolve()
   },
-  nativeMagic: GZIP_MAGIC,
+  nativeGzipped: true,
+  isNativeHead (head) {
+    return head.subarray(0, MONGODUMP_MAGIC.length).equals(MONGODUMP_MAGIC)
+  },
+  checkNative (_target, archive) {
+    return uncompressWhole(archive)
+  },
   dumpNative (target) {
     return scriptOutput(target, `${MONGODB_SETUP}auth mongodump --quiet --archive --gzip --db "$DB"`)
   },
   async restoreNative (target, archive, tables) {
+    let selection: string[] = []
+    if (tables !== null) {
+      const namespaces = await mongodumpNamespaces(archive())
+      const missing = tables.filter(table => !namespaces.some(namespace => namespace.collection === table))
+      if (missing.length > 0) {
+        throw new Error(`not in the archive: ${missing.join(', ')}`)
+      }
+      selection = namespaces
+        .filter(namespace => tables.includes(namespace.collection))
+        .flatMap(namespace => ['--nsInclude', `${escapeNamespace(namespace.db)}.${escapeNamespace(namespace.collection)}`])
+    }
     await scriptInput(
       target,
       `${MONGODB_SETUP}auth mongorestore --quiet --archive --gzip --drop --nsFrom '$db$.$coll$' --nsTo "$DB"'.$coll$' "$@"`,
-      archive,
-      (tables ?? []).flatMap(table => ['--nsInclude', `*.${escapeNamespace(table)}`])
+      archive(),
+      selection
     )
   }
 }

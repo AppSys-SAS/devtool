@@ -1,7 +1,7 @@
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { type EnvironmentItem, type EnvironmentOptions, overwritesLocalData, parseTargets, readEnvironmentOptions, SHARED_CONFIG_PATH } from '../../src/environment.js'
+import { type EnvironmentItem, type EnvironmentOptions, overwritesLocalData, parseTargets, readEnvironmentOptions, SHARED_CONFIG_PATH, transfersParts } from '../../src/environment.js'
 
 const open = { groups: { pull: null, push: null } }
 const fileItem: EnvironmentItem = { kind: 'file', path: 'api/config.yml', backend: null, encryption: null, ...open, ignore: null }
@@ -555,6 +555,16 @@ describe('readEnvironmentOptions', () => {
       expect(() => readEnvironmentOptions({ encryption: [{ paths: ['*'] }] })).toThrow('environment.encryption[0] needs paths and must be')
       expect(() => readEnvironmentOptions({ files: [{ path: 'api/config.yml', encryption: { prompt: 'yes' } }] })).toThrow('invalid encryption of api/config.yml')
     })
+  })
+})
+
+describe('transfersParts', () => {
+  it('lets some tables or key groups be chosen except in a native archive pushed or a native mariadb archive', () => {
+    const native = { ...databaseItem, format: 'native' as const }
+    expect([transfersParts(databaseItem, 'pull'), transfersParts(databaseItem, 'push')]).toEqual([true, true])
+    expect([transfersParts(native, 'pull'), transfersParts(native, 'push')]).toEqual([true, false])
+    expect([transfersParts({ ...native, engine: 'mariadb' }, 'pull'), transfersParts({ ...native, engine: 'mariadb' }, 'push')]).toEqual([false, false])
+    expect([transfersParts(redisItem, 'pull'), transfersParts(fileItem, 'pull'), transfersParts(bucketItem, 'pull')]).toEqual([true, false, false])
   })
 })
 
