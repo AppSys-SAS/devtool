@@ -92,7 +92,7 @@ export function transformed (source: AsyncIterable<Buffer>, transform: Transform
 /**
  * Reads lines and exact byte counts from a stream of chunks.
  */
-export class BufferedReader {
+class BufferedReader {
   private _buffer: Buffer = Buffer.alloc(0)
 
   /**
@@ -139,15 +139,6 @@ export class BufferedReader {
     const chunk = this._buffer.subarray(0, size)
     this._buffer = this._buffer.subarray(size)
     return chunk
-  }
-
-  /**
-   * Tells whether every byte of the source was read.
-   *
-   * @returns True at the end of the source.
-   */
-  async atEnd (): Promise<boolean> {
-    return this._buffer.length === 0 && !(await this.fill())
   }
 
   /**

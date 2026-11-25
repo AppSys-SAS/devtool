@@ -27,6 +27,7 @@ export {
   readEnvironmentOptions,
   SHARED_CONFIG_PATH,
   sharedConfigItem,
+  transfersParts,
   type TransferResult
 } from './environment.js'
 export type { TransferDirection } from './access.js'

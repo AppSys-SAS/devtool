@@ -173,8 +173,8 @@ environment:
 ```
 
 A MongoDB archive dumped from a database of another name is restored into the database of the item.
-A pulled file that does not start like an archive of the engine is refused before the database is
-touched.
+A pulled file is read whole before the database is touched: an archive of another engine, truncated
+or corrupted, is refused and the database stays as it is.
 
 A pull of some tables restores only those: their collections replaced for `mongodb`; their rows
 replaced in one transaction for `postgres`, every table having to be in the archive. A native `mariadb`

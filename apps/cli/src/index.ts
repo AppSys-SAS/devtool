@@ -24,6 +24,7 @@ import {
   redisDatabaseName,
   SHARED_CONFIG_PATH,
   sharedConfigItem,
+  transfersParts,
   type TransferDirection,
   type TransferResult
 } from '@appsys-sas/devtool-environment'
@@ -110,13 +111,15 @@ async function closeBackends (backends: Map<string, EnvironmentBackend>): Promis
 }
 
 /**
- * Runs a task on a backend of the environment, when its groups let the developer transfer in the
- * direction of the task, then closes the backends.
+ * Runs a task on a file of a backend of the environment, when the groups of the item stored there,
+ * or else of the backend, let the developer transfer in the direction of the task, then closes the
+ * backends.
  * @param name The name of the backend, the default one when missing.
- * @param direction Whether the task reads files of the backend, or writes or deletes some.
+ * @param filePath The path of the file in the backend.
+ * @param direction Whether the task reads the file, or writes or deletes it.
  * @param task Uses the backend.
  */
-async function withBackend (name: string | undefined, direction: 'pull' | 'push', task: (backend: EnvironmentBackend) => Promise<void>): Promise<void> {
+async function withBackend (name: string | undefined, filePath: string, direction: TransferDirection, task: (backend: EnvironmentBackend) => Promise<void>): Promise<void> {
   const { options, backends, environment } = await openEnvironment(resolveDefaultConfigPaths(), false)
   try {
     const slug = name ?? options.defaultBackend!
@@ -125,9 +128,10 @@ async function withBackend (name: string | undefined, direction: 'pull' | 'push'
     if (!backend || !settings) {
       throw new Error(`no backend named ${slug} in environment.backends (${[...backends.keys()].join(', ')})`)
     }
-    const refusal = await environment.refusal(settings, direction)
+    const item = options.items.find(candidate => candidate.path === filePath && candidate.backend === slug)
+    const refusal = await environment.refusal(item ?? settings, direction)
     if (refusal !== null) {
-      throw new Error(`${slug}: ${refusal}`)
+      throw new Error(`${filePath} on ${slug}: ${refusal}`)
     }
     await task(backend)
   } finally {
@@ -195,14 +199,15 @@ async function transferableItems (environment: Environment, items: EnvironmentIt
 }
 
 /**
- * Asks which items, and which tables of the databases or key groups of the Redis databases, to transfer.
+ * Asks which items, and which tables of the databases or key groups of the Redis databases when they
+ * can be transferred alone, to transfer.
  * @param candidates The items to choose from.
- * @param verb What is done with them.
+ * @param direction The direction of the transfer.
  * @returns The selections.
  */
-async function chooseSelections (candidates: EnvironmentItem[], verb: string): Promise<EnvironmentSelection[]> {
+async function chooseSelections (candidates: EnvironmentItem[], direction: TransferDirection): Promise<EnvironmentSelection[]> {
   const items = await checkbox({
-    message: `Items to ${verb}`,
+    message: `Items to ${direction}`,
     choices: candidates.map(item => ({ name: describeItem(item), value: item })),
     required: true,
     pageSize: 15
@@ -210,7 +215,7 @@ async function chooseSelections (candidates: EnvironmentItem[], verb: string): P
 
   const selections: EnvironmentSelection[] = []
   for (const item of items) {
-    if (item.kind !== 'database' && item.kind !== 'redis') {
+    if ((item.kind !== 'database' && item.kind !== 'redis') || !transfersParts(item, direction)) {
       selections.push({ item, tables: null })
       continue
     }
@@ -483,7 +488,7 @@ async function main (): Promise<void> {
     .description('Download a file; `-` as destination writes it to the standard output')
     .option('-b, --backend <name>', 'backend of environment.backends, the default one when omitted')
     .action(async (filePath: string, destination: string | undefined, flags: { backend?: string }) => {
-      await withBackend(flags.backend, 'pull', async backend => {
+      await withBackend(flags.backend, filePath, 'pull', async backend => {
         const content = await backend.download(filePath)
         if (!content) {
           throw new Error(`no such file: ${filePath}`)
@@ -511,7 +516,7 @@ async function main (): Promise<void> {
     .option('-b, --backend <name>', 'backend of environment.backends, the default one when omitted')
     .option('-t, --type <mediaType>', 'media type of the file, guessed from its name when omitted')
     .action(async (filePath: string, localFile: string, flags: { backend?: string, type?: string }) => {
-      await withBackend(flags.backend, 'push', async backend => {
+      await withBackend(flags.backend, filePath, 'push', async backend => {
         await backend.upload(filePath, path.resolve(localFile), flags.type ?? mediaTypeOf(filePath))
         logger.info('CLI', 'Push', `${localFile} -> ${filePath}`)
       })
@@ -522,7 +527,7 @@ async function main (): Promise<void> {
     .description('Delete a file')
     .option('-b, --backend <name>', 'backend of environment.backends, the default one when omitted')
     .action(async (filePath: string, flags: { backend?: string }) => {
-      await withBackend(flags.backend, 'push', async backend => {
+      await withBackend(flags.backend, filePath, 'push', async backend => {
         await backend.remove(filePath)
         logger.info('CLI', 'Remove', filePath)
       })

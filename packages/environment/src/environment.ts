@@ -1,9 +1,10 @@
 import { createReadStream } from 'node:fs'
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import { createGunzip } from 'node:zlib'
 import type { S3Client } from '@aws-sdk/client-s3'
 import { mergeTransferGroups, OPEN_ACCESS, type TransferAccess, type TransferDirection, TransferGate, readTransferGroups } from './access.js'
-import { ArchiveWriter, readArchive, type RecordHeader } from './archive.js'
+import { ArchiveWriter, readArchive, type RecordHeader, transformed } from './archive.js'
 import { type BackendContext, type BackendOptions, encrypted, EncryptionSecret, type EncryptionSettings, type EnvironmentBackend, readBackends, readEncryption } from './backends/index.js'
 import { plainLengthOf } from './backends/encryption.js'
 import { createS3Client, objectsOfArchive, objectsOfTar, restoreBucket, type S3Options, snapshotBucket, snapshotBucketTar } from './buckets.js'
@@ -15,6 +16,8 @@ import { type ConfigFormat, configFormatOf, countChoices, diffConfig, IgnoredKey
 
 /** Path of the shared devtool configuration, the file declaring the environment. */
 export const SHARED_CONFIG_PATH = 'devtool/config.yml'
+
+const HEAD_BYTES = 64
 
 const MEDIA_TYPES: Record<string, string> = {
   '.yml': 'application/yaml',
@@ -352,6 +355,24 @@ export function parseTargets (options: EnvironmentOptions, targets: string[]): E
 }
 
 /**
+ * Tells whether some tables of a database, or key groups of a Redis database, can be transferred
+ * alone in a direction: never in a native archive pushed, nor in a native mariadb archive.
+ *
+ * @param item - The item.
+ * @param direction - The direction.
+ * @returns True when a part of the item can be chosen.
+ */
+export function transfersParts (item: EnvironmentItem, direction: TransferDirection): boolean {
+  if (item.kind === 'redis') {
+    return true
+  }
+  if (item.kind !== 'database') {
+    return false
+  }
+  return item.format === 'devtool' || (direction === 'pull' && item.engine !== 'mariadb')
+}
+
+/**
  * Gives the shared devtool configuration as an item of the default backend.
  *
  * @param options - The environment.
@@ -370,6 +391,27 @@ export function sharedConfigItem (options: EnvironmentOptions): EnvironmentItem 
  */
 export async function listTables (item: Extract<EnvironmentItem, { kind: 'database' | 'redis' }>): Promise<string[]> {
   return item.kind === 'redis' ? listRedisGroups(item.url) : databaseEngine(item.engine).listTables(item)
+}
+
+/**
+ * Reads the first bytes of a file, uncompressed when it is gzip-compressed.
+ *
+ * @param filePath - The file.
+ * @param gzipped - Whether the file is gzip-compressed.
+ * @returns Its first bytes, empty when it holds none or cannot be uncompressed.
+ */
+async function readHead (filePath: string, gzipped: boolean): Promise<Buffer> {
+  const source = createReadStream(filePath, { end: gzipped ? undefined : HEAD_BYTES - 1 })
+  try {
+    for await (const chunk of gzipped ? transformed(source, createGunzip()) : source) {
+      return (chunk as Buffer).subarray(0, HEAD_BYTES)
+    }
+  } catch {
+    return Buffer.alloc(0)
+  } finally {
+    source.destroy()
+  }
+  return Buffer.alloc(0)
 }
 
 /**
@@ -538,6 +580,7 @@ export class Environment {
    */
   async pull (selection: EnvironmentSelection): Promise<TransferResult> {
     const { item, tables } = selection
+    await this.assertAllowed(item, 'pull')
     if (item.kind === 'file' && (selection.keys || await this.mergesWhole(item))) {
       return this.pullKeys(item, selection.keys ?? null)
     }
@@ -618,7 +661,8 @@ export class Environment {
   }
 
   /**
-   * Restores a local database from an archive of the engine's own tools.
+   * Restores a local database from an archive of the engine's own tools, read whole first so that an
+   * archive of another engine, truncated or corrupted, leaves the database untouched.
    *
    * @param item - The database item.
    * @param localPath - The archive.
@@ -627,23 +671,19 @@ export class Environment {
    */
   private async restoreNative (item: Extract<EnvironmentItem, { kind: 'database' }>, localPath: string, tables: string[] | null): Promise<TransferResult> {
     const engine = databaseEngine(item.engine)
-    const head = Buffer.alloc(engine.nativeMagic.length)
-    const file = await fs.open(localPath)
-    try {
-      await file.read(head, 0, head.length, 0)
-    } finally {
-      await file.close()
-    }
-    if (!head.equals(engine.nativeMagic)) {
+    if (!engine.isNativeHead(await readHead(localPath, engine.nativeGzipped))) {
       throw new Error(`${item.path} is not a native ${item.engine} archive`)
     }
+    await engine.checkNative(item, createReadStream(localPath)).catch((error: unknown) => {
+      throw new Error(`${item.path} is not a complete native ${item.engine} archive: ${error instanceof Error ? error.message : String(error)}`)
+    })
 
     if (tables === null) {
       await engine.reset(item)
     } else {
       assertKnownTables(tables, await engine.listTables(item), databaseNameOf(item))
     }
-    await engine.restoreNative(item, createReadStream(localPath), tables)
+    await engine.restoreNative(item, () => createReadStream(localPath), tables)
     await engine.finish(item)
 
     return { done: true, detail: tables === null ? `database restored in ${databaseNameOf(item)}` : `tables restored: ${tables.join(', ')}` }

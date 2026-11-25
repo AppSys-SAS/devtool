@@ -131,14 +131,15 @@ const overwritten = computed(() =>
 const selectedItems = computed(() => (state.value?.items ?? []).filter(item => selected.value[item.path]))
 
 /**
- * Tells whether the groups of the developer let them transfer in a direction: every selected item,
- * or at least one item while none is selected.
+ * Tells whether a direction can be run: the groups of the developer let them transfer every selected
+ * item, those restricted to some tables or key groups allowing it, or at least one item while none is
+ * selected.
  * @param direction The direction.
  * @returns True when the action is shown.
  */
 function shows (direction: 'pull' | 'push'): boolean {
   return selectedItems.value.length > 0
-    ? selectedItems.value.every(item => item.allowed[direction])
+    ? selectedItems.value.every(item => item.allowed[direction] && (selected.value[item.path].tables === null || item.parts[direction]))
     : (state.value?.items ?? []).some(item => item.allowed[direction])
 }
 
@@ -659,7 +660,7 @@ onMounted(() => wsStore.envRefresh())
             </div>
 
             <div
-              v-if="(item.kind === 'database' || item.kind === 'redis') && selected[item.path]"
+              v-if="(item.parts.pull || item.parts.push) && selected[item.path]"
               class="space-y-3 px-4 pb-4 pl-[4.25rem]"
             >
               <div class="inline-flex rounded-md border p-0.5 text-xs">

@@ -108,6 +108,7 @@ describe('Environment groups', () => {
 
     await expect(environment.pull({ item, tables: null })).rejects.toThrow('api/config.yml: pull needs one of the groups admins')
     await expect(environment.push({ item, tables: null })).rejects.toThrow('api/config.yml: push is disabled')
+    expect(backend.list).not.toHaveBeenCalled()
     expect(backend.download).not.toHaveBeenCalled()
     expect(backend.upload).not.toHaveBeenCalled()
   })
