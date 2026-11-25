@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, shallowRef } from 'vue'
 import { Icon } from '@iconify/vue'
-import type { DirectoryExtra } from '@appsys/devtool-shared'
+import type { DirectoryExtra } from '@appsys-sas/devtool-shared'
 import CommandInputsForm from '@/components/CommandInputsForm.vue'
 import { commandLine, commandName, iconFromMeta, runDirectoryCommand } from '@/lib/directory-commands'
 import { cn } from '@/lib/utils'

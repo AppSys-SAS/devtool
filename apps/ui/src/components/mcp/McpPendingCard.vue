@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { CommandInputValue, McpAnswer } from '@appsys/devtool-shared'
+import type { CommandInputValue, McpAnswer } from '@appsys-sas/devtool-shared'
 import McpRequestDetails from '@/components/mcp/McpRequestDetails.vue'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import mcpStore from '@/stores/mcp'

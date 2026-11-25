@@ -1,4 +1,4 @@
-import type { ClientConfigPayload, ProjectDefinition, StreamUpdatePayload } from '@appsys/devtool-shared'
+import type { ClientConfigPayload, ProjectDefinition, StreamUpdatePayload } from '@appsys-sas/devtool-shared'
 
 export type CommandStreamStatus = 'STOPPED' | 'RUNNING' | 'ERROR'
 

@@ -1,4 +1,4 @@
-import schema from '@appsys/devtool-config/schema/config.schema.json'
+import schema from '@appsys-sas/devtool-config/schema/config.schema.json'
 import { Ajv2020 } from 'ajv/dist/2020.js'
 import type { ErrorObject } from 'ajv/dist/2020.js'
 

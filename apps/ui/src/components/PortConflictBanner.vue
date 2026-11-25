@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { TriangleAlert } from '@lucide/vue'
-import type { PortConflict, PortConflictAction } from '@appsys/devtool-shared'
+import type { PortConflict, PortConflictAction } from '@appsys-sas/devtool-shared'
 import { Button } from '@/components/ui/button'
 
 defineProps<{

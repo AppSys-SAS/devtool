@@ -1,6 +1,12 @@
 {
-  "name": "@appsys/devtool-certs",
+  "name": "@appsys-sas/devtool-certs",
   "version": "0.1.1",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AppSys-SAS/devtool.git",
+    "directory": "packages/certs"
+  },
   "type": "module",
   "main": "./lib/index.js",
   "types": "./lib/index.d.ts",

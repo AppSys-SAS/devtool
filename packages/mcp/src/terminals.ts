@@ -14,7 +14,7 @@ import {
   type McpRule,
   type ProjectDefinition,
   type RuntimeConfig
-} from '@appsys/devtool-shared'
+} from '@appsys-sas/devtool-shared'
 import { z } from 'zod'
 import { patternRule } from './approvals.js'
 import type { McpHost, McpTerminal } from './host.js'

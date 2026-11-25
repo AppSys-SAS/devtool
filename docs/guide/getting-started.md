@@ -20,27 +20,29 @@ Install the `devtool` command globally with your package manager:
 ::: code-group
 
 ```sh [npm]
-npm i -g @appsys/devtool
+npm i -g @appsys-sas/devtool
 ```
 
 ```sh [pnpm]
-pnpm add -g @appsys/devtool
+pnpm add -g @appsys-sas/devtool
 ```
 
 ```sh [yarn]
-yarn global add @appsys/devtool
+yarn global add @appsys-sas/devtool
 ```
 
 ```sh [bun]
-bun add -g @appsys/devtool
+bun add -g @appsys-sas/devtool
 ```
 
 :::
 
-::: info Not on npm yet
-The package is about to be published. Until then, run the devtool from its sources: see
-[Contributing](/reference/contributing).
-:::
+The package brings the command, its server and its built interface. Terminals use prebuilt binaries for
+macOS and Linux (x64 and arm64), so the install compiles nothing and needs no build tools. Run the same
+command again to update.
+
+npm may warn that `ssh2` and `cpu-features` have install scripts it did not run: they only build optional
+speedups of the SFTP backend, the devtool works without them.
 
 Check that it works:
 

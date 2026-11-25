@@ -1,10 +1,10 @@
 import http from 'node:http'
 import type { Http2ServerRequest } from 'node:http2'
 import https from 'node:https'
-import { logger } from '@appsys/devtool-shared'
+import { logger } from '@appsys-sas/devtool-shared'
 import type { IncomingMessage, OutgoingHttpHeaders } from 'node:http'
 import type { Socket } from 'node:net'
-import type { HostAccess, RuntimeConfig } from '@appsys/devtool-shared'
+import type { HostAccess, RuntimeConfig } from '@appsys-sas/devtool-shared'
 import { allows, clientAddressOf } from './access.js'
 
 const httpAgent = new http.Agent({ keepAlive: true })

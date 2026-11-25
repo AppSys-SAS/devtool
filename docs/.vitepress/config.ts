@@ -8,7 +8,7 @@ import { exampleArchiveAt, zipExamples } from './examples.js'
 
 const require = createRequire(import.meta.url)
 const examplesFolder = fileURLToPath(new URL('../examples', import.meta.url))
-const schemaFile = require.resolve('@appsys/devtool-config/schema/config.schema.json')
+const schemaFile = require.resolve('@appsys-sas/devtool-config/schema/config.schema.json')
 const repository = 'https://github.com/AppSys-SAS/devtool'
 
 export default defineConfig({

@@ -1,5 +1,5 @@
-import type { AgentDefinition } from '@appsys/devtool-shared'
-import { agentUrl } from '@appsys/devtool-shared'
+import type { AgentDefinition } from '@appsys-sas/devtool-shared'
+import { agentUrl } from '@appsys-sas/devtool-shared'
 import wsStore from '@/stores/ws'
 
 /** Where an agent works: a project, or one of its directories, and its folder. */

@@ -1,8 +1,8 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import type { ForgeItemsPayload, ForgeTimelinePayload, ForgeKind, IntegrationDefinition, RuntimeConfig } from '@appsys/devtool-shared'
-import { integrationKey, logger } from '@appsys/devtool-shared'
-import { findForge, ForgeError, type GitForge, repositoryOf, type ForgeRepository } from '@appsys/devtool-git'
+import type { ForgeItemsPayload, ForgeTimelinePayload, ForgeKind, IntegrationDefinition, RuntimeConfig } from '@appsys-sas/devtool-shared'
+import { integrationKey, logger } from '@appsys-sas/devtool-shared'
+import { findForge, ForgeError, type GitForge, repositoryOf, type ForgeRepository } from '@appsys-sas/devtool-git'
 import { type AuthReader, type CommandAutomation, CommandSecrets } from './command-automation.js'
 import { integrationAutomationKey } from './configure.js'
 

@@ -4,7 +4,7 @@ import fs from 'node:fs/promises'
 import net from 'node:net'
 import os from 'node:os'
 import packet, { type Answer, type DecodedPacket, type Question } from 'dns-packet'
-import { logger, type DnsDefinition, type DnsServerAddress } from '@appsys/devtool-shared'
+import { logger, type DnsDefinition, type DnsServerAddress } from '@appsys-sas/devtool-shared'
 import { allows, matchesHost } from './access.js'
 
 /** The DNS listens on every interface, who may query it being decided by its configuration. */

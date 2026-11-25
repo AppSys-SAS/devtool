@@ -8,7 +8,7 @@ import {
   type DirectoryDefinition,
   type DirectoryExtra,
   type ProjectDefinition
-} from '@appsys/devtool-shared'
+} from '@appsys-sas/devtool-shared'
 import commandInputsStore from '@/stores/command-inputs'
 import commandRunsStore from '@/stores/command-runs'
 import configStore from '@/stores/config'

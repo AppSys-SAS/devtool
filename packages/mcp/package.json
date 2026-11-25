@@ -1,6 +1,12 @@
 {
-  "name": "@appsys/devtool-mcp",
+  "name": "@appsys-sas/devtool-mcp",
   "version": "0.1.1",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AppSys-SAS/devtool.git",
+    "directory": "packages/mcp"
+  },
   "type": "module",
   "main": "./lib/index.js",
   "types": "./lib/index.d.ts",
@@ -18,8 +24,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@appsys/devtool-environment": "workspace:*",
-    "@appsys/devtool-shared": "workspace:*",
+    "@appsys-sas/devtool-environment": "workspace:*",
+    "@appsys-sas/devtool-shared": "workspace:*",
     "@modelcontextprotocol/node": "^2.1.2",
     "@modelcontextprotocol/server": "^2.4.0",
     "zod": "^4.6.7"

@@ -1,5 +1,5 @@
 import { ref } from 'vue'
-import type { ForgeItemsPayload, ForgeTimelinePayload } from '@appsys/devtool-shared'
+import type { ForgeItemsPayload, ForgeTimelinePayload } from '@appsys-sas/devtool-shared'
 
 /**
  * Open pull requests and issues of the integrations, as the server last read them, and the timelines

@@ -5,8 +5,5 @@ packages:
 allowBuilds:
   cpu-features: false
   esbuild: true
-  node-pty: true
   ssh2: false
   vue-demi: true
-patchedDependencies:
-  node-pty@1.1.0: patches/node-pty@1.1.0.patch

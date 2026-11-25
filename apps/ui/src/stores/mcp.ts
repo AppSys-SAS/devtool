@@ -1,5 +1,5 @@
 import { computed, shallowRef } from 'vue'
-import type { CommandInputValue, McpAnswer, McpHistoryEntry, McpMessagePayload, McpRequestPayload, McpStatePayload } from '@appsys/devtool-shared'
+import type { CommandInputValue, McpAnswer, McpHistoryEntry, McpMessagePayload, McpRequestPayload, McpStatePayload } from '@appsys-sas/devtool-shared'
 import { agentIcon, type McpLevelChange } from '@/lib/mcp'
 import configStore from './config'
 import notificationStore from './notification'

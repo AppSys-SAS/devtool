@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, shallowRef } from 'vue'
 import { TriangleAlert } from '@lucide/vue'
-import { type AgentSkillFields, readAgentSkill, withAgentSkillBody, withAgentSkillFields } from '@appsys/devtool-shared'
+import { type AgentSkillFields, readAgentSkill, withAgentSkillBody, withAgentSkillFields } from '@appsys-sas/devtool-shared'
 import CodeEditor from '@/components/CodeEditor.vue'
 import MarkdownPreview from '@/components/files/MarkdownPreview.vue'
 import { Button } from '@/components/ui/button'

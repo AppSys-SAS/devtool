@@ -1,5 +1,5 @@
 import { ref } from 'vue'
-import type { EnvironmentKeysPayload, EnvironmentPayload, EnvironmentTablesPayload } from '@appsys/devtool-shared'
+import type { EnvironmentKeysPayload, EnvironmentPayload, EnvironmentTablesPayload } from '@appsys-sas/devtool-shared'
 
 /**
  * Development environment as the server describes it, the tables of its databases and the keys

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { McpAnswer, McpRequestPayload } from '@appsys/devtool-shared'
+import type { McpAnswer, McpRequestPayload } from '@appsys-sas/devtool-shared'
 import { Button } from '@/components/ui/button'
 import { ANSWERS } from '@/lib/mcp'
 

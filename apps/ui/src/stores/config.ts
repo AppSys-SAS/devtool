@@ -1,6 +1,6 @@
 import { ref } from 'vue'
 import router from '@/router'
-import type { AgentDefinition, ClientConfigPayload, IntegrationDefinition, ProjectDefinition, SidebarSettings, StreamUpdatePayload } from '@appsys/devtool-shared'
+import type { AgentDefinition, ClientConfigPayload, IntegrationDefinition, ProjectDefinition, SidebarSettings, StreamUpdatePayload } from '@appsys-sas/devtool-shared'
 import { CommandStreamStore } from './command-stream'
 import { CommandStreamOutputStore } from './command-stream-output'
 import type { WsConfigPayload } from '@/types'

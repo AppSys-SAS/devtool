@@ -15,7 +15,7 @@ first line to your configuration files.
 workspace: ~/Workspace
 ```
 
-The schema is also published with the npm package, as `@appsys/devtool-config/schema/config.schema.json`.
+The schema is also published with the npm package, as `@appsys-sas/devtool-config/schema/config.schema.json`.
 
 ## Root
 

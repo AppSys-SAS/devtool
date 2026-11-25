@@ -1,8 +1,8 @@
 import type { Component } from 'vue'
 import type { RouteLocationRaw } from 'vue-router'
 import { CircleDot, GitPullRequest, Search, Sparkles, Wrench } from '@lucide/vue'
-import type { AgentAction, AgentDefinition, ForgeEntry, ForgeKind, IntegrationDefinition } from '@appsys/devtool-shared'
-import { agentPrompt, DEFAULT_AGENT_PROMPTS } from '@appsys/devtool-shared'
+import type { AgentAction, AgentDefinition, ForgeEntry, ForgeKind, IntegrationDefinition } from '@appsys-sas/devtool-shared'
+import { agentPrompt, DEFAULT_AGENT_PROMPTS } from '@appsys-sas/devtool-shared'
 import { type AgentPlace, startAgent } from '@/lib/agents'
 
 /** How the interface shows an action of agents: its name, its icon, and whether its button shows the icon alone. */

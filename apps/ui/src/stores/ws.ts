@@ -1,5 +1,5 @@
 import { ref } from 'vue'
-import type { EnvironmentKeyChoicePayload, FileEntryPayload, PortConflictAction, SidebarOrderChange } from '@appsys/devtool-shared'
+import type { EnvironmentKeyChoicePayload, FileEntryPayload, PortConflictAction, SidebarOrderChange } from '@appsys-sas/devtool-shared'
 import configStore from './config'
 import filesStore from './files'
 import certificatesStore from './certificates'

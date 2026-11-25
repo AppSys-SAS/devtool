@@ -1,7 +1,7 @@
 import { isUtf8 } from 'node:buffer'
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import type { CommandInput, DirectoryDefinition, DirectoryExtra } from '@appsys/devtool-shared'
+import type { CommandInput, DirectoryDefinition, DirectoryExtra } from '@appsys-sas/devtool-shared'
 
 const HEADER_BYTES = 8192
 const FREE_ARGUMENTS: CommandInput = { name: 'arguments', kind: 'text', choices: [], display: 'buttons', optional: true, default: null }

@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import { computedAsync, useColorMode } from '@vueuse/core'
 import DOMPurify from 'dompurify'
 import MarkdownIt, { type StateCore } from 'markdown-it'
-import { splitFrontMatter } from '@appsys/devtool-shared'
+import { splitFrontMatter } from '@appsys-sas/devtool-shared'
 
 const props = defineProps<{
   /** The Markdown text, its HTML kept once sanitized, its task lists shown as checkboxes, its alerts as callouts and its YAML front matter left out. */

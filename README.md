@@ -10,8 +10,8 @@ Terminals, HTTPS hosts, a shared development environment and permissions for cod
 in one local web interface.
 
 [![CI](https://img.shields.io/github/actions/workflow/status/AppSys-SAS/devtool/ci.yml?branch=main&label=CI&logo=githubactions&logoColor=white)](https://github.com/AppSys-SAS/devtool/actions/workflows/ci.yml)
-[![npm](https://img.shields.io/npm/v/@appsys/devtool?color=6f3aff&logo=npm)](https://www.npmjs.com/package/@appsys/devtool)
-[![npm downloads](https://img.shields.io/npm/dm/@appsys/devtool?color=6f3aff)](https://www.npmjs.com/package/@appsys/devtool)
+[![npm](https://img.shields.io/npm/v/@appsys-sas/devtool?color=6f3aff&logo=npm)](https://www.npmjs.com/package/@appsys-sas/devtool)
+[![npm downloads](https://img.shields.io/npm/dm/@appsys-sas/devtool?color=6f3aff)](https://www.npmjs.com/package/@appsys-sas/devtool)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D24-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![MCP](https://img.shields.io/badge/MCP-server-20085e)](https://appsys-sas.github.io/devtool/agents/mcp-server)
@@ -66,10 +66,13 @@ in one local web interface.
 You need Node.js 24 or later, on macOS or Linux.
 
 ```bash
-npm install -g @appsys/devtool
+npm install -g @appsys-sas/devtool
+devtool --version
 ```
 
-or `pnpm add -g @appsys/devtool`, `yarn global add @appsys/devtool`, `bun add -g @appsys/devtool`.
+or `pnpm add -g @appsys-sas/devtool`, `yarn global add @appsys-sas/devtool`, `bun add -g @appsys-sas/devtool`. The
+package brings the `devtool` command, its server and its built interface; terminals use prebuilt binaries,
+so nothing is compiled on your machine. Run the same command again to update.
 
 ## Quick start
 
@@ -124,7 +127,7 @@ contributors.
 | Area | Projects |
 |---|---|
 | Interface | [Vue](https://vuejs.org), [Vue Router](https://router.vuejs.org), [VueUse](https://vueuse.org), [Vite](https://vite.dev), [Tailwind CSS](https://tailwindcss.com), [Reka UI](https://reka-ui.com), [shadcn-vue](https://www.shadcn-vue.com), [Lucide](https://lucide.dev), [Iconify](https://iconify.design) |
-| Terminals and editor | [xterm.js](https://xtermjs.org), [node-pty](https://github.com/microsoft/node-pty), [Monaco Editor](https://microsoft.github.io/monaco-editor), [markdown-it](https://github.com/markdown-it/markdown-it), [DOMPurify](https://github.com/cure53/DOMPurify) |
+| Terminals and editor | [xterm.js](https://xtermjs.org), [node-pty](https://github.com/microsoft/node-pty) (prebuilt by [@lydell/node-pty](https://github.com/lydell/node-pty)), [Monaco Editor](https://microsoft.github.io/monaco-editor), [markdown-it](https://github.com/markdown-it/markdown-it), [DOMPurify](https://github.com/cure53/DOMPurify) |
 | Server | [ws](https://github.com/websockets/ws), [YAML](https://eemeli.org/yaml), [Croner](https://croner.56k.guru), [dns-packet](https://github.com/mafintosh/dns-packet) |
 | Agents | [Model Context Protocol TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk), [Zod](https://zod.dev) |
 | Environment | [AWS SDK for JavaScript](https://github.com/aws/aws-sdk-js-v3), [ioredis](https://github.com/redis/ioredis), [ssh2-sftp-client](https://github.com/theophilusx/ssh2-sftp-client), [xmldom](https://github.com/xmldom/xmldom), [toml-patch](https://github.com/DecimalTurn/toml-patch) |

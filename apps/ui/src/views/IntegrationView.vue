@@ -2,7 +2,7 @@
 import { computed, useTemplateRef, watchEffect } from 'vue'
 import { Icon } from '@iconify/vue'
 import { ExternalLink, RotateCw } from '@lucide/vue'
-import { integrationKey } from '@appsys/devtool-shared'
+import { integrationKey } from '@appsys-sas/devtool-shared'
 import ForgeItemDetail from '@/components/forge/ForgeItemDetail.vue'
 import ForgeItemList from '@/components/forge/ForgeItemList.vue'
 import SidebarToggle from '@/components/SidebarToggle.vue'

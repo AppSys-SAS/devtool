@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { DialogContent, DialogDescription, DialogOverlay, DialogPortal, DialogRoot, DialogTitle } from 'reka-ui'
-import type { CommandInputValue } from '@appsys/devtool-shared'
+import type { CommandInputValue } from '@appsys-sas/devtool-shared'
 import CommandInputsForm from '@/components/CommandInputsForm.vue'
 import { commandName } from '@/lib/directory-commands'
 import commandInputsStore from '@/stores/command-inputs'

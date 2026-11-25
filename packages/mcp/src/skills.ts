@@ -3,7 +3,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import type { McpServer } from '@modelcontextprotocol/server'
 import { type SkillCatalog, type SkillFileEntry, type SkillFiles, SkillsExtension } from '@modelcontextprotocol/server/ext/skills'
-import { logger } from '@appsys/devtool-shared'
+import { logger } from '@appsys-sas/devtool-shared'
 
 const RELOAD_DELAY_MS = 300
 

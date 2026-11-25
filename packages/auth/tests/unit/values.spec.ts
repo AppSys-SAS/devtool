@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { CONFIG_FOLDER_VARIABLE } from '@appsys/devtool-config'
+import { CONFIG_FOLDER_VARIABLE } from '@appsys-sas/devtool-config'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { authValue, AuthSignInRequiredError, readAuthOptions, sessionStatus } from '../../src/index.js'
 
