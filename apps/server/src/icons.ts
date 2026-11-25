@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 import type { IconifyJSON } from '@iconify/types'
 import { getIcons } from '@iconify/utils'
 import mime from 'mime-types'
-import { logger } from '@appsys/devtool-shared'
+import { logger } from '@appsys-sas/devtool-shared'
 
 /** Path under which icons are served, in the format of the Iconify API. */
 export const ICONS_PATH = '/icons/'

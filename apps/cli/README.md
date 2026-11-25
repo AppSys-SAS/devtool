@@ -9,7 +9,7 @@ coding agents through its MCP server.
 You need Node.js 24 or later, on macOS or Linux.
 
 ```bash
-npm install -g @appsys/devtool
+npm install -g @appsys-sas/devtool
 devtool --version
 ```
 

@@ -1,7 +1,7 @@
 import { type FSWatcher, mkdirSync, watch } from 'node:fs'
 import path from 'node:path'
-import { type AuthOptions, authReaderOf, type AuthValue, login, logout, readAuthOptions, sessionPath, sessionStatus } from '@appsys/devtool-auth'
-import { type AuthSessionPayload, logger } from '@appsys/devtool-shared'
+import { type AuthOptions, authReaderOf, type AuthValue, login, logout, readAuthOptions, sessionPath, sessionStatus } from '@appsys-sas/devtool-auth'
+import { type AuthSessionPayload, logger } from '@appsys-sas/devtool-shared'
 
 const CHANGE_DELAY_MS = 200
 

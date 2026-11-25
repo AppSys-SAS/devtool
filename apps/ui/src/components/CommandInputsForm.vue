@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, shallowRef } from 'vue'
 import { MessageSquare, Play, X } from '@lucide/vue'
-import { commandInputs, defaultCommandInputs, expandCommandArgs, missingCommandInputs, type CommandInput, type CommandInputValue, type DirectoryExtra } from '@appsys/devtool-shared'
+import { commandInputs, defaultCommandInputs, expandCommandArgs, missingCommandInputs, type CommandInput, type CommandInputValue, type DirectoryExtra } from '@appsys-sas/devtool-shared'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'

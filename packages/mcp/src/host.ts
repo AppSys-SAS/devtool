@@ -18,7 +18,7 @@ import type {
   PortOwner,
   RuntimeConfig,
   StreamOutputLine
-} from '@appsys/devtool-shared'
+} from '@appsys-sas/devtool-shared'
 
 /** What a terminal tells its listeners: each piece of output, each change of state, and its closing. */
 export interface McpTerminalEvents {

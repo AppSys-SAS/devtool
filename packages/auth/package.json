@@ -1,5 +1,5 @@
 {
-  "name": "@appsys/devtool-auth",
+  "name": "@appsys-sas/devtool-auth",
   "version": "0.1.1",
   "license": "Apache-2.0",
   "repository": {
@@ -24,7 +24,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@appsys/devtool-config": "workspace:*",
+    "@appsys-sas/devtool-config": "workspace:*",
     "oauth4webapi": "^3.8.8"
   }
 }

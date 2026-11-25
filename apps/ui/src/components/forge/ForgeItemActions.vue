@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ExternalLink } from '@lucide/vue'
-import type { AgentAction, AgentDefinition } from '@appsys/devtool-shared'
+import type { AgentAction, AgentDefinition } from '@appsys-sas/devtool-shared'
 import AgentButton from '@/components/agents/AgentButton.vue'
 import { Button } from '@/components/ui/button'
 import { AGENT_ACTION_VIEWS } from '@/lib/forge'

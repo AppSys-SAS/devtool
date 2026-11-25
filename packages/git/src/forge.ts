@@ -1,4 +1,4 @@
-import type { ForgeKind, ForgeTimelinePage, ForgeTimelinePart, IssuePayload, PullRequestPayload } from '@appsys/devtool-shared'
+import type { ForgeKind, ForgeTimelinePage, ForgeTimelinePart, IssuePayload, PullRequestPayload } from '@appsys-sas/devtool-shared'
 import type { ForgeRepository } from './repository.js'
 
 const REQUEST_TIMEOUT = 15_000

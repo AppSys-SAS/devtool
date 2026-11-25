@@ -1,9 +1,9 @@
 import { execFile } from 'node:child_process'
 import fs from 'node:fs/promises'
 import { promisify } from 'node:util'
-import { authReaderOf, readAuthOptions } from '@appsys/devtool-auth'
-import { readCertificate } from '@appsys/devtool-certs'
-import { type RawConfig, resolveCacheFolder, resolveConfigFolder } from '@appsys/devtool-config'
+import { authReaderOf, readAuthOptions } from '@appsys-sas/devtool-auth'
+import { readCertificate } from '@appsys-sas/devtool-certs'
+import { type RawConfig, resolveCacheFolder, resolveConfigFolder } from '@appsys-sas/devtool-config'
 import {
   type BackendContext,
   configFormatOf,
@@ -19,8 +19,8 @@ import {
   readEnvironmentOptions,
   redisDatabaseName,
   SHARED_CONFIG_PATH
-} from '@appsys/devtool-environment'
-import { logger } from '@appsys/devtool-shared'
+} from '@appsys-sas/devtool-environment'
+import { logger } from '@appsys-sas/devtool-shared'
 import { Cron } from 'croner'
 import type {
   EnvironmentCopyPayload,
@@ -31,7 +31,7 @@ import type {
   EnvironmentPemPayload,
   EnvironmentRunPayload,
   EnvironmentTablesPayload
-} from '@appsys/devtool-shared'
+} from '@appsys-sas/devtool-shared'
 import { CommandSecrets } from './command-automation.js'
 
 const execFileAsync = promisify(execFile)

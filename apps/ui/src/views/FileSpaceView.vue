@@ -2,7 +2,7 @@
 import { computed, shallowRef, watch } from 'vue'
 import { onBeforeRouteLeave, onBeforeRouteUpdate, type RouteLocationNormalized, useRoute, useRouter } from 'vue-router'
 import { useEventListener } from '@vueuse/core'
-import { AGENT_SKILL_FILE, agentSkillFolderOf, type DirectoryExtra, type FileEntryPayload } from '@appsys/devtool-shared'
+import { AGENT_SKILL_FILE, agentSkillFolderOf, type DirectoryExtra, type FileEntryPayload } from '@appsys-sas/devtool-shared'
 import CodeEditor from '@/components/CodeEditor.vue'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import AgentSkillEditor from '@/components/files/AgentSkillEditor.vue'

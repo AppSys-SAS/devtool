@@ -208,28 +208,28 @@ importers:
 
   apps/cli:
     dependencies:
-      '@appsys/devtool-auth':
+      '@appsys-sas/devtool-auth':
         specifier: workspace:*
         version: link:../../packages/auth
-      '@appsys/devtool-config':
+      '@appsys-sas/devtool-config':
         specifier: workspace:*
         version: link:../../packages/config
-      '@appsys/devtool-environment':
+      '@appsys-sas/devtool-environment':
         specifier: workspace:*
         version: link:../../packages/environment
-      '@appsys/devtool-proxy':
+      '@appsys-sas/devtool-proxy':
         specifier: workspace:*
         version: link:../proxy
-      '@appsys/devtool-server':
+      '@appsys-sas/devtool-server':
         specifier: workspace:*
         version: link:../server
-      '@appsys/devtool-shared':
+      '@appsys-sas/devtool-shared':
         specifier: workspace:*
         version: link:../../packages/shared
-      '@appsys/devtool-skills':
+      '@appsys-sas/devtool-skills':
         specifier: workspace:*
         version: link:../../packages/skills
-      '@appsys/devtool-ui':
+      '@appsys-sas/devtool-ui':
         specifier: workspace:*
         version: link:../ui
       '@inquirer/prompts':
@@ -248,34 +248,34 @@ importers:
 
   apps/proxy:
     dependencies:
-      '@appsys/devtool-shared':
+      '@appsys-sas/devtool-shared':
         specifier: workspace:*
         version: link:../../packages/shared
 
   apps/server:
     dependencies:
-      '@appsys/devtool-auth':
+      '@appsys-sas/devtool-auth':
         specifier: workspace:*
         version: link:../../packages/auth
-      '@appsys/devtool-certs':
+      '@appsys-sas/devtool-certs':
         specifier: workspace:*
         version: link:../../packages/certs
-      '@appsys/devtool-config':
+      '@appsys-sas/devtool-config':
         specifier: workspace:*
         version: link:../../packages/config
-      '@appsys/devtool-environment':
+      '@appsys-sas/devtool-environment':
         specifier: workspace:*
         version: link:../../packages/environment
-      '@appsys/devtool-git':
+      '@appsys-sas/devtool-git':
         specifier: workspace:*
         version: link:../../packages/git
-      '@appsys/devtool-mcp':
+      '@appsys-sas/devtool-mcp':
         specifier: workspace:*
         version: link:../../packages/mcp
-      '@appsys/devtool-shared':
+      '@appsys-sas/devtool-shared':
         specifier: workspace:*
         version: link:../../packages/shared
-      '@appsys/devtool-skills':
+      '@appsys-sas/devtool-skills':
         specifier: workspace:*
         version: link:../../packages/skills
       '@iconify-json/akar-icons':
@@ -369,7 +369,7 @@ importers:
 
   apps/ui:
     devDependencies:
-      '@appsys/devtool-shared':
+      '@appsys-sas/devtool-shared':
         specifier: workspace:*
         version: link:../../packages/shared
       '@fontsource-variable/inter':
@@ -462,7 +462,7 @@ importers:
 
   docs:
     dependencies:
-      '@appsys/devtool-config':
+      '@appsys-sas/devtool-config':
         specifier: workspace:*
         version: link:../packages/config
       ajv:
@@ -496,7 +496,7 @@ importers:
 
   packages/auth:
     dependencies:
-      '@appsys/devtool-config':
+      '@appsys-sas/devtool-config':
         specifier: workspace:*
         version: link:../config
       oauth4webapi:
@@ -532,10 +532,10 @@ importers:
 
   packages/environment:
     dependencies:
-      '@appsys/devtool-auth':
+      '@appsys-sas/devtool-auth':
         specifier: workspace:*
         version: link:../auth
-      '@appsys/devtool-config':
+      '@appsys-sas/devtool-config':
         specifier: workspace:*
         version: link:../config
       '@aws-sdk/client-s3':
@@ -569,16 +569,16 @@ importers:
 
   packages/git:
     dependencies:
-      '@appsys/devtool-shared':
+      '@appsys-sas/devtool-shared':
         specifier: workspace:*
         version: link:../shared
 
   packages/mcp:
     dependencies:
-      '@appsys/devtool-environment':
+      '@appsys-sas/devtool-environment':
         specifier: workspace:*
         version: link:../environment
-      '@appsys/devtool-shared':
+      '@appsys-sas/devtool-shared':
         specifier: workspace:*
         version: link:../shared
       '@modelcontextprotocol/node':

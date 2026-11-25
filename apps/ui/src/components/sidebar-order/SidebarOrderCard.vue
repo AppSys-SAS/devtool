@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Check, Pencil, X } from '@lucide/vue'
-import { SORT_MODES, type SortMode } from '@appsys/devtool-shared'
+import { SORT_MODES, type SortMode } from '@appsys-sas/devtool-shared'
 import ConfigFileChoice from '@/components/ConfigFileChoice.vue'
 import SidebarOrderList from '@/components/sidebar-order/SidebarOrderList.vue'
 import { Button } from '@/components/ui/button'

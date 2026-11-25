@@ -1,5 +1,5 @@
 import { runLoadBalancer } from './index.js'
-import { logger } from '@appsys/devtool-shared'
+import { logger } from '@appsys-sas/devtool-shared'
 import { DEV_UI_PATH } from './dev-options.js'
 
 void (async () => {

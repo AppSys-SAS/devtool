@@ -1,6 +1,6 @@
 import type { RouteLocationRaw } from 'vue-router'
-import type { DirectoryDefinition, DirectoryShortcut, ForgeItemsPayload, IntegrationDefinition, ProjectDefinition } from '@appsys/devtool-shared'
-import { integrationKey } from '@appsys/devtool-shared'
+import type { DirectoryDefinition, DirectoryShortcut, ForgeItemsPayload, IntegrationDefinition, ProjectDefinition } from '@appsys-sas/devtool-shared'
+import { integrationKey } from '@appsys-sas/devtool-shared'
 import router from '@/router'
 import { commandName, iconFromMeta, runDirectoryCommand, startDefaultCommand } from '@/lib/directory-commands'
 import forgeItemsStore from '@/stores/forge-items'

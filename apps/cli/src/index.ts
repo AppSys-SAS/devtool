@@ -8,7 +8,7 @@ import path from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import { checkbox, confirm, password, select } from '@inquirer/prompts'
 import { Command } from 'commander'
-import { type AuthOptions, AuthSignInRequiredError, login, logout, openInBrowser, readAuthOptions } from '@appsys/devtool-auth'
+import { type AuthOptions, AuthSignInRequiredError, login, logout, openInBrowser, readAuthOptions } from '@appsys-sas/devtool-auth'
 import {
   createBackends,
   Environment,
@@ -24,16 +24,16 @@ import {
   redisDatabaseName,
   SHARED_CONFIG_PATH,
   type TransferResult
-} from '@appsys/devtool-environment'
-import { CONFIG_FOLDER_VARIABLE, loadMergedConfig, resolveDefaultConfigPaths } from '@appsys/devtool-config'
-import runProxy from '@appsys/devtool-proxy'
-import runServer, { createBackendContext, relaunchUnderApp, renewCertificates } from '@appsys/devtool-server'
-import { SKILLS_FOLDER } from '@appsys/devtool-skills'
-import { logger, type LogLevel } from '@appsys/devtool-shared'
+} from '@appsys-sas/devtool-environment'
+import { CONFIG_FOLDER_VARIABLE, loadMergedConfig, resolveDefaultConfigPaths } from '@appsys-sas/devtool-config'
+import runProxy from '@appsys-sas/devtool-proxy'
+import runServer, { createBackendContext, relaunchUnderApp, renewCertificates } from '@appsys-sas/devtool-server'
+import { SKILLS_FOLDER } from '@appsys-sas/devtool-skills'
+import { logger, type LogLevel } from '@appsys-sas/devtool-shared'
 import pkg from '../package.json' with { type: 'json' }
 import { agentSkillFolders, distinctFolders, foreignSkills, type SkillInstallMode, syncSkills, wasSynced } from './skills.js'
 
-const UI_PATH = path.join(path.dirname(createRequire(import.meta.url).resolve('@appsys/devtool-ui/package.json')), 'dist')
+const UI_PATH = path.join(path.dirname(createRequire(import.meta.url).resolve('@appsys-sas/devtool-ui/package.json')), 'dist')
 
 /**
  * Reads the identity provider of the configuration of the devtool installation.

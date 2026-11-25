@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, shallowRef } from 'vue'
 import { Check, Pencil, X } from '@lucide/vue'
-import { type IntegrationDefinition, MCP_ACTIONS, type McpAction, type McpLevel, type McpPatterns, type McpRules, type McpTarget } from '@appsys/devtool-shared'
+import { type IntegrationDefinition, MCP_ACTIONS, type McpAction, type McpLevel, type McpPatterns, type McpRules, type McpTarget } from '@appsys-sas/devtool-shared'
 import ConfigFileChoice from '@/components/ConfigFileChoice.vue'
 import McpRulesRow from '@/components/mcp/McpRulesRow.vue'
 import { Button } from '@/components/ui/button'

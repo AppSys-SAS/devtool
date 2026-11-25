@@ -1,5 +1,5 @@
 {
-  "name": "@appsys/devtool",
+  "name": "@appsys-sas/devtool",
   "version": "0.1.1",
   "description": "A local development environment: one server running your projects, their terminals and their shared environment, with a web interface.",
   "license": "Apache-2.0",
@@ -27,14 +27,14 @@
     "dev": "tsx src/index.ts"
   },
   "dependencies": {
-    "@appsys/devtool-auth": "workspace:*",
-    "@appsys/devtool-config": "workspace:*",
-    "@appsys/devtool-environment": "workspace:*",
-    "@appsys/devtool-proxy": "workspace:*",
-    "@appsys/devtool-server": "workspace:*",
-    "@appsys/devtool-shared": "workspace:*",
-    "@appsys/devtool-skills": "workspace:*",
-    "@appsys/devtool-ui": "workspace:*",
+    "@appsys-sas/devtool-auth": "workspace:*",
+    "@appsys-sas/devtool-config": "workspace:*",
+    "@appsys-sas/devtool-environment": "workspace:*",
+    "@appsys-sas/devtool-proxy": "workspace:*",
+    "@appsys-sas/devtool-server": "workspace:*",
+    "@appsys-sas/devtool-shared": "workspace:*",
+    "@appsys-sas/devtool-skills": "workspace:*",
+    "@appsys-sas/devtool-ui": "workspace:*",
     "@inquirer/prompts": "^8.7.4",
     "commander": "^15.0.0"
   },

@@ -1,4 +1,4 @@
-import type { DirectoryExtra, McpAction, McpAnswer, McpDecision, McpLevel, ProjectDefinition } from '@appsys/devtool-shared'
+import type { DirectoryExtra, McpAction, McpAnswer, McpDecision, McpLevel, ProjectDefinition } from '@appsys-sas/devtool-shared'
 
 /** How each decision of a call is shown. */
 export const DECISIONS: Record<McpDecision, { label: string, class: string }> = {

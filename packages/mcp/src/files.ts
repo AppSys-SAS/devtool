@@ -1,5 +1,5 @@
-import { configFormatOf } from '@appsys/devtool-environment'
-import { type DirectoryFilesType, environmentRules, type McpDetail, type McpRules } from '@appsys/devtool-shared'
+import { configFormatOf } from '@appsys-sas/devtool-environment'
+import { type DirectoryFilesType, environmentRules, type McpDetail, type McpRules } from '@appsys-sas/devtool-shared'
 import { z } from 'zod'
 import { McpRefusal } from './approvals.js'
 import type { McpFileSpace, McpHost } from './host.js'

@@ -2,7 +2,7 @@
 import { computed, shallowRef } from 'vue'
 import { Icon } from '@iconify/vue'
 import { FilePlus, FolderPlus, RefreshCw, Sparkles, TriangleAlert } from '@lucide/vue'
-import type { DirectoryExtra, FileEntryPayload, FileTreePayload } from '@appsys/devtool-shared'
+import type { DirectoryExtra, FileEntryPayload, FileTreePayload } from '@appsys-sas/devtool-shared'
 import FileTree from '@/components/files/FileTree.vue'
 import SidebarToggle from '@/components/SidebarToggle.vue'
 import { Button } from '@/components/ui/button'

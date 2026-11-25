@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { isMap, isScalar, isSeq, parseDocument, type Document } from 'yaml'
-import { isMcpFilesSetting, mcpLevelsFor, mcpLevelsOf, type McpAction, type McpLevel } from '@appsys/devtool-shared'
+import { isMcpFilesSetting, mcpLevelsFor, mcpLevelsOf, type McpAction, type McpLevel } from '@appsys-sas/devtool-shared'
 
 /** The levels of the settings being a level themselves, by their last key. */
 const LEVEL_SETTINGS: Record<string, McpLevel[]> = {

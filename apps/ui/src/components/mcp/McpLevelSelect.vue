@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ChevronDown } from '@lucide/vue'
 import { DropdownMenuContent, DropdownMenuItem, DropdownMenuPortal, DropdownMenuRoot, DropdownMenuSeparator, DropdownMenuTrigger } from 'reka-ui'
-import type { McpLevel } from '@appsys/devtool-shared'
+import type { McpLevel } from '@appsys-sas/devtool-shared'
 import { Badge } from '@/components/ui/badge'
 import { LEVELS } from '@/lib/mcp'
 

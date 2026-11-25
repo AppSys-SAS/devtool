@@ -23,7 +23,7 @@ The repository is a pnpm workspace:
 
 | Folder | Content |
 |---|---|
-| `apps/cli` | the `devtool` command, published as `@appsys/devtool` |
+| `apps/cli` | the `devtool` command, published as `@appsys-sas/devtool` |
 | `apps/server` | the API and WebSocket server, command streams and load balancer |
 | `apps/proxy` | the TCP proxy forwarding port 443 to the load balancer |
 | `apps/ui` | the web interface (Vue, Vite, Tailwind, shadcn-vue) |
@@ -91,8 +91,8 @@ pull request that bumps that version in every `package.json` and writes the chan
 
 - every package that is not `private` is published, dependencies first, `workspace:*` replaced by the
   released version; a version already on npm is skipped, so a failed job can be run again;
-- `@appsys/devtool` is the package people install: it holds the `devtool` command and depends on the
-  others, among them `@appsys/devtool-ui`, which only ships the built interface (`dist`), so its
+- `@appsys-sas/devtool` is the package people install: it holds the `devtool` command and depends on the
+  others, among them `@appsys-sas/devtool-ui`, which only ships the built interface (`dist`), so its
   build-time dependencies are `devDependencies`;
 - each package is signed with an npm provenance statement linking it to the workflow run, which needs
   the `repository` field of its `package.json` to point at this repository.
@@ -104,7 +104,7 @@ and must be installed on this repository; the workflow reads its Client ID from 
 repository variable and its private key from the `RELEASE_APP_PRIVATE_KEY` repository secret.
 
 The job reads an npm token from the `NPM_TOKEN` repository secret: a granular access token of an npm
-account that can publish to the `@appsys` scope, with read and write permission on its packages and
+account that can publish to the `@appsys-sas` scope, with read and write permission on its packages and
 "bypass two-factor authentication" enabled. Once the packages exist, they can move to
 [trusted publishing](https://docs.npmjs.com/trusted-publishers) (the workflow already has the
 `id-token: write` permission it needs) and the secret can be removed.

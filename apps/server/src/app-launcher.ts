@@ -6,8 +6,8 @@ import path from 'node:path'
 import type { Duplex } from 'node:stream'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
-import { type AppIdentity, type RawConfig, resolveAppIdentity, resolveCacheFolder } from '@appsys/devtool-config'
-import { logger } from '@appsys/devtool-shared'
+import { type AppIdentity, type RawConfig, resolveAppIdentity, resolveCacheFolder } from '@appsys-sas/devtool-config'
+import { logger } from '@appsys-sas/devtool-shared'
 
 const DEFAULT_ICON = fileURLToPath(new URL('../assets/AppIcon.icns', import.meta.url))
 const ICONSET_SIZES = [16, 32, 128, 256, 512]

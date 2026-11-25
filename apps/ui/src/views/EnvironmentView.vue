@@ -21,7 +21,7 @@ import {
   UserRound,
   X
 } from '@lucide/vue'
-import type { EnvironmentCopyPayload, EnvironmentItemPayload, EnvironmentKeyChoicePayload, EnvironmentStepPayload } from '@appsys/devtool-shared'
+import type { EnvironmentCopyPayload, EnvironmentItemPayload, EnvironmentKeyChoicePayload, EnvironmentStepPayload } from '@appsys-sas/devtool-shared'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import ConfigKeyChooser from '@/components/ConfigKeyChooser.vue'
 import { Badge } from '@/components/ui/badge'

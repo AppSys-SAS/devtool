@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import type { SecretRequestPayload } from '@appsys/devtool-shared'
+import type { SecretRequestPayload } from '@appsys-sas/devtool-shared'
 
 const ANSWER_TIMEOUT_MS = 5 * 60_000
 

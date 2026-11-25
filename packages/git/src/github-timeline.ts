@@ -1,4 +1,4 @@
-import type { ForgeKind, ForgeReviewState, ForgeReviewThread, ForgeTimelineEvent } from '@appsys/devtool-shared'
+import type { ForgeKind, ForgeReviewState, ForgeReviewThread, ForgeTimelineEvent } from '@appsys-sas/devtool-shared'
 
 const SHARED_EVENTS = `
   ... on IssueComment { author { login } body createdAt }

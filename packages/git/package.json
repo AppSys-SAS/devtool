@@ -1,5 +1,5 @@
 {
-  "name": "@appsys/devtool-git",
+  "name": "@appsys-sas/devtool-git",
   "version": "0.1.1",
   "license": "Apache-2.0",
   "repository": {
@@ -24,6 +24,6 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@appsys/devtool-shared": "workspace:*"
+    "@appsys-sas/devtool-shared": "workspace:*"
   }
 }

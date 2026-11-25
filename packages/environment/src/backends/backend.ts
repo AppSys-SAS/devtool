@@ -1,5 +1,5 @@
 import type { Readable } from 'node:stream'
-import type { AuthOptions } from '@appsys/devtool-auth'
+import type { AuthOptions } from '@appsys-sas/devtool-auth'
 import type { EncryptionSettings } from './encryption.js'
 
 /** A file stored by a backend. */

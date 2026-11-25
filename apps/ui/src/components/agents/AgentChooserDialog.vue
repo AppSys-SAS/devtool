@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { DialogClose, DialogContent, DialogDescription, DialogOverlay, DialogPortal, DialogRoot, DialogTitle } from 'reka-ui'
-import type { AgentDefinition } from '@appsys/devtool-shared'
+import type { AgentDefinition } from '@appsys-sas/devtool-shared'
 import AgentOption from '@/components/agents/AgentOption.vue'
 import { buttonVariants } from '@/components/ui/button'
 

@@ -1,4 +1,4 @@
-import { stripAnsi } from '@appsys/devtool-shared'
+import { stripAnsi } from '@appsys-sas/devtool-shared'
 
 /** The answers to a yes/no question, as the question spells them. */
 export interface CommandPromptChoice {

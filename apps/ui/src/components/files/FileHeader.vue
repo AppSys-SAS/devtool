@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { Eye, EyeOff, Loader2, Save, TriangleAlert, Undo2 } from '@lucide/vue'
-import type { FilePayload } from '@appsys/devtool-shared'
+import type { FilePayload } from '@appsys-sas/devtool-shared'
 import SidebarToggle from '@/components/SidebarToggle.vue'
 import { Button } from '@/components/ui/button'
 import { formatRelativeDate } from '@/lib/format'

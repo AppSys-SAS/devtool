@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, shallowRef } from 'vue'
 import { Trash2 } from '@lucide/vue'
-import type { McpDecision, McpGrantPayload } from '@appsys/devtool-shared'
+import type { McpDecision, McpGrantPayload } from '@appsys-sas/devtool-shared'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import McpHistoryRow from '@/components/mcp/McpHistoryRow.vue'
 import { Button } from '@/components/ui/button'

@@ -1,5 +1,5 @@
 import { ref } from 'vue'
-import type { CertificatePayload } from '@appsys/devtool-shared'
+import type { CertificatePayload } from '@appsys-sas/devtool-shared'
 
 /**
  * Certificates of the load balancer as the server describes them.

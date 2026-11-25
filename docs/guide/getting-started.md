@@ -20,19 +20,19 @@ Install the `devtool` command globally with your package manager:
 ::: code-group
 
 ```sh [npm]
-npm i -g @appsys/devtool
+npm i -g @appsys-sas/devtool
 ```
 
 ```sh [pnpm]
-pnpm add -g @appsys/devtool
+pnpm add -g @appsys-sas/devtool
 ```
 
 ```sh [yarn]
-yarn global add @appsys/devtool
+yarn global add @appsys-sas/devtool
 ```
 
 ```sh [bun]
-bun add -g @appsys/devtool
+bun add -g @appsys-sas/devtool
 ```
 
 :::

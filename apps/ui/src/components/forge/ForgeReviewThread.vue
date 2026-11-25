@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { ForgeReviewThread } from '@appsys/devtool-shared'
+import type { ForgeReviewThread } from '@appsys-sas/devtool-shared'
 import MarkdownPreview from '@/components/files/MarkdownPreview.vue'
 import { Badge } from '@/components/ui/badge'
 import { formatRelativeDate } from '@/lib/format'

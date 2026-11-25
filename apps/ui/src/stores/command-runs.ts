@@ -1,5 +1,5 @@
 import { shallowRef } from 'vue'
-import type { CommandInputValue } from '@appsys/devtool-shared'
+import type { CommandInputValue } from '@appsys-sas/devtool-shared'
 import wsStore from './ws'
 
 /** A command to run in the background. */

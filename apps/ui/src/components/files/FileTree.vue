@@ -2,7 +2,7 @@
 import { computed, shallowRef, watch } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 import { ChevronRight, FileCog, FileKey, FilePlus, FileText, Folder, FolderOpen, FolderPlus, Pencil, Sparkles, Trash2, TriangleAlert } from '@lucide/vue'
-import { agentSkillFolderOf, type AgentSkillSummary, type FileEntryPayload } from '@appsys/devtool-shared'
+import { agentSkillFolderOf, type AgentSkillSummary, type FileEntryPayload } from '@appsys-sas/devtool-shared'
 import { cn } from '@/lib/utils'
 
 interface TreeNode {

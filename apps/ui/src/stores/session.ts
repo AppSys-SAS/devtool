@@ -1,5 +1,5 @@
 import { ref } from 'vue'
-import type { AuthSessionPayload } from '@appsys/devtool-shared'
+import type { AuthSessionPayload } from '@appsys-sas/devtool-shared'
 
 /**
  * Sign-in state of the developer with the identity provider, and the browser tab of a sign-in in progress.

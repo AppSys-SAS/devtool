@@ -10,8 +10,8 @@ Terminals, HTTPS hosts, a shared development environment and permissions for cod
 in one local web interface.
 
 [![CI](https://img.shields.io/github/actions/workflow/status/AppSys-SAS/devtool/ci.yml?branch=main&label=CI&logo=githubactions&logoColor=white)](https://github.com/AppSys-SAS/devtool/actions/workflows/ci.yml)
-[![npm](https://img.shields.io/npm/v/@appsys/devtool?color=6f3aff&logo=npm)](https://www.npmjs.com/package/@appsys/devtool)
-[![npm downloads](https://img.shields.io/npm/dm/@appsys/devtool?color=6f3aff)](https://www.npmjs.com/package/@appsys/devtool)
+[![npm](https://img.shields.io/npm/v/@appsys-sas/devtool?color=6f3aff&logo=npm)](https://www.npmjs.com/package/@appsys-sas/devtool)
+[![npm downloads](https://img.shields.io/npm/dm/@appsys-sas/devtool?color=6f3aff)](https://www.npmjs.com/package/@appsys-sas/devtool)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D24-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![MCP](https://img.shields.io/badge/MCP-server-20085e)](https://appsys-sas.github.io/devtool/agents/mcp-server)
@@ -66,11 +66,11 @@ in one local web interface.
 You need Node.js 24 or later, on macOS or Linux.
 
 ```bash
-npm install -g @appsys/devtool
+npm install -g @appsys-sas/devtool
 devtool --version
 ```
 
-or `pnpm add -g @appsys/devtool`, `yarn global add @appsys/devtool`, `bun add -g @appsys/devtool`. The
+or `pnpm add -g @appsys-sas/devtool`, `yarn global add @appsys-sas/devtool`, `bun add -g @appsys-sas/devtool`. The
 package brings the `devtool` command, its server and its built interface; terminals use prebuilt binaries,
 so nothing is compiled on your machine. Run the same command again to update.
 

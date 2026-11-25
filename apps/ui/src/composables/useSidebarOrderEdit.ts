@@ -1,5 +1,5 @@
 import { computed, shallowRef } from 'vue'
-import { shortcutKey, sortKeys, type SortMode } from '@appsys/devtool-shared'
+import { shortcutKey, sortKeys, type SortMode } from '@appsys-sas/devtool-shared'
 import { iconFromMeta } from '@/lib/directory-commands'
 import configStore from '@/stores/config'
 import wsStore from '@/stores/ws'
