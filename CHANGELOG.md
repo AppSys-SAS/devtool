@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.2](https://github.com/AppSys-SAS/devtool/compare/v1.0.1...v1.0.2) (2026-11-25)
+
+
+### Miscellaneous Chores
+
+* release 1.0.2 ([f7c89c6](https://github.com/AppSys-SAS/devtool/commit/f7c89c60b1ed9f1274594cee7725a5e671928aab))
+
 ## [1.0.1](https://github.com/AppSys-SAS/devtool/compare/v1.0.0...v1.0.1) (2026-11-25)
 
 
