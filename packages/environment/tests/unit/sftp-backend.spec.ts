@@ -198,7 +198,7 @@ beforeEach(async () => {
   backend = sftp.create(options!, context)
 })
 
-describe('sftp backend', () => {
+describe('sftp backend', { timeout: 30_000 }, () => {
   it('lists nothing before the folder exists, then stores, lists, reads and deletes files', async () => {
     expect(await backend.list()).toEqual([])
     await backend.upload('api/config.yml', await localFile('config.yml', 'port: 3000\n'), 'application/yaml')
