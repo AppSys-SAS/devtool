@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, shallowRef } from 'vue'
 import { Check, Pencil, X } from '@lucide/vue'
-import { MCP_ACTIONS, type McpAction, type McpLevel, type McpPatterns, type McpRules, type McpTarget } from '@appsys/devtool-shared'
+import { type IntegrationDefinition, MCP_ACTIONS, type McpAction, type McpLevel, type McpPatterns, type McpRules, type McpTarget } from '@appsys/devtool-shared'
 import ConfigFileChoice from '@/components/ConfigFileChoice.vue'
 import McpRulesRow from '@/components/mcp/McpRulesRow.vue'
 import { Button } from '@/components/ui/button'
@@ -15,6 +15,8 @@ const FILE_ACTIONS: readonly McpAction[] = ['read', 'write']
 const CERTIFICATE_ACTIONS: readonly McpAction[] = ['read', 'run']
 const ENVIRONMENT_ACTIONS: readonly McpAction[] = ['read', 'run', 'write']
 const DATA_ACTIONS: readonly McpAction[] = ['read', 'run']
+const INTEGRATION_ACTIONS: readonly McpAction[] = ['read']
+const INTEGRATION_KINDS: Record<string, string> = { pullRequests: 'pull requests', issues: 'issues' }
 const OWN_TERMINAL_LEVELS: readonly McpLevel[] = ['allow', 'ask']
 const PATTERN_LEVELS: readonly McpLevel[] = ['allow', 'ask', 'deny']
 
@@ -136,9 +138,26 @@ const settingRows = computed<SettingRow[]>(() => {
       levels: PATTERN_LEVELS
     },
     { label: 'adt.mcp.devtool', kind: 'holders of a port (read), reloading the configuration (control)', rules: value.devtool, actions: ['read', 'control'], target: targets.devtool },
+    { label: 'adt.mcp.integrations', kind: 'pull requests and issues of the integrations, refined below', rules: value.integrations, actions: INTEGRATION_ACTIONS, target: targets.integrations },
     { label: 'adt.mcp.certificates', kind: 'every certificate, refined below', rules: value.certificates, actions: CERTIFICATE_ACTIONS, target: targets.certificates }
   ]
 })
+
+const servedSkills = computed<string[]>(() => [
+  ...(settings.value?.skills ? ['the skills of the devtool'] : []),
+  ...projects.value.flatMap(section => Object.values(section.directories).flatMap(project => Object.values(project.files).flatMap(files =>
+    files.mcpSkills ? [`${section.slug}/${project.slug}/${files.slug} (${files.mcpSkills.join(', ')})`] : []
+  )))
+])
+
+/**
+ * Keeps the integrations agents may read the items of: the pull requests and the issues.
+ * @param integrations The integrations of a section or a project.
+ * @returns Those with rules, and their rules and target.
+ */
+function forgeIntegrations (integrations: IntegrationDefinition[]): (IntegrationDefinition & { mcp: McpRules, mcpTarget: McpTarget })[] {
+  return integrations.filter((integration): integration is IntegrationDefinition & { mcp: McpRules, mcpTarget: McpTarget } => integration.mcp !== null && integration.mcpTarget !== null)
+}
 </script>
 
 <template>
@@ -222,6 +241,14 @@ const settingRows = computed<SettingRow[]>(() => {
         <p class="px-2 py-1 text-xs text-muted-foreground">
           <code>notify_user</code> is always allowed: it only shows a message in this interface. Writing the configuration of the devtool is always refused.
         </p>
+        <p class="px-2 py-1 text-xs text-muted-foreground">
+          <template v-if="servedSkills.length">
+            Skills served over MCP, readable by every connected agent without asking: {{ servedSkills.join(" · ") }}.
+          </template>
+          <template v-else>
+            No skill is served over MCP (<code>adt.mcp.skills</code>, <code>mcpSkills</code> of the folders of agent skills).
+          </template>
+        </p>
       </div>
 
       <div class="space-y-1 border-t pt-2">
@@ -263,6 +290,19 @@ const settingRows = computed<SettingRow[]>(() => {
           :depth="0"
           :granted="granted"
           :target="section.slug === 'uncategorized' ? undefined : section.mcpTarget"
+          :edit="edit"
+        />
+        <McpRulesRow
+          v-for="integration in forgeIntegrations(section.integrations)"
+          :key="`${section.slug}/integrations/${integration.slug}`"
+          :label="integration.slug"
+          :kind="INTEGRATION_KINDS[integration.type]"
+          :rules="integration.mcp"
+          :actions="INTEGRATION_ACTIONS"
+          :depth="1"
+          :grant-id="integration.type"
+          :granted="granted"
+          :target="integration.mcpTarget"
           :edit="edit"
         />
         <template
@@ -315,6 +355,19 @@ const settingRows = computed<SettingRow[]>(() => {
             :grant-id="`${section.slug}/${project.slug}/${files.slug}`"
             :granted="granted"
             :target="files.mcpTarget"
+            :edit="edit"
+          />
+          <McpRulesRow
+            v-for="integration in forgeIntegrations(project.integrations)"
+            :key="`${section.slug}/${project.slug}/integrations/${integration.slug}`"
+            :label="integration.slug"
+            :kind="INTEGRATION_KINDS[integration.type]"
+            :rules="integration.mcp"
+            :actions="INTEGRATION_ACTIONS"
+            :depth="2"
+            :grant-id="integration.type"
+            :granted="granted"
+            :target="integration.mcpTarget"
             :edit="edit"
           />
         </template>

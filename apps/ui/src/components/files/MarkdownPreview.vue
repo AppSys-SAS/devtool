@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { computedAsync, useColorMode } from '@vueuse/core'
 import DOMPurify from 'dompurify'
 import MarkdownIt, { type StateCore } from 'markdown-it'
 import { splitFrontMatter } from '@appsys/devtool-shared'
@@ -68,7 +69,38 @@ purify.addHook('afterSanitizeAttributes', node => {
   }
 })
 
-const rendered = computed(() => purify.sanitize(markdown.render(splitFrontMatter(props.source).body)))
+/** The languages whose tokens come from a language service started by an editor, colored with a close grammar. */
+const COLORIZED_AS: Record<string, string> = { json: 'javascript' }
+
+const colorMode = useColorMode({ storageKey: 'devtool-color-mode' })
+const theme = computed(() => (colorMode.state.value === 'dark' ? 'vs-dark' : 'vs'))
+
+/**
+ * Colors the fenced code blocks of an HTML document with the editor tokenizer of their language, leaving the unknown languages as plain text.
+ * @param html The HTML document.
+ * @param theme The editor theme the colors come from.
+ * @returns The HTML document with its code blocks colored.
+ */
+async function highlight (html: string, theme: string): Promise<string> {
+  const template = document.createElement('template')
+  template.innerHTML = html
+  const blocks = [...template.content.querySelectorAll<HTMLElement>('pre > code[class*="language-"]')]
+  if (blocks.length === 0) return html
+  const monaco = await import('@/lib/monaco')
+  monaco.editor.setTheme(theme)
+  await Promise.all(blocks.map(async block => {
+    const language = monaco.languageNamed(/language-(\S+)/.exec(block.className)?.[1] ?? '')
+    if (language) {
+      block.innerHTML = await monaco.editor.colorize(block.textContent.replace(/\n$/, ''), COLORIZED_AS[language] ?? language, {})
+    }
+  }))
+  return template.innerHTML
+}
+
+const rendered = computedAsync(
+  async () => purify.sanitize(await highlight(markdown.render(splitFrontMatter(props.source).body), theme.value)),
+  ''
+)
 </script>
 
 <template>

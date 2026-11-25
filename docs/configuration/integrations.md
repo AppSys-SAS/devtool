@@ -147,6 +147,7 @@ Cursor and many other agents, and how to write your own prompts with `agentPromp
 | `agentAnalyze` | boolean | `false` | Issues: analyze button. |
 | `agentFix` | boolean | `false` | Issues: fix button. |
 | `agentPrompts` | map | none | `review`, or `analyze` and `fix`: prompts of this integration, see [Prompts](/agents/coding-agents#prompts). |
+| `mcp` | level or levels | inherited | Forges: whether agents may read its items (`read`), see [Agent permissions](/configuration/mcp#from-general-to-precise). |
 
 The agents and their prompts have their own [reference](/agents/coding-agents#reference).
 

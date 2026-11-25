@@ -654,3 +654,101 @@ describe('countChoices', () => {
     expect(diffConfig(yaml, merged, remote)).toHaveLength(1)
   })
 })
+
+describe('TOML files', () => {
+  const toml = formatOf('app/settings.toml')
+  const local = [
+    '# Settings of the app',
+    'name = "app"',
+    'released = 2026-01-15',
+    '',
+    '[server]',
+    'host = "localhost" # on this machine',
+    'port = 8080',
+    '',
+    '[[feature]]',
+    'name = "search"',
+    'on = true',
+    ''
+  ].join('\n')
+
+  it('reads tables as maps and arrays of tables as lists', () => {
+    expect(toml.read(local, 'the file')).toMatchObject({ name: 'app', server: { host: 'localhost', port: 8080 }, feature: [{ name: 'search', on: true }] })
+  })
+
+  it('compares the keys of two copies, dates included', () => {
+    const remote = local.replace('port = 8080', 'port = 9090').replace('2026-01-15', '2026-02-01')
+    expect(diffConfig(toml, local, remote).map(difference => difference.path)).toEqual([['released'], ['server', 'port']])
+  })
+
+  it('changes the chosen keys, keeping the comments and layout', () => {
+    const remote = local.replace('port = 8080', 'port = 9090').replace('name = "app"', 'name = "web"')
+    const merged = mergeConfig(toml, local, 'local', diffConfig(toml, local, remote), [{ path: ['server', 'port'], side: 'remote' }])
+    expect(merged).toBe(local.replace('port = 8080', 'port = 9090'))
+  })
+
+  it('refuses an invalid file', () => {
+    expect(() => toml.read('[server\nport = 1\n', 'the local copy')).toThrow(/^the local copy is not valid TOML: /)
+  })
+})
+
+describe('XML files', () => {
+  const xml = formatOf('app/settings.xml')
+  const local = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<!-- Settings of the app -->',
+    '<settings>',
+    '  <server host="localhost" port="8080"/>',
+    '  <!-- The database -->',
+    '  <database>',
+    '    <url>jdbc:postgresql://localhost/app</url>',
+    '    <user>app</user>',
+    '  </database>',
+    '  <feature name="search">on</feature>',
+    '  <feature name="export">off</feature>',
+    '</settings>',
+    ''
+  ].join('\n')
+
+  it('reads elements as keys, attributes as @keys and siblings sharing a name as a list', () => {
+    expect(xml.read(local, 'the file')).toEqual({
+      settings: {
+        server: { '@host': 'localhost', '@port': '8080' },
+        database: { url: 'jdbc:postgresql://localhost/app', user: 'app' },
+        feature: [{ '@name': 'search', '#text': 'on' }, { '@name': 'export', '#text': 'off' }]
+      }
+    })
+  })
+
+  it('compares the keys of two copies', () => {
+    const remote = local.replace('port="8080"', 'port="9090"').replace('<user>app</user>', '<user>admin</user>')
+    expect(diffConfig(xml, local, remote)).toEqual([
+      { path: ['settings', 'server', '@port'], local: '8080', remote: '9090' },
+      { path: ['settings', 'database', 'user'], local: 'app', remote: 'admin' }
+    ])
+  })
+
+  it('changes the chosen keys in place, keeping the declaration, comments and layout', () => {
+    const remote = local.replace('port="8080"', 'port="9090"').replace('<user>app</user>', '<user>admin</user>')
+    const merged = mergeConfig(xml, local, 'local', diffConfig(xml, local, remote), [{ path: ['settings', 'server', '@port'], side: 'remote' }])
+    expect(merged).toBe(local.replace('port="8080"', 'port="9090"'))
+  })
+
+  it('adds and removes elements and attributes, indented like their siblings', () => {
+    const remote = local.replace('    <user>app</user>\n', '').replace(' host="localhost"', '').replace('</database>', '  <pool>10</pool>\n  </database>')
+    const merged = mergeConfig(xml, local, 'local', diffConfig(xml, local, remote), diffConfig(xml, local, remote).map(difference => ({ path: difference.path, side: 'remote' as const })))
+    expect(merged).toBe(remote)
+  })
+
+  it('replaces a list of elements and ignores the keys asked inside it', () => {
+    const remote = local.replace('>off<', '>on<')
+    expect(diffConfig(xml, local, remote, new IgnoredKeys(['settings.feature.*.#text']))).toEqual([])
+    const merged = mergeConfig(xml, local, 'local', diffConfig(xml, local, remote), [{ path: ['settings', 'feature'], side: 'remote' }])
+    expect(merged).toBe(remote)
+  })
+
+  it('writes a new file from nothing and refuses an invalid one', () => {
+    expect(xml.write('', [{ path: ['settings', 'mode'], value: 'dev' }])).toBe('<settings>\n  <mode>dev</mode>\n</settings>')
+    expect(() => xml.read('<settings><open></settings>', 'the local copy')).toThrow(/^the local copy is not valid XML: /)
+  })
+})

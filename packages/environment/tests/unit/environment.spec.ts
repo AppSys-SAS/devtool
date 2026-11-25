@@ -184,7 +184,7 @@ describe('readEnvironmentOptions', () => {
 
     it('rejects ignored keys that are not key paths, or on a file without keys', () => {
       expect(() => read({ files: [{ path: 'a.json', ignore: 'connections' }] })).toThrow('invalid ignore of a.json in the environment: must be a list of key paths, such as connections.*.lastUsedAt')
-      expect(() => read({ files: [{ path: 'a.txt', ignore: ['a'] }] })).toThrow('invalid ignore of a.txt in the environment: needs a YAML, JSON or .env file')
+      expect(() => read({ files: [{ path: 'a.txt', ignore: ['a'] }] })).toThrow('invalid ignore of a.txt in the environment: needs a YAML, JSON, TOML, XML or .env file')
     })
 
     it('hides a file from the configurations tab with display: false', () => {

@@ -91,7 +91,7 @@ for `api/config.yml`). It stays on your machine, so you can change a value witho
 ### Ignored keys
 
 Some tools write values of their own into a shared file: the last time a connection was used, a window
-size. `ignore` leaves these keys out of the synchronization of a YAML, JSON or `.env` file:
+size. `ignore` leaves these keys out of the synchronization of a YAML, JSON, TOML, XML or `.env` file:
 
 ```yaml [config.yml]
 environment:
@@ -105,6 +105,19 @@ environment:
   agents show a change.
 - A pull keeps your values of the ignored keys, and a push keeps the ones of the backend. A new entry of a
   list arrives with its own values.
+
+### Keys of XML and TOML files
+
+The Environment page compares and merges YAML, JSON, TOML, XML and `.env` files key by key, and agents read
+their keys without the values. The keys of the two formats it may be less obvious to name:
+
+- **TOML:** a table is a map (`server.port`), an array of tables a list (`feature.0.name`).
+- **XML:** the root element is the first key, each child element a key (`settings.database.url`), each
+  attribute a key starting with `@` (`settings.server.@port`), and the text of an element holding
+  attributes or children `#text`. Sibling elements sharing a name form a list
+  (`settings.feature.*.@name`).
+
+Changes keep the comments and the layout of the file.
 
 ## Databases
 
@@ -313,4 +326,4 @@ Environment page shows the error and `devtool env` stops.
 - `invalid encryption rule in the environment: ...`, `invalid encryption of <path> in the environment:
   ...`: see [Encryption](/configuration/encryption#warnings-and-errors).
 - `invalid ignore of <path> in the environment: must be a list of key paths, such as
-  connections.*.lastUsedAt`, `... needs a YAML, JSON or .env file`: see [Ignored keys](#ignored-keys).
+  connections.*.lastUsedAt`, `... needs a YAML, JSON, TOML, XML or .env file`: see [Ignored keys](#ignored-keys).

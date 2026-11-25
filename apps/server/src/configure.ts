@@ -97,6 +97,7 @@ function defaultMcpSettings (notifications: boolean): McpSettings {
     terminals: rules,
     certificates: rules,
     devtool: rules,
+    integrations: rules,
     clients: { level: 'ask', allow: [], deny: [] },
     ownTerminals: 'allow',
     shell: { level: 'deny', allow: [], deny: [] },
@@ -109,7 +110,7 @@ function defaultMcpSettings (notifications: boolean): McpSettings {
 const ENVIRONMENT_LISTS = { files: 'file', databases: 'database', buckets: 'bucket', redis: 'redis' } as const
 
 /** The categories of `adt.mcp` refining `adt.mcp.default`. */
-const MCP_CATEGORIES: readonly McpCategory[] = ['commands', 'scripts', 'files', 'terminals', 'certificates', 'devtool']
+const MCP_CATEGORIES: readonly McpCategory[] = ['commands', 'scripts', 'files', 'terminals', 'certificates', 'devtool', 'integrations']
 const FILES_TYPES: readonly DirectoryFilesType[] = ['files', 'agentSkills']
 
 /** What shortcuts may name: the integrations of a project, and the commands, files and services of a directory. */
@@ -121,6 +122,8 @@ interface IntegrationOwner {
   section: string
   /** The project, null for the section itself. */
   project: string | null
+  /** The `mcp` settings of the section and the project, applied over `adt.mcp.integrations`. */
+  layers: McpLayer[]
 }
 
 /** An `mcp` setting declared by something holding others, applied over the rules of what it holds. */
@@ -267,7 +270,8 @@ export class DevtoolConfigure {
         ...Object.values(directory.extras).map(extra => extra.mcpTarget),
         ...directory.scripts.map(folder => folder.mcpTarget),
         ...Object.values(directory.files).map(files => files.mcpTarget)
-      ])
+      ]),
+      ...[...Object.values(this.projects), ...directories].flatMap(owner => owner.integrations.flatMap(integration => (integration.mcpTarget ? [integration.mcpTarget] : [])))
     ]
     return targets.find(target => target.path.length === settingPath.length && target.path.every((key, index) => key === settingPath[index])) ?? null
   }
@@ -736,7 +740,7 @@ export class DevtoolConfigure {
       return
     }
 
-    projectDefinition.integrations = this.readIntegrations(`${slug}.integrations`, project.integrations, { path: projectPath, section: projectSlug, project: null })
+    projectDefinition.integrations = this.readIntegrations(`${slug}.integrations`, project.integrations, { path: projectPath, section: projectSlug, project: null, layers })
     projectDefinition.icons = this.readShortcuts(`${slug}.icons`, projectDefinition, project.icons)
     projectDefinition.lines = this.readShortcuts(`${slug}.lines`, projectDefinition, project.lines)
     projectDefinition.content = this.sortItems(
@@ -994,7 +998,7 @@ export class DevtoolConfigure {
       directoryDefinition.args = directoryDefinition.extras[mainCommand]?.args ?? null
     }
     directoryDefinition.files = this.readFiles(`${slug}.files`, directoryDefinition, directory.files, this.layeredRules(this.adt.mcp.files, layers))
-    directoryDefinition.integrations = this.readIntegrations(`${slug}.integrations`, directory.integrations, { path: directoryPath, section: projectDefinition.slug, project: directorySlug })
+    directoryDefinition.integrations = this.readIntegrations(`${slug}.integrations`, directory.integrations, { path: directoryPath, section: projectDefinition.slug, project: directorySlug, layers })
     directoryDefinition.defaultAction = this.readDefaultAction(`${slug}.default`, directoryDefinition, directory.default)
     directoryDefinition.icons = this.readShortcuts(`${slug}.icons`, directoryDefinition, directory.icons)
     directoryDefinition.lines = this.readShortcuts(`${slug}.lines`, directoryDefinition, directory.lines)
@@ -1205,7 +1209,9 @@ export class DevtoolConfigure {
         agentActions: [],
         agentPrompts: {},
         badge: false,
-        refresh: 0
+        refresh: 0,
+        mcp: null,
+        mcpTarget: null
       })
     }
     return integrations
@@ -1215,8 +1221,9 @@ export class DevtoolConfigure {
    * Reads an integration listing the pull requests or the issues of a repository: `url`, the `origin`
    * remote of the folder of its owner by default, `provider`, guessed from the host by default, `token`,
    * read with value blocks, `opAccount`, `refresh` in minutes, `badge`, the actions of agents its kind
-   * offers (`agentReview`, `agentAnalyze`, `agentFix`), each off by default, and their `agentPrompts`,
-   * over those of `adt.agentPrompts` and of the devtool.
+   * offers (`agentReview`, `agentAnalyze`, `agentFix`), each off by default, their `agentPrompts`,
+   * over those of `adt.agentPrompts` and of the devtool, and `mcp`, what agents may do with its items,
+   * over `adt.mcp.integrations` and the rules of its section and project.
    * @param setting Names the integration in warnings.
    * @param slug The slug of the integration.
    * @param kind What it lists.
@@ -1257,6 +1264,7 @@ export class DevtoolConfigure {
       return null
     }
     const prompts = this.readAgentPrompts(`${setting}.agentPrompts`, kind, integration.agentPrompts)
+    const fromPath = owner.project === null ? ['sections', owner.section, 'integrations', slug] : ['projects', owner.project, 'integrations', slug]
 
     const key = integrationKey(owner.section, owner.project, slug)
     if (typeof integration.token === 'string') {
@@ -1277,7 +1285,9 @@ export class DevtoolConfigure {
       agentActions: AGENT_ACTIONS[kind].filter(action => integration[AGENT_ACTION_SETTINGS[action]] === true),
       agentPrompts: Object.fromEntries(AGENT_ACTIONS[kind].map(action => [action, prompts[action] ?? this.agentPrompts[kind]?.[action] ?? DEFAULT_AGENT_PROMPTS[action]])),
       badge: (integration.badge as boolean | undefined) ?? true,
-      refresh
+      refresh,
+      mcp: this.readMcpRules(`${setting}.mcp`, integration.mcp, this.layeredRules(this.adt.mcp.integrations, owner.layers), fromPath),
+      mcpTarget: this.settingTarget([...fromPath, 'mcp'])
     }
   }
 
