@@ -209,7 +209,7 @@ adt:
 
 - **VS Code**: install the YAML extension by Red Hat.
 - **JetBrains IDEs**: the line works out of the box.
-- The schema also ships in the npm package, at `@appsys-sas/devtool-config/schema/config.schema.json`.
+- The schema also ships in the npm package, at `@appsys-sas/devtool/dist/schema/config.schema.json`.
 
 ## Warnings
 

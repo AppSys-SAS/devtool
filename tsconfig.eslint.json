@@ -8,6 +8,7 @@
   },
   "include": [
     "*.config.ts",
+    "apps/cli/tsdown.config.ts",
     "apps/cli/tests/**/*.ts",
     "apps/proxy/tests/**/*.ts",
     "apps/server/tests/**/*.ts",
