@@ -127,6 +127,7 @@ describe('database targets', () => {
     const check = async (archive: Buffer): Promise<void> => databaseEngine('mongodb').checkNative({ container: 'mongo', database: null }, Readable.from([archive]))
     await expect(check(mongodumpArchive('production', ['users', 'orders']))).resolves.toBeUndefined()
     await expect(check(gzipSync(Buffer.from([0x6d, 0xe2, 0x99, 0x81])))).rejects.toThrow('no complete list of collections')
+    await expect(check(gzipSync(Buffer.concat([Buffer.from([0x6d, 0xe2, 0x99, 0x81]), TERMINATOR])))).rejects.toThrow('no header')
     await expect(check(mongodumpPrelude('production', ['users']))).rejects.toThrow('production.users never ends')
     const whole = gunzipSync(mongodumpArchive('production', ['users']))
     await expect(check(gzipSync(whole.subarray(0, whole.length - 10)))).rejects.toThrow('not a mongodump archive: it ends in the middle of a document')
@@ -139,7 +140,10 @@ describe('database targets', () => {
     const badLength = bsonDocument({ db: 'production', collection: 'users' })
     badLength.writeInt32LE(1_000_000, 4 + 1 + 'db'.length + 1)
     const outOfDocument = gzipSync(Buffer.concat([header, badLength]))
-    for (const archive of [zeroSize, outOfDocument]) {
+    const smallOverrun = bsonDocument({ db: 'production', collection: 'users' })
+    smallOverrun.writeInt32LE(smallOverrun.length - 8 - 2, 4 + 1 + 'db'.length + 1)
+    const overrunByFewBytes = gzipSync(Buffer.concat([header, smallOverrun]))
+    for (const archive of [zeroSize, outOfDocument, overrunByFewBytes]) {
       await expect(databaseEngine('mongodb').restoreNative({ container: 'mongo', database: 'catalog' }, () => Readable.from([archive]), ['users'])).rejects.toThrow('not a mongodump archive')
     }
     expect(await dockerCalls()).toEqual([])
@@ -224,11 +228,14 @@ describe('database targets', () => {
     expect(await dockerCalls()).toEqual([])
   })
 
-  it('leaves a mongodb database untouched when the pulled archive is complete gzip but an incomplete mongodump', async () => {
+  it.each([
+    ['a list of collections whose data never comes', mongodumpPrelude('production', ['users'])],
+    ['no header', gzipSync(Buffer.concat([Buffer.from([0x6d, 0xe2, 0x99, 0x81]), TERMINATOR]))]
+  ])('leaves a mongodb database untouched when the pulled archive is complete gzip but a mongodump with %s', async (_case, content) => {
     const item: EnvironmentItem = { kind: 'database', path: 'api/db.archive.gz', backend: 'team', encryption: null, groups: { pull: null, push: null }, engine: 'mongodb', container: 'mongo', database: 'shop', format: 'native' }
     const backend: EnvironmentBackend = {
       list: async () => [],
-      download: async () => Readable.from([mongodumpPrelude('production', ['users'])]),
+      download: async () => Readable.from([content]),
       upload: async () => undefined,
       remove: async () => undefined,
       close: async () => undefined

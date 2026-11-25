@@ -501,6 +501,18 @@ describe('readEnvironmentOptions', () => {
     })
   })
 
+  describe('paths', () => {
+    it('refuses an item path that is not in its canonical form, so its groups cannot be bypassed through an alias', () => {
+      expect(() => readEnvironmentOptions({ files: [{ path: 'api/./config.yml', groups: { pull: ['admins'] } }] })).toThrow('invalid path of api/./config.yml in the environment: write it api/config.yml')
+      expect(() => readEnvironmentOptions({ databases: [{ path: '/api/db.gz', engine: 'postgres', container: 'db' }] })).toThrow('write it api/db.gz')
+      expect(() => readEnvironmentOptions({ files: ['../secrets.yml'] })).toThrow('is not a path inside the backend')
+    })
+
+    it('refuses an item path declared twice', () => {
+      expect(() => readEnvironmentOptions({ files: ['api/config.yml'], buckets: [{ path: 'api/config.yml', bucket: 'b' }] })).toThrow('api/config.yml is declared twice in the environment')
+    })
+  })
+
   describe('groups', () => {
     const backends = {
       team: { type: 'cdn', url: 'https://files.example.dev/', groups: { pull: ['developers'], push: false } },

@@ -148,6 +148,19 @@ export async function* objectsOfTar (archive: AsyncIterable<Buffer>): AsyncGener
 }
 
 /**
+ * Reads a whole gzip-compressed tar archive of objects, failing when it is truncated or corrupted.
+ *
+ * @param archive - The archive.
+ */
+export async function checkTar (archive: AsyncIterable<Buffer>): Promise<void> {
+  for await (const { body } of objectsOfTar(archive)) {
+    for await (const chunk of body) {
+      void chunk
+    }
+  }
+}
+
+/**
  * Replaces the content of a bucket, created when missing, by some objects; the bucket is left as it
  * is when the first object cannot be read.
  *

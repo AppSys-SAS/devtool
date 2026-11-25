@@ -8,7 +8,7 @@ import { mergeTransferGroups, OPEN_ACCESS, type TransferAccess, type TransferDir
 import { ArchiveWriter, readArchive, type RecordHeader, transformed } from './archive.js'
 import { type BackendContext, type BackendOptions, encrypted, EncryptionSecret, type EncryptionSettings, type EnvironmentBackend, readBackends, readEncryption } from './backends/index.js'
 import { plainLengthOf } from './backends/encryption.js'
-import { createS3Client, objectsOfArchive, objectsOfTar, restoreBucket, type S3Options, snapshotBucket, snapshotBucketTar } from './buckets.js'
+import { checkTar, createS3Client, objectsOfArchive, objectsOfTar, restoreBucket, type S3Options, snapshotBucket, snapshotBucketTar } from './buckets.js'
 import { defaultEnvironmentFolder, localPathOf, writeLocalFile } from './directory.js'
 import { databaseEngine, type DatabaseEngineName, isDatabaseEngineName } from './engines.js'
 import { listRedisGroups, redisDatabaseName, redisRecordGroup, restoreRedis, snapshotRedis } from './redis.js'
@@ -263,6 +263,13 @@ export function readEnvironmentOptions (section: unknown): EnvironmentOptions | 
     return { path: itemPath, backend, encryption: encryptionOf(itemPath, entry.encryption), groups: mergeTransferGroups(groups, backendGroups) }
   }
   const addItem = (item: EnvironmentItem, pull: unknown): void => {
+    const canonical = canonicalBackendPath(item.path)
+    if (canonical !== item.path) {
+      throw new Error(`invalid path of ${item.path} in the environment: write it ${canonical}`)
+    }
+    if (items.some(other => other.path === item.path)) {
+      throw new Error(`${item.path} is declared twice in the environment`)
+    }
     items.push(item)
     const autoPull = readAutoPull(item.path, pull)
     if (autoPull) {
@@ -610,9 +617,12 @@ export class Environment {
       return { done: true, detail: localPath }
     }
 
+    if (item.kind === 'bucket' && item.format === 'native') {
+      return this.restoreBucketTar(item, localPath)
+    }
+
     if (item.kind === 'bucket') {
-      const objects = item.format === 'native' ? objectsOfTar(createReadStream(localPath)) : objectsOfArchive(readArchive(localPath))
-      const count = await restoreBucket(this.s3(), item.bucket, objects)
+      const count = await restoreBucket(this.s3(), item.bucket, objectsOfArchive(readArchive(localPath)))
       return { done: true, detail: `${count} objects restored in ${item.bucket}` }
     }
 
@@ -634,6 +644,29 @@ export class Environment {
     }
 
     return item.format === 'native' ? this.restoreNative(item, localPath, tables) : this.restoreDatabase(item, localPath, tables)
+  }
+
+  /**
+   * Replaces the objects of a bucket by those of a tar.gz archive, read whole first so that a
+   * truncated or corrupted archive leaves the bucket untouched; the bytes checked are those restored,
+   * from a private copy of the archive.
+   *
+   * @param item - The bucket item.
+   * @param localPath - The archive.
+   * @returns What was done.
+   */
+  private async restoreBucketTar (item: Extract<EnvironmentItem, { kind: 'bucket' }>, localPath: string): Promise<TransferResult> {
+    const copyPath = `${localPath}.${randomUUID()}.restore`
+    await fs.copyFile(localPath, copyPath)
+    try {
+      await checkTar(createReadStream(copyPath)).catch((error: unknown) => {
+        throw new Error(`${item.path} is not a complete tar.gz archive: ${error instanceof Error ? error.message : String(error)}`)
+      })
+      const count = await restoreBucket(this.s3(), item.bucket, objectsOfTar(createReadStream(copyPath)))
+      return { done: true, detail: `${count} objects restored in ${item.bucket}` }
+    } finally {
+      await fs.rm(copyPath, { force: true })
+    }
   }
 
   /**
