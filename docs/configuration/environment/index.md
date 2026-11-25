@@ -173,9 +173,13 @@ environment:
 ```
 
 A MongoDB archive dumped from a database of another name is restored into the database of the item.
-A pull of some tables restores only those: their collections replaced for `mongodb`, their rows
-replaced for `postgres`. A native `mariadb` archive is a SQL script, restored whole only. A push always
-dumps the whole database: the tables of a native archive cannot be replaced one by one.
+A pulled file that does not start like an archive of the engine is refused before the database is
+touched.
+
+A pull of some tables restores only those: their collections replaced for `mongodb`; their rows
+replaced in one transaction for `postgres`, every table having to be in the archive. A native `mariadb`
+archive is a SQL script, restored whole only. A push always dumps the whole database: the tables of a
+native archive cannot be replaced one by one.
 
 ## Buckets and S3
 
@@ -190,8 +194,9 @@ A bucket is saved as a snapshot, media types kept, and emptied before a pull res
 where your local S3 server is; `region` defaults to `us-east-1`.
 
 With `format: native`, the snapshot is a `tar.gz` of the objects, the path of each file in the archive
-being its key. A pull empties the bucket, then stores every file with the media type of its extension;
-a push writes the objects of the bucket to the archive.
+being its key, without the `./` the tar command writes before it. A pull empties the bucket, then
+stores every file with the media type of its extension; a push writes the objects of the bucket to the
+archive, each behind `./`, as `tar -czf uploads.tar.gz -C <folder> .` does.
 
 ```yaml [config.yml]
 environment:
@@ -208,7 +213,8 @@ On macOS, `tar` adds `._*` files holding extended attributes. Make the archive w
 
 `groups` lets only some developers pull or push, by the groups the [identity provider](/configuration/auth)
 gives them. It goes on a [backend](/configuration/environment/backends), for all its items, or on an
-item, which replaces the groups of its backend direction by direction:
+item, which replaces the groups of its backend direction by direction. A direction a backend sets to
+`false` stays refused for all its items:
 
 ```yaml [config.yml]
 environment:
@@ -226,7 +232,9 @@ environment:
 - `false`: nobody, such as a backend serving archives read-only;
 - left out: everyone.
 
-A refused transfer stops before reaching the backend, from the CLI, the interface or an agent.
+A refused transfer stops before reaching the backend, from the CLI, the interface or an agent. Reading
+the copy of a backend, to compare the keys of a configuration file for instance, needs the pull groups
+too.
 The Environment page hides Pull or Push when they are refused for the selected items, `devtool env`
 without target skips the refused items, and a scheduled pull reports them as skipped.
 

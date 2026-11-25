@@ -296,7 +296,7 @@ async function syncEnvironment (direction: TransferDirection, targets: string[],
       selections = parseTargets(options, targets)
     } else {
       const items = await transferableItems(environment, options.items, direction)
-      selections = flags.interactive ? await chooseSelections(items, direction) : items.map(item => ({ item, tables: null }))
+      selections = flags.interactive && items.length > 0 ? await chooseSelections(items, direction) : items.map(item => ({ item, tables: null }))
     }
     if (direction === 'push') {
       await transfer(selections, selection => environment.push(selection))

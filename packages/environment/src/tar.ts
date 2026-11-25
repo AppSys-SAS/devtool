@@ -2,7 +2,7 @@ import { BufferedReader } from './archive.js'
 
 /** A regular file of a tar archive; its body must be read before the next entry is. */
 export interface TarEntry {
-  /** Its path in the archive, without leading `./` or `/`. */
+  /** Its path relative to the archived folder, without the `./` the archive writes before it. */
   name: string
   size: number
   /** Last change, written to the archive; the current date when missing. */
@@ -98,13 +98,13 @@ function parsePax (data: Buffer): Map<string, string> {
 }
 
 /**
- * Strips the leading `./` and `/` of a path of an archive.
+ * Strips the `./` the tar command writes before each path of an archive of a folder.
  *
- * @param name - The path.
- * @returns The relative path.
+ * @param name - The path in the archive.
+ * @returns The path relative to the archived folder.
  */
 function relativeName (name: string): string {
-  return name.replace(/^(?:\.?\/)+/, '')
+  return name.startsWith('./') ? name.slice(2) : name
 }
 
 /**
@@ -114,7 +114,25 @@ function relativeName (name: string): string {
  * @returns The files, in their order in the archive.
  */
 export async function* readTar (source: AsyncIterable<Buffer>): AsyncGenerator<TarEntry> {
-  const reader = new BufferedReader(source[Symbol.asyncIterator]())
+  const iterator = source[Symbol.asyncIterator]()
+  const reader = new BufferedReader(iterator)
+  try {
+    if (await reader.atEnd()) {
+      throw new Error('not a tar archive')
+    }
+    yield* readEntries(reader)
+  } finally {
+    await iterator.return?.()
+  }
+}
+
+/**
+ * Reads the regular files of a tar archive up to its end blocks or the end of its bytes.
+ *
+ * @param reader - The archive, positioned on a header block.
+ * @returns The files, in their order in the archive.
+ */
+async function* readEntries (reader: BufferedReader): AsyncGenerator<TarEntry> {
   let longName: string | null = null
   let pax = new Map<string, string>()
   while (!(await reader.atEnd())) {
@@ -145,7 +163,7 @@ export async function* readTar (source: AsyncIterable<Buffer>): AsyncGenerator<T
     longName = null
     pax = new Map()
     let remaining = size
-    if (REGULAR_TYPES.has(type) && name !== '' && !name.endsWith('/')) {
+    if (REGULAR_TYPES.has(type) && name !== '') {
       const body = async function* (): AsyncGenerator<Buffer> {
         while (remaining > 0) {
           const chunk = await reader.read(Math.min(remaining, MAX_CHUNK))
@@ -215,14 +233,15 @@ function paxRecord (key: string, value: string): string {
 }
 
 /**
- * Writes a tar archive of files, PAX records carrying the paths longer than 100 bytes and the sizes
- * too large for ustar.
+ * Writes a tar archive of files, each path behind `./` as the tar command writes those of a folder,
+ * PAX records carrying the paths longer than 100 bytes and the sizes too large for ustar.
  *
  * @param entries - The files; each body must hold exactly `size` bytes.
  * @returns The uncompressed archive.
  */
 export async function* writeTar (entries: AsyncIterable<TarEntry>): AsyncGenerator<Buffer> {
-  for await (const { name, size, mtime = new Date(), body } of entries) {
+  for await (const { name: relative, size, mtime = new Date(), body } of entries) {
+    const name = `./${relative}`
     const records = [
       ...(Buffer.byteLength(name) > USTAR_NAME_BYTES ? [paxRecord('path', name)] : []),
       ...(size >= MAX_OCTAL_SIZE ? [paxRecord('size', String(size))] : [])
@@ -240,7 +259,7 @@ export async function* writeTar (entries: AsyncIterable<TarEntry>): AsyncGenerat
       yield chunk
     }
     if (written !== size) {
-      throw new Error(`${name} holds ${written} bytes instead of ${size}`)
+      throw new Error(`${relative} holds ${written} bytes instead of ${size}`)
     }
     yield Buffer.alloc(paddingOf(size))
   }

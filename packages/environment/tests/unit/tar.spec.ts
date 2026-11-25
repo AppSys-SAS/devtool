@@ -87,6 +87,16 @@ describe('tar archives', () => {
     await expect(bytesOf(writeTar(entries))).rejects.toThrow('a.txt holds 5 bytes instead of 10')
   })
 
+  it('keeps names that start with ./ or end with /, such as folder markers', async () => {
+    const files = { './hidden.txt': 'a', 'hidden.txt': 'b', 'photos/': '' }
+    expect(await filesOf(writeTar(entriesOf(files)))).toEqual(files)
+  })
+
+  it('reads an archive holding no file, and refuses one without any block', async () => {
+    expect(await filesOf(writeTar(entriesOf({})))).toEqual({})
+    await expect(filesOf(Readable.from([]))).rejects.toThrow('not a tar archive')
+  })
+
   it('refuses what is not a tar archive', async () => {
     await expect(filesOf(Readable.from([Buffer.alloc(512, 'x')]))).rejects.toThrow('not a tar archive')
   })

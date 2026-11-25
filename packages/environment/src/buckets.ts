@@ -160,6 +160,38 @@ export async function restoreBucket (client: S3Client, bucket: string, objects: 
   const iterator = objects[Symbol.asyncIterator]()
   let next = await iterator.next()
   try {
+    await emptyBucket(client, bucket)
+    let count = 0
+    while (!next.done) {
+      const { key, size, contentType, body } = next.value
+      await client.send(
+        new PutObjectCommand({
+          Bucket: bucket,
+          Key: key,
+          Body: Readable.from(body, { objectMode: false }),
+          ContentLength: size,
+          ContentType: contentType
+        })
+      )
+      count += 1
+      next = await iterator.next()
+    }
+    return count
+  } finally {
+    if (!next.done) {
+      await iterator.return?.()
+    }
+  }
+}
+
+/**
+ * Deletes every object of a bucket, creating the bucket when missing.
+ *
+ * @param client - The S3 client.
+ * @param bucket - The bucket.
+ */
+async function emptyBucket (client: S3Client, bucket: string): Promise<void> {
+  try {
     await client.send(new HeadBucketCommand({ Bucket: bucket }))
   } catch {
     await client.send(new CreateBucketCommand({ Bucket: bucket }))
@@ -173,22 +205,4 @@ export async function restoreBucket (client: S3Client, bucket: string, objects: 
     const batch = keys.slice(start, start + 1000).map(Key => ({ Key }))
     await client.send(new DeleteObjectsCommand({ Bucket: bucket, Delete: { Objects: batch, Quiet: true } }))
   }
-
-  let count = 0
-  while (!next.done) {
-    const { key, size, contentType, body } = next.value
-    await client.send(
-      new PutObjectCommand({
-        Bucket: bucket,
-        Key: key,
-        Body: Readable.from(body, { objectMode: false }),
-        ContentLength: size,
-        ContentType: contentType
-      })
-    )
-    count += 1
-    next = await iterator.next()
-  }
-
-  return count
 }

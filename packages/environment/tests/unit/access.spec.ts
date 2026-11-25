@@ -40,8 +40,12 @@ describe('readTransferGroups', () => {
 
 describe('mergeTransferGroups', () => {
   it('replaces the groups of the backend by those the item names, direction by direction', () => {
-    expect(mergeTransferGroups({ pull: null, push: ['admins'] }, { pull: ['developers'], push: false })).toEqual({ pull: ['developers'], push: ['admins'] })
+    expect(mergeTransferGroups({ pull: null, push: ['admins'] }, { pull: ['developers'], push: ['developers'] })).toEqual({ pull: ['developers'], push: ['admins'] })
     expect(mergeTransferGroups({ pull: false, push: null }, { pull: null, push: null })).toEqual({ pull: false, push: null })
+  })
+
+  it('keeps a direction the backend refuses to everyone refused', () => {
+    expect(mergeTransferGroups({ pull: ['admins'], push: ['admins'] }, { pull: null, push: false })).toEqual({ pull: ['admins'], push: false })
   })
 })
 
@@ -97,6 +101,14 @@ describe('Environment groups', () => {
     await expect(environment.push({ item, tables: null })).rejects.toThrow('api/config.yml: push is disabled')
     expect(backend.download).not.toHaveBeenCalled()
     expect(backend.upload).not.toHaveBeenCalled()
+  })
+
+  it('refuses to read the copy of the backend for a key comparison without the pull groups', async () => {
+    signIn(['developers'])
+    const { environment, item } = environmentWith({ pull: ['admins'], push: null })
+
+    await expect(environment.diffKeys(item)).rejects.toThrow('api/config.yml: pull needs one of the groups admins')
+    expect(backend.download).not.toHaveBeenCalled()
   })
 
   it('transfers when the groups of the developer allow it', async () => {

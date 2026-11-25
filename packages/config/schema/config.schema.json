@@ -751,7 +751,7 @@
                     "examples": [["connections.*.lastUsedAt"]]
                   },
                   "pull": { "$ref": "#/$defs/pull" },
-                  "groups": { "$ref": "#/$defs/transferGroups", "description": "Who may pull and push it, replacing the groups of its backend direction by direction." },
+                  "groups": { "$ref": "#/$defs/transferGroups", "description": "Who may pull and push it, replacing the groups of its backend direction by direction, except a direction the backend sets to false." },
                   "mcp": { "$ref": "#/$defs/mcpRules" }
                 }
               }
@@ -773,7 +773,7 @@
               "backend": { "$ref": "#/$defs/backendName" },
               "encryption": { "$ref": "#/$defs/encryption" },
               "pull": { "$ref": "#/$defs/pull" },
-              "groups": { "$ref": "#/$defs/transferGroups", "description": "Who may pull and push it, replacing the groups of its backend direction by direction." },
+              "groups": { "$ref": "#/$defs/transferGroups", "description": "Who may pull and push it, replacing the groups of its backend direction by direction, except a direction the backend sets to false." },
               "mcp": { "$ref": "#/$defs/mcpRules" }
             }
           }
@@ -791,7 +791,7 @@
               "backend": { "$ref": "#/$defs/backendName" },
               "encryption": { "$ref": "#/$defs/encryption" },
               "pull": { "$ref": "#/$defs/pull" },
-              "groups": { "$ref": "#/$defs/transferGroups", "description": "Who may pull and push it, replacing the groups of its backend direction by direction." },
+              "groups": { "$ref": "#/$defs/transferGroups", "description": "Who may pull and push it, replacing the groups of its backend direction by direction, except a direction the backend sets to false." },
               "mcp": { "$ref": "#/$defs/mcpRules" }
             }
           }
@@ -808,7 +808,7 @@
               "backend": { "$ref": "#/$defs/backendName" },
               "encryption": { "$ref": "#/$defs/encryption" },
               "pull": { "$ref": "#/$defs/pull" },
-              "groups": { "$ref": "#/$defs/transferGroups", "description": "Who may pull and push it, replacing the groups of its backend direction by direction." },
+              "groups": { "$ref": "#/$defs/transferGroups", "description": "Who may pull and push it, replacing the groups of its backend direction by direction, except a direction the backend sets to false." },
               "mcp": { "$ref": "#/$defs/mcpRules" }
             }
           }

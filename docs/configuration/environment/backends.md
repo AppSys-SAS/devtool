@@ -146,7 +146,7 @@ Every backend takes these keys, on top of those of its type:
 | `type` | `cdn`, `s3`, `sftp`, `git`, `scripts` | required | Kind of backend. |
 | `default` | boolean | `false` | Items naming no backend, and the shared configuration, use this one. The first backend when none is marked. |
 | `encryption` | map | none | Encrypt every file stored here: `{ key }`, `{ password }` or `{ prompt: true }`. See [Encryption](/configuration/environment/encryption). |
-| `groups` | map | everyone | `{ pull, push }`: who may pull and push its items, each a list of groups or `false`. An item naming its own groups replaces them. See [Who may pull and push](/configuration/environment/#who-may-pull-and-push). |
+| `groups` | map | everyone | `{ pull, push }`: who may pull and push its items, each a list of groups or `false`. An item naming its own groups replaces them, except a direction set to `false` here. See [Who may pull and push](/configuration/environment/#who-may-pull-and-push). |
 
 The keys of each type are listed on its page: [cdn](/configuration/environment/cdn),
 [s3](/configuration/environment/s3), [sftp](/configuration/environment/sftp),

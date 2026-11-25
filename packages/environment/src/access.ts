@@ -52,14 +52,18 @@ export function readTransferGroups (value: unknown): { groups: TransferAccess, p
 }
 
 /**
- * Gives the groups of a direction, those of an item replacing those of its backend.
+ * Gives the groups of each direction, those of an item replacing those of its backend, except where
+ * the backend refuses everyone.
  *
  * @param item - The groups of the item.
  * @param backend - The groups of its backend.
  * @returns The groups by direction.
  */
 export function mergeTransferGroups (item: TransferAccess, backend: TransferAccess): TransferAccess {
-  return { pull: item.pull ?? backend.pull, push: item.push ?? backend.push }
+  return {
+    pull: backend.pull === false ? false : item.pull ?? backend.pull,
+    push: backend.push === false ? false : item.push ?? backend.push
+  }
 }
 
 /**
