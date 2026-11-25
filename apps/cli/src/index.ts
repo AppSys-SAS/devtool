@@ -2,10 +2,10 @@
 
 import { createWriteStream } from 'node:fs'
 import fs from 'node:fs/promises'
-import { createRequire } from 'node:module'
 import os from 'node:os'
 import path from 'node:path'
 import { pipeline } from 'node:stream/promises'
+import { fileURLToPath } from 'node:url'
 import { checkbox, confirm, password, select } from '@inquirer/prompts'
 import { Command } from 'commander'
 import { type AuthOptions, AuthSignInRequiredError, login, logout, openInBrowser, readAuthOptions } from '@appsys-sas/devtool-auth'
@@ -33,7 +33,7 @@ import { logger, type LogLevel } from '@appsys-sas/devtool-shared'
 import pkg from '../package.json' with { type: 'json' }
 import { agentSkillFolders, distinctFolders, foreignSkills, type SkillInstallMode, syncSkills, wasSynced } from './skills.js'
 
-const UI_PATH = path.join(path.dirname(createRequire(import.meta.url).resolve('@appsys-sas/devtool-ui/package.json')), 'dist')
+const UI_PATH = fileURLToPath(new URL('../ui', import.meta.url))
 
 /**
  * Reads the identity provider of the configuration of the devtool installation.

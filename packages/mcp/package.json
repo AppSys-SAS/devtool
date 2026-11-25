@@ -1,6 +1,7 @@
 {
   "name": "@appsys-sas/devtool-mcp",
   "version": "1.0.0",
+  "private": true,
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -10,9 +11,6 @@
   "type": "module",
   "main": "./lib/index.js",
   "types": "./lib/index.d.ts",
-  "files": [
-    "lib"
-  ],
   "exports": {
     ".": {
       "types": "./lib/index.d.ts",

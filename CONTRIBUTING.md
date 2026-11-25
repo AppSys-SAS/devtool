@@ -23,7 +23,7 @@ The repository is a pnpm workspace:
 
 | Folder | Content |
 |---|---|
-| `apps/cli` | the `devtool` command, published as `@appsys-sas/devtool` |
+| `apps/cli` | the `devtool` command, the only package published (`@appsys-sas/devtool`): it bundles the other packages and ships the interface, the agent skills and the schema |
 | `apps/server` | the API and WebSocket server, command streams and load balancer |
 | `apps/proxy` | the TCP proxy forwarding port 443 to the load balancer |
 | `apps/ui` | the web interface (Vue, Vite, Tailwind, shadcn-vue) |
@@ -63,7 +63,9 @@ pnpm docs:build  # documentation site, fails on dead links
 
 The end-to-end tests start a devtool on ports 16730 and 16731 with the configuration of
 `e2e/fixtures`, copied to a temporary folder (`$E2E_FOLDER`, `devtool-e2e` in the system temporary
-folder by default). They need Chromium once: `pnpm exec playwright install chromium`.
+folder by default). They need Chromium once: `pnpm exec playwright install chromium`. They run the
+built bundle (`apps/cli/dist/lib/index.js`), or the `index.js` named by `$E2E_DEVTOOL`: the CI points
+it to the package packed and installed as a user would.
 
 ## Configuration changes
 

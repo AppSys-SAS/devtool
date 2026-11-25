@@ -14,19 +14,58 @@
     "node": ">=24"
   },
   "bin": {
-    "devtool": "./lib/index.js"
+    "devtool": "./dist/lib/index.js"
   },
-  "main": "./lib/index.js",
-  "types": "./lib/index.d.ts",
+  "main": "./dist/lib/index.js",
   "files": [
-    "lib"
+    "dist"
   ],
   "scripts": {
-    "build": "tsc -b tsconfig.json --force",
+    "build": "tsdown && node scripts/collect-assets.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "dev": "tsx src/index.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1154.0",
+    "@decimalturn/toml-patch": "^3.3.3",
+    "@iconify-json/akar-icons": "^1.2.7",
+    "@iconify-json/bxl": "^1.2.4",
+    "@iconify-json/devicon": "^1.2.81",
+    "@iconify-json/flowbite": "^1.2.7",
+    "@iconify-json/lineicons": "^1.2.6",
+    "@iconify-json/logos": "^1.2.20",
+    "@iconify-json/lucide": "^1.2.155",
+    "@iconify-json/material-icon-theme": "^1.2.77",
+    "@iconify-json/material-symbols": "^1.2.100",
+    "@iconify-json/mdi": "^1.2.3",
+    "@iconify-json/ph": "^1.2.2",
+    "@iconify-json/simple-icons": "^1.2.102",
+    "@iconify-json/tabler": "^1.2.46",
+    "@iconify-json/vscode-icons": "^1.2.99",
+    "@iconify/utils": "^3.1.7",
+    "@inquirer/prompts": "^8.7.4",
+    "@lydell/node-pty": "^1.1.0",
+    "@modelcontextprotocol/node": "^2.1.2",
+    "@modelcontextprotocol/server": "^2.4.0",
+    "@xmldom/xmldom": "^0.9.12",
+    "@xterm/headless": "^6.0.0",
+    "commander": "^15.0.0",
+    "croner": "^11.0.1",
+    "dns-packet": "^5.6.1",
+    "glob": "^13.0.6",
+    "ioredis": "^6.0.0",
+    "js-yaml": "^5.5.0",
+    "lodash.clonedeep": "^4.5.0",
+    "lodash.mergewith": "^4.6.2",
+    "mime-types": "^3.0.2",
+    "oauth4webapi": "^3.8.8",
+    "ssh2-sftp-client": "^12.1.1",
+    "tree-kill": "^1.2.2",
+    "ws": "^8.22.0",
+    "yaml": "^2.9.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
     "@appsys-sas/devtool-auth": "workspace:*",
     "@appsys-sas/devtool-config": "workspace:*",
     "@appsys-sas/devtool-environment": "workspace:*",
@@ -35,11 +74,8 @@
     "@appsys-sas/devtool-shared": "workspace:*",
     "@appsys-sas/devtool-skills": "workspace:*",
     "@appsys-sas/devtool-ui": "workspace:*",
-    "@inquirer/prompts": "^8.7.4",
-    "commander": "^15.0.0"
-  },
-  "devDependencies": {
     "@types/node": "^26.6.5",
+    "tsdown": "^0.23.7",
     "tsx": "^4.23.15"
   }
 }

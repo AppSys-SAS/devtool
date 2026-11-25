@@ -10,8 +10,8 @@ so the same folders work in Claude Code, Codex CLI, Gemini CLI, Cursor and the o
 | [`devtool-terminals`](skills/devtool-terminals/SKILL.md) | run commands and scripts, follow and drive terminals, debug a failing service |
 | [`devtool-files-environment`](skills/devtool-files-environment/SKILL.md) | read and change the files of the projects, configuration keys and the shared environment |
 
-The skills sit in the `skills` folder of this package, published with it; `SKILLS_FOLDER` gives its
-absolute path to the devtool, which installs them (`devtool skills sync`) and serves them over MCP
+The skills sit in the `skills` folder of this package, copied into the published `@appsys-sas/devtool`
+package; `SKILLS_FOLDER` gives their absolute path to the devtool, which installs them (`devtool skills sync`) and serves them over MCP
 (`adt.mcp.skills`).
 
 ## Installation

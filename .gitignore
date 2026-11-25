@@ -12,6 +12,7 @@ lib
 test-results
 playwright-report
 docs/.vitepress/cache
+*.tgz
 
 *.tsbuildinfo
 
