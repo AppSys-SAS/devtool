@@ -3,8 +3,18 @@ name: Release Please
 on:
   push:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version of the release, such as 1.2.0 (empty to let release-please choose)
+        required: false
+        type: string
 
 permissions: {}
+
+concurrency:
+  group: release-please
+  cancel-in-progress: false
 
 jobs:
   release-please:
@@ -19,10 +29,28 @@ jobs:
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
           permission-contents: write
           permission-pull-requests: write
+      - name: Commit the requested version
+        if: inputs.version != ''
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          VERSION: ${{ inputs.version }}
+          BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::$VERSION is not a version such as 1.2.0"
+            exit 1
+          fi
+          head=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$BRANCH" --jq .object.sha)
+          tree=$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$head" --jq .tree.sha)
+          message=$(printf 'chore: release %s\n\nRelease-As: %s\n' "$VERSION" "$VERSION")
+          commit=$(gh api "repos/$GITHUB_REPOSITORY/git/commits" -f message="$message" -f tree="$tree" -f "parents[]=$head" --jq .sha)
+          gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/heads/$BRANCH" -f sha="$commit" > /dev/null
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        if: inputs.version == ''
         id: release
         with:
           token: ${{ steps.app-token.outputs.token }}
+          skip-github-pull-request: ${{ github.event_name == 'push' && !contains(github.event.head_commit.message, 'Release-As:') }}
 
   publish:
     name: Publish to npm
