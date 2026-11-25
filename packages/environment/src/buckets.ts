@@ -1,4 +1,5 @@
 import { Readable } from 'node:stream'
+import { createGunzip, createGzip } from 'node:zlib'
 import {
   CreateBucketCommand,
   DeleteObjectsCommand,
@@ -8,7 +9,10 @@ import {
   PutObjectCommand,
   S3Client
 } from '@aws-sdk/client-s3'
-import type { ArchiveRecord, ArchiveWriter } from './archive.js'
+import mime from 'mime-types'
+import { type ArchiveRecord, type ArchiveWriter, transformed } from './archive.js'
+import { writeLocalFile } from './directory.js'
+import { readTar, type TarEntry, writeTar } from './tar.js'
 
 /** Local S3 server holding the buckets of the environment. */
 export interface S3Options {
@@ -16,6 +20,16 @@ export interface S3Options {
   accessKeyId: string
   secretAccessKey: string
   region: string
+}
+
+/** An object of a bucket with its content. */
+export interface BucketObject {
+  key: string
+  size: number
+  contentType: string | undefined
+  /** Last change, unknown for an object read from an archive. */
+  lastModified?: Date
+  body: AsyncIterable<Buffer>
 }
 
 /**
@@ -54,6 +68,20 @@ async function* listObjects (client: S3Client, bucket: string): AsyncGenerator<{
 }
 
 /**
+ * Reads every object of a bucket, one at a time.
+ *
+ * @param client - The S3 client.
+ * @param bucket - The bucket.
+ * @returns The objects; each body must be read before the next object is.
+ */
+async function* readObjects (client: S3Client, bucket: string): AsyncGenerator<BucketObject> {
+  for await (const { key } of listObjects(client, bucket)) {
+    const object = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }))
+    yield { key, size: object.ContentLength ?? 0, contentType: object.ContentType, lastModified: object.LastModified, body: object.Body as Readable }
+  }
+}
+
+/**
  * Writes every object of a bucket to an archive, one record per object with its media type.
  *
  * @param client - The S3 client.
@@ -63,12 +91,8 @@ async function* listObjects (client: S3Client, bucket: string): AsyncGenerator<{
  */
 export async function snapshotBucket (client: S3Client, bucket: string, archive: ArchiveWriter): Promise<number> {
   let count = 0
-  for await (const { key } of listObjects(client, bucket)) {
-    const object = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }))
-    await archive.add(
-      { type: 'object', key, contentType: object.ContentType ?? 'application/octet-stream', size: object.ContentLength ?? 0 },
-      object.Body as Readable
-    )
+  for await (const { key, size, contentType, body } of readObjects(client, bucket)) {
+    await archive.add({ type: 'object', key, contentType: contentType ?? 'application/octet-stream', size }, body)
     count += 1
   }
 
@@ -76,14 +100,65 @@ export async function snapshotBucket (client: S3Client, bucket: string, archive:
 }
 
 /**
- * Replaces the content of a bucket, created when missing, by the objects of archive records.
+ * Writes every object of a bucket to a gzip-compressed tar file, the key of each object being its
+ * path in the archive.
  *
  * @param client - The S3 client.
  * @param bucket - The bucket.
- * @param records - The records of a bucket snapshot.
+ * @param filePath - The local file, replaced once fully written.
+ * @returns The number of objects.
+ */
+export async function snapshotBucketTar (client: S3Client, bucket: string, filePath: string): Promise<number> {
+  let count = 0
+  const entries = async function* (): AsyncGenerator<TarEntry> {
+    for await (const { key, size, lastModified, body } of readObjects(client, bucket)) {
+      count += 1
+      yield { name: key, size, mtime: lastModified, body }
+    }
+  }
+  await writeLocalFile(filePath, transformed(writeTar(entries()), createGzip()))
+  return count
+}
+
+/**
+ * Reads the objects of the records of a bucket snapshot.
+ *
+ * @param records - The records.
+ * @returns The objects.
+ */
+export async function* objectsOfArchive (records: AsyncIterable<ArchiveRecord>): AsyncGenerator<BucketObject> {
+  for await (const { header, body } of records) {
+    if (header.type !== 'object' || typeof header.key !== 'string' || typeof header.size !== 'number') {
+      throw new Error('not a bucket snapshot')
+    }
+    yield { key: header.key, size: header.size, contentType: typeof header.contentType === 'string' ? header.contentType : undefined, body }
+  }
+}
+
+/**
+ * Reads the files of a gzip-compressed tar archive as objects, their media type guessed from their name.
+ *
+ * @param archive - The archive.
+ * @returns The objects, keyed by their path in the archive.
+ */
+export async function* objectsOfTar (archive: AsyncIterable<Buffer>): AsyncGenerator<BucketObject> {
+  for await (const { name, size, body } of readTar(transformed(archive, createGunzip()))) {
+    yield { key: name, size, contentType: mime.lookup(name) || 'application/octet-stream', body }
+  }
+}
+
+/**
+ * Replaces the content of a bucket, created when missing, by some objects; the bucket is left as it
+ * is when the first object cannot be read.
+ *
+ * @param client - The S3 client.
+ * @param bucket - The bucket.
+ * @param objects - The objects.
  * @returns The number of objects restored.
  */
-export async function restoreBucket (client: S3Client, bucket: string, records: AsyncIterable<ArchiveRecord>): Promise<number> {
+export async function restoreBucket (client: S3Client, bucket: string, objects: AsyncIterable<BucketObject>): Promise<number> {
+  const iterator = objects[Symbol.asyncIterator]()
+  let next = await iterator.next()
   try {
     await client.send(new HeadBucketCommand({ Bucket: bucket }))
   } catch {
@@ -100,21 +175,19 @@ export async function restoreBucket (client: S3Client, bucket: string, records: 
   }
 
   let count = 0
-  for await (const { header, body } of records) {
-    if (header.type !== 'object' || typeof header.key !== 'string' || typeof header.size !== 'number') {
-      throw new Error('not a bucket snapshot')
-    }
-
+  while (!next.done) {
+    const { key, size, contentType, body } = next.value
     await client.send(
       new PutObjectCommand({
         Bucket: bucket,
-        Key: header.key,
+        Key: key,
         Body: Readable.from(body, { objectMode: false }),
-        ContentLength: header.size,
-        ContentType: typeof header.contentType === 'string' ? header.contentType : undefined
+        ContentLength: size,
+        ContentType: contentType
       })
     )
     count += 1
+    next = await iterator.next()
   }
 
   return count

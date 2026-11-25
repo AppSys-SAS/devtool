@@ -3,10 +3,11 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { type EnvironmentItem, type EnvironmentOptions, overwritesLocalData, parseTargets, readEnvironmentOptions, SHARED_CONFIG_PATH } from '../../src/environment.js'
 
-const fileItem: EnvironmentItem = { kind: 'file', path: 'api/config.yml', backend: null, encryption: null, ignore: null }
-const databaseItem: EnvironmentItem = { kind: 'database', path: 'api/db.gz', backend: null, encryption: null, engine: 'postgres', container: 'postgres' }
-const bucketItem: EnvironmentItem = { kind: 'bucket', path: 'api/s3.gz', backend: null, encryption: null, bucket: 'uploads-dev' }
-const redisItem: EnvironmentItem = { kind: 'redis', path: 'api/redis.gz', backend: null, encryption: null, url: 'redis://localhost:6379/0' }
+const open = { groups: { pull: null, push: null } }
+const fileItem: EnvironmentItem = { kind: 'file', path: 'api/config.yml', backend: null, encryption: null, ...open, ignore: null }
+const databaseItem: EnvironmentItem = { kind: 'database', path: 'api/db.gz', backend: null, encryption: null, ...open, engine: 'postgres', container: 'postgres', database: null, format: 'devtool' }
+const bucketItem: EnvironmentItem = { kind: 'bucket', path: 'api/s3.gz', backend: null, encryption: null, ...open, bucket: 'uploads-dev', format: 'devtool' }
+const redisItem: EnvironmentItem = { kind: 'redis', path: 'api/redis.gz', backend: null, encryption: null, ...open, url: 'redis://localhost:6379/0' }
 
 /**
  * Builds an environment made of the given items.
@@ -82,11 +83,11 @@ describe('readEnvironmentOptions', () => {
         backends: [],
         defaultBackend: null,
         items: [
-          { kind: 'file', path: 'devtool/config.yml', backend: null, encryption: null, ignore: null },
-          { kind: 'file', path: 'api/config.yml', backend: null, encryption: null, ignore: null },
-          { kind: 'file', path: 'devtool/docker-compose.yml', backend: null, encryption: null, ignore: null },
-          { kind: 'database', path: 'api/db.gz', backend: null, encryption: null, engine: 'postgres', container: 'postgres' },
-          { kind: 'bucket', path: 'api/s3.gz', backend: null, encryption: null, bucket: 'uploads-dev' }
+          { ...fileItem, path: 'devtool/config.yml' },
+          fileItem,
+          { ...fileItem, path: 'devtool/docker-compose.yml' },
+          databaseItem,
+          bucketItem
         ],
         configFiles: [
           { path: 'devtool/config.yml', display: true, local: true },
@@ -334,8 +335,30 @@ describe('readEnvironmentOptions', () => {
   describe('databases', () => {
     it.each(['postgres', 'mariadb', 'mongodb'])('reads a %s database', engine => {
       expect(read({ databases: [{ path: 'api/db.gz', engine, container: 'db' }] }).items).toEqual([
-        { kind: 'database', path: 'api/db.gz', backend: null, encryption: null, engine, container: 'db' }
+        { ...databaseItem, engine, container: 'db' }
       ])
+    })
+
+    it('reads the database of the container and the archive format', () => {
+      expect(read({ databases: [{ path: 'api/db.gz', engine: 'mongodb', container: 'mongo', database: 'catalog', format: 'native' }] }).items).toEqual([
+        { ...databaseItem, engine: 'mongodb', container: 'mongo', database: 'catalog', format: 'native' }
+      ])
+    })
+
+    it('lets several items name databases of one container', () => {
+      const options = read({
+        databases: [
+          { path: 'api/catalog.gz', engine: 'mongodb', container: 'mongo', database: 'catalog' },
+          { path: 'api/orders.gz', engine: 'mongodb', container: 'mongo', database: 'orders' }
+        ]
+      })
+      expect(options.items.map(item => item.kind === 'database' && [item.container, item.database])).toEqual([['mongo', 'catalog'], ['mongo', 'orders']])
+    })
+
+    it('rejects a blank or non-string database, and an unknown format', () => {
+      expect(() => readEnvironmentOptions({ databases: [{ path: 'api/db.gz', engine: 'postgres', container: 'db', database: ' ' }] })).toThrow('invalid database in the environment')
+      expect(() => readEnvironmentOptions({ databases: [{ path: 'api/db.gz', engine: 'postgres', container: 'db', database: 3 }] })).toThrow('invalid database in the environment')
+      expect(() => readEnvironmentOptions({ databases: [{ path: 'api/db.gz', engine: 'postgres', container: 'db', format: 'sql' }] })).toThrow('invalid format of api/db.gz in the environment: must be devtool or native')
     })
 
     it('leaves databases out of the configuration files', () => {
@@ -373,6 +396,11 @@ describe('readEnvironmentOptions', () => {
 
       expect(options.items).toEqual([bucketItem])
       expect(options.configFiles).toEqual([])
+    })
+
+    it('reads the archive format of a bucket', () => {
+      expect(read({ buckets: [{ path: 'api/s3.tar.gz', bucket: 'uploads-dev', format: 'native' }] }).items).toEqual([{ ...bucketItem, path: 'api/s3.tar.gz', format: 'native' }])
+      expect(() => readEnvironmentOptions({ buckets: [{ path: 'api/s3.gz', bucket: 'uploads-dev', format: 'zip' }] })).toThrow('invalid format of api/s3.gz')
     })
 
     it('rejects a bucket without a string path or bucket name', () => {
@@ -470,6 +498,38 @@ describe('readEnvironmentOptions', () => {
 
     it('reads the encryption of a backend', () => {
       expect(read({ backends: { team: { ...backends.team, encryption: { prompt: true } } } }).backends[0].encryption).toEqual({ prompt: true })
+    })
+  })
+
+  describe('groups', () => {
+    const backends = {
+      team: { type: 'cdn', url: 'https://files.example.dev/', groups: { pull: ['developers'], push: false } },
+      nas: { type: 'sftp', host: 'nas.example.dev', username: 'dev' }
+    }
+
+    it('reads the groups of a backend, everyone being let in a direction it leaves out', () => {
+      const options = read({ backends })
+      expect(options.backends.map(backend => backend.groups)).toEqual([{ pull: ['developers'], push: false }, { pull: null, push: null }])
+    })
+
+    it('gives each item the groups of its backend, its own groups replacing them direction by direction', () => {
+      const options = read({
+        backends,
+        files: ['api/config.yml', { path: 'api/keys.yml', groups: { push: ['admins'] } }],
+        databases: [{ path: 'api/db.gz', engine: 'postgres', container: 'postgres', backend: 'nas', groups: { pull: false } }]
+      })
+      expect(options.items.map(item => [item.path, item.groups])).toEqual([
+        ['api/config.yml', { pull: ['developers'], push: false }],
+        ['api/keys.yml', { pull: ['developers'], push: ['admins'] }],
+        ['api/db.gz', { pull: false, push: null }]
+      ])
+    })
+
+    it('rejects groups that are not a non-empty list or false', () => {
+      expect(() => readEnvironmentOptions({ backends: { team: { ...backends.team, groups: { push: [] } } } })).toThrow('environment.backends.team.groups push must be a non-empty list of groups, or false')
+      expect(() => readEnvironmentOptions({ backends: { team: { ...backends.team, groups: { write: false } } } })).toThrow('write is unknown: only pull and push')
+      expect(() => readEnvironmentOptions({ files: [{ path: 'api/config.yml', groups: ['admins'] }] })).toThrow('invalid groups of api/config.yml in the environment: must be a map of pull and push groups')
+      expect(() => readEnvironmentOptions({ files: [{ path: 'api/config.yml', groups: { pull: true } }] })).toThrow('invalid groups of api/config.yml in the environment: pull must be')
     })
   })
 

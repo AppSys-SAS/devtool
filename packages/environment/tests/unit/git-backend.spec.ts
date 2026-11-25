@@ -27,7 +27,7 @@ let globalConfig: string | undefined
  * @returns The backend.
  */
 function backendOf (name: string, settings: Record<string, unknown> = {}): EnvironmentBackend {
-  const { options, problems } = git.readOptions({ url: remote, ...settings }, { type: 'git', slug: name, default: true, encryption: null }, `environment.backends.${name}`)
+  const { options, problems } = git.readOptions({ url: remote, ...settings }, { type: 'git', slug: name, default: true, encryption: null, groups: { pull: null, push: null } }, `environment.backends.${name}`)
   if (!options) {
     throw new Error(JSON.stringify(problems))
   }

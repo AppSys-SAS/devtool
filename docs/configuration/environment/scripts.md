@@ -67,6 +67,23 @@ Write the file next to its place, then rename it, as `folder.sh` does: a cut upl
 a half written file behind.
 :::
 
+## Read-only storage
+
+A storage the developers only read from, such as archives published by another job, needs no
+`upload` nor `remove` when the backend refuses every push with `groups: { push: false }`:
+
+```yaml [config.yml]
+environment:
+  backends:
+    dumps:
+      type: scripts
+      list: [ ./dumps.sh, list ]
+      download: [ ./dumps.sh, download, "%{ADT:PATH}", "%{ADT:FILE}" ]
+      groups: { push: false }
+```
+
+Pushes of its items, and `devtool env file push` and `rm`, are then refused before any command runs.
+
 ## Reference
 
 ### environment.backends.&lt;name&gt; (type: scripts)
@@ -76,12 +93,13 @@ a half written file behind.
 | `type` | `scripts` | required | |
 | `list` | command | required | Lists the stored files. |
 | `download` | command | required | Writes a stored file into `%{ADT:FILE}`. |
-| `upload` | command | required | Stores `%{ADT:FILE}`. |
-| `remove` | command | required | Deletes a stored file. |
+| `upload` | command | required, unless `groups.push` is `false` | Stores `%{ADT:FILE}`. |
+| `remove` | command | required, unless `groups.push` is `false` | Deletes a stored file. |
 | `cwd` | string | the configuration folder | Folder the commands run in, relative to the configuration folder. |
 | `env` | map of strings | none | Environment variables of the commands; value blocks are read. |
 | `default` | boolean | `false` | See [Backends](/configuration/environment/backends#the-default-backend). |
 | `encryption` | map | none | See [Encryption](/configuration/environment/encryption). |
+| `groups` | map | everyone | See [Who may pull and push](/configuration/environment/#who-may-pull-and-push). |
 
 ### Warnings
 

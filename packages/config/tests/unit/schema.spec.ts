@@ -59,6 +59,37 @@ describe('config schema', () => {
     expect(validate(config), JSON.stringify(validate.errors)).toBe(true)
   })
 
+  it('accepts databases of one container, native archives and the groups of backends and items', () => {
+    const config = {
+      environment: {
+        backends: {
+          dumps: { type: 'scripts', list: ['./dumps.sh', 'list'], download: ['./dumps.sh', 'download', '%{ADT:PATH}', '%{ADT:FILE}'], groups: { pull: ['developers'], push: false } }
+        },
+        databases: [
+          { path: 'api/catalog.archive.gz', engine: 'mongodb', container: 'mongo', database: 'catalog', format: 'native' },
+          { path: 'api/orders.archive.gz', engine: 'mongodb', container: 'mongo', database: 'orders', format: 'native', groups: { pull: ['admins'] } }
+        ],
+        buckets: [{ path: 'api/uploads.tar.gz', bucket: 'uploads', format: 'native' }],
+        files: [{ path: 'api/config.yml', groups: { push: ['admins'] } }]
+      }
+    }
+    expect(validate(config), JSON.stringify(validate.errors)).toBe(true)
+  })
+
+  it('needs the upload and remove commands of a scripts backend unless its groups refuse every push', () => {
+    const scripts = { type: 'scripts', list: ['./dumps.sh'], download: ['./dumps.sh'] }
+    expect(validate({ environment: { backends: { dumps: scripts } } })).toBe(false)
+    expect(validate({ environment: { backends: { dumps: { ...scripts, groups: { push: ['admins'] } } } } })).toBe(false)
+    expect(validate({ environment: { backends: { dumps: { ...scripts, groups: { push: false } } } } })).toBe(true)
+  })
+
+  it('rejects empty groups, an unknown format and a blank database', () => {
+    expect(validate({ environment: { files: [{ path: 'a.yml', groups: { push: [] } }] } })).toBe(false)
+    expect(validate({ environment: { files: [{ path: 'a.yml', groups: { push: true } }] } })).toBe(false)
+    expect(validate({ environment: { buckets: [{ path: 'a.gz', bucket: 'b', format: 'zip' }] } })).toBe(false)
+    expect(validate({ environment: { databases: [{ path: 'a.gz', engine: 'mongodb', container: 'mongo', database: ' ' }] } })).toBe(false)
+  })
+
   it('rejects unknown keys and invalid values', () => {
     expect(validate({ projects: { web: { comands: {} } } })).toBe(false)
     expect(validate({ adt: { sidebar: { sort: 'random' } } })).toBe(false)

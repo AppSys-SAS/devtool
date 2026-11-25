@@ -1,5 +1,6 @@
 import type { Readable } from 'node:stream'
 import type { AuthOptions } from '@appsys-sas/devtool-auth'
+import type { TransferAccess } from '../access.js'
 import type { EncryptionSettings } from './encryption.js'
 
 /** A file stored by a backend. */
@@ -55,6 +56,8 @@ export interface BackendSettings {
   default: boolean
   /** The secret encrypting every file before it reaches the backend, null to store the files as they are. */
   encryption: EncryptionSettings | null
+  /** Who may pull and push the items of the backend, unless an item names its own groups. */
+  groups: TransferAccess
 }
 
 /** A problem of the settings of a backend. */

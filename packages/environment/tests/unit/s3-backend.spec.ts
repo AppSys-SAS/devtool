@@ -161,7 +161,7 @@ async function localFile (name: string, content: string): Promise<string> {
  * @returns The backend.
  */
 function backendOf (section: Record<string, unknown> = {}): EnvironmentBackend {
-  const shared: BackendSettings = { type: 's3', slug: 'archive', default: false, encryption: null }
+  const shared: BackendSettings = { type: 's3', slug: 'archive', default: false, encryption: null, groups: { pull: null, push: null } }
   const { options, problems } = s3.readOptions({
     bucket: BUCKET,
     endpoint,

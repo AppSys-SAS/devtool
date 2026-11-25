@@ -1,3 +1,4 @@
+import { readTransferGroups } from '../access.js'
 import type { BackendContext, BackendProblem, BackendSettings, BackendType, EnvironmentBackend } from './backend.js'
 import { cdn, type CdnSettings } from './cdn.js'
 import { encrypted, EncryptionSecret, readEncryption } from './encryption.js'
@@ -19,7 +20,7 @@ const BACKEND_TYPES: { [T in BackendOptions['type']]: BackendType<Extract<Backen
 export const BACKEND_KINDS = Object.keys(BACKEND_TYPES)
 
 /**
- * Reads `environment.backends`, a map of backends by name, each with its `type`, `default` and `encryption`.
+ * Reads `environment.backends`, a map of backends by name, each with its `type`, `default`, `encryption` and `groups`.
  * @param section The raw `environment.backends` section.
  * @returns The backends in their declaration order, the name of the default one, and the problems of the section.
  */
@@ -49,7 +50,9 @@ export function readBackends (section: unknown): { backends: BackendOptions[], d
     }
     const { encryption, problems: encryptionProblems } = readEncryption(record.encryption, `${setting}.encryption`)
     problems.push(...encryptionProblems)
-    const shared: BackendSettings = { type: record.type, slug, default: record.default === true, encryption }
+    const { groups, problems: groupProblems } = readTransferGroups(record.groups)
+    problems.push(...groupProblems.map(message => ({ setting: `${setting}.groups`, message })))
+    const shared: BackendSettings = { type: record.type, slug, default: record.default === true, encryption, groups }
     const type = BACKEND_TYPES[record.type as BackendOptions['type']] as BackendType<BackendOptions>
     const read = type.readOptions(record, shared, setting)
     problems.push(...read.problems)

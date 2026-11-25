@@ -185,7 +185,7 @@ beforeEach(async () => {
   root = path.join(base, 'remote', 'environment')
   local = path.join(base, 'local')
   await fs.mkdir(local, { recursive: true })
-  const shared: BackendSettings = { type: 'sftp', slug: 'nas', default: true, encryption: null }
+  const shared: BackendSettings = { type: 'sftp', slug: 'nas', default: true, encryption: null, groups: { pull: null, push: null } }
   const { options, problems } = sftp.readOptions({ host: '127.0.0.1', port, username: USER, path: root, password: '{{ op://dev/nas/password }}' }, shared, 'environment.backends.nas')
   expect(problems).toEqual([])
   const context: BackendContext = {

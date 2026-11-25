@@ -18,7 +18,8 @@ import {
   localPathOf,
   readEnvironmentOptions,
   redisDatabaseName,
-  SHARED_CONFIG_PATH
+  SHARED_CONFIG_PATH,
+  sharedConfigItem
 } from '@appsys-sas/devtool-environment'
 import { logger } from '@appsys-sas/devtool-shared'
 import { Cron } from 'croner'
@@ -206,8 +207,9 @@ export class DevtoolEnvironment {
 
   /**
    * Pulls items on their own: an item whose copy on its backend is missing or unchanged since the last
-   * sync is left alone, one whose local copy changed since the last sync (or was never synchronized) is
-   * skipped and reported, the others are pulled. Nothing happens while another run is in progress.
+   * sync is left alone, one whose local copy changed since the last sync (or was never synchronized), or
+   * that the groups of the developer do not let pull, is skipped and reported, the others are pulled.
+   * Nothing happens while another run is in progress.
    *
    * @param paths - The paths of the items.
    */
@@ -226,6 +228,11 @@ export class DevtoolEnvironment {
       }
       if (local && local.updatedAt.getTime() !== synced?.localUpdatedAt.getTime()) {
         skipped.push({ path: item.path, detail: synced ? 'local copy changed since the last sync, pull it by hand' : 'local copy never synchronized, pull it by hand' })
+        continue
+      }
+      const refusal = await environment.refusal(item, 'pull')
+      if (refusal !== null) {
+        skipped.push({ path: item.path, detail: refusal })
         continue
       }
       targets.push({ path: item.path, tables: null })
@@ -254,7 +261,10 @@ export class DevtoolEnvironment {
             encrypted: item.encryption !== null,
             engine: item.kind === 'database' ? item.engine : null,
             container: item.kind === 'database' ? item.container : null,
+            database: item.kind === 'database' ? item.database : null,
             bucket: item.kind === 'bucket' ? item.bucket : null,
+            format: item.kind === 'database' || item.kind === 'bucket' ? item.format : null,
+            allowed: { pull: await environment.refusal(item, 'pull') === null, push: await environment.refusal(item, 'push') === null },
             redis: item.kind === 'redis' ? redisDatabaseName(item.url) : null,
             keyed,
             local: local ? copyPayload(local) : null,
@@ -279,14 +289,14 @@ export class DevtoolEnvironment {
    */
   async pullSharedConfig (): Promise<boolean> {
     const environment = this.environment()
-    const backend = this._options?.defaultBackend ?? null
-    if (!environment || backend === null) {
+    const item = this._options && sharedConfigItem(this._options)
+    if (!environment || !item) {
       return false
     }
 
     try {
-      const result = await environment.pull({ item: { kind: 'file', path: SHARED_CONFIG_PATH, backend, encryption: null, ignore: null }, tables: null })
-      this._error = result.done ? null : `${SHARED_CONFIG_PATH} is not on ${backend}`
+      const result = await environment.pull({ item, tables: null })
+      this._error = result.done ? null : `${SHARED_CONFIG_PATH} is not on ${item.backend}`
     } catch (error) {
       this._error = error instanceof Error ? error.message : String(error)
     }
