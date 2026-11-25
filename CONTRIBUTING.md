@@ -81,42 +81,5 @@ Commits follow [Conventional Commits](https://www.conventionalcommits.org/): `fe
 Pull requests are squashed with their title as the commit message, so give the pull request a
 Conventional Commits title.
 
-## Releases
-
-Every package shares one version. On each push to `main`, release-please opens or updates a release
-pull request that bumps that version in every `package.json` and writes the changelog. Merging it tags
-`vX.Y.Z`, creates the GitHub release, then the `Publish to npm` job of
-`.github/workflows/release-please.yml` builds the workspace and runs
-`pnpm -r publish --access public --provenance`:
-
-- every package that is not `private` is published, dependencies first, `workspace:*` replaced by the
-  released version; a version already on npm is skipped, so a failed job can be run again;
-- `@appsys-sas/devtool` is the package people install: it holds the `devtool` command and depends on the
-  others, among them `@appsys-sas/devtool-ui`, which only ships the built interface (`dist`), so its
-  build-time dependencies are `devDependencies`;
-- each package is signed with an npm provenance statement linking it to the workflow run, which needs
-  the `repository` field of its `package.json` to point at this repository.
-
-release-please acts as a GitHub App of the organization, not with the default `GITHUB_TOKEN`: GitHub
-starts no workflow for a pull request opened with that token, so the release pull request would never get
-its CI checks. The App needs the repository permissions "Contents" and "Pull requests" (read and write)
-and must be installed on this repository; the workflow reads its Client ID from the `RELEASE_APP_CLIENT_ID`
-repository variable and its private key from the `RELEASE_APP_PRIVATE_KEY` repository secret.
-
-The job reads an npm token from the `NPM_TOKEN` repository secret: a granular access token of an npm
-account that can publish to the `@appsys-sas` scope, with read and write permission on its packages and
-"bypass two-factor authentication" enabled. Once the packages exist, they can move to
-[trusted publishing](https://docs.npmjs.com/trusted-publishers) (the workflow already has the
-`id-token: write` permission it needs) and the secret can be removed.
-
-To check the packages before a release, pack them and install the result in a throwaway prefix:
-
-```bash
-pnpm build
-pnpm -r --filter "./apps/**" --filter "./packages/**" pack --pack-destination /tmp/devtool-packs
-npm install -g --prefix /tmp/devtool-prefix /tmp/devtool-packs/*.tgz
-/tmp/devtool-prefix/bin/devtool --version
-```
-
 By contributing, you agree that your contribution is licensed under the
 [Apache License 2.0](https://github.com/AppSys-SAS/devtool/blob/main/LICENSE).
