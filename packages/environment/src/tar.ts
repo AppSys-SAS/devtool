@@ -33,7 +33,10 @@ function unsupported (header: Header): string | null {
   if (!(header.type as Header['type'] | null)) {
     return 'an entry of an unknown type'
   }
-  const pax = typeof header.pax === 'object' && header.pax !== null ? header.pax : {}
+  const pax = (typeof header.pax === 'object' && header.pax !== null ? header.pax : {}) as Record<string, unknown>
+  if (pax.size !== undefined && !(typeof pax.size === 'string' && /^\d+$/.test(pax.size))) {
+    return `an entry of an invalid size ${typeof pax.size === 'string' ? pax.size : JSON.stringify(pax.size)}`
+  }
   return Object.keys(pax).some(key => key.startsWith('GNU.sparse.')) ? 'a sparse file' : null
 }
 

@@ -25,6 +25,7 @@ export {
   overwritesLocalData,
   parseTargets,
   readEnvironmentOptions,
+  canonicalBackendPath,
   SHARED_CONFIG_PATH,
   sharedConfigItem,
   transfersParts,

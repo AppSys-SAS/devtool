@@ -5,6 +5,7 @@ import path from 'node:path'
 import { Readable } from 'node:stream'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { readTar, type TarEntry, writeTar } from '../../src/tar.js'
+import { paxRecord, rawEntry, TAR_END } from './tar-fixtures.js'
 
 const LONG_NAME = `${'nested/'.repeat(20)}photo.png`
 const hasTar = ((): boolean => {
@@ -60,51 +61,6 @@ async function bytesOf (stream: AsyncIterable<Buffer>): Promise<Buffer> {
   return Buffer.concat(chunks)
 }
 
-/**
- * Builds a ustar header block.
- * @param name - The path.
- * @param size - The size of the body, as written in the header.
- * @param type - The entry type.
- * @returns The header block.
- */
-function rawHeader (name: string, size: number | string, type: string): Buffer {
-  const header = Buffer.alloc(512)
-  header.write(name, 0, 100)
-  header.write(typeof size === 'number' ? `${size.toString(8).padStart(11, '0')}\0` : size, 124, 12)
-  header.write(type, 156, 1)
-  header.write('ustar\u000000', 257, 8)
-  let sum = 0
-  for (let index = 0; index < 512; index += 1) {
-    sum += index >= 148 && index < 156 ? 0x20 : header[index]
-  }
-  header.write(`${sum.toString(8).padStart(6, '0')}\0 `, 148, 8)
-  return header
-}
-
-/**
- * Builds an entry: its header and its body padded to whole blocks.
- * @param name - The path.
- * @param type - The entry type.
- * @param body - The body.
- * @returns The entry bytes.
- */
-function rawEntry (name: string, type: string, body: string): Buffer {
-  const bytes = Buffer.from(body)
-  return Buffer.concat([rawHeader(name, bytes.length, type), bytes, Buffer.alloc((512 - (bytes.length % 512)) % 512)])
-}
-
-/**
- * Builds a PAX record, its length counting itself.
- * @param key - The key.
- * @param value - The value.
- * @returns The record.
- */
-function paxRecord (key: string, value: string): string {
-  const body = ` ${key}=${value}\n`
-  const length = String(body.length + 3).length + body.length
-  return `${length}${body}`
-}
-
 beforeEach(async () => {
   folder = await fs.mkdtemp(path.join(os.tmpdir(), 'devtool-tar-'))
 })
@@ -143,9 +99,14 @@ describe('tar archives', () => {
   })
 
   it('refuses sparse files and entries of an unknown type rather than storing their raw bytes', async () => {
-    const pax = Buffer.concat([rawEntry('PaxHeader', 'x', paxRecord('GNU.sparse.name', 'disk.img') + paxRecord('GNU.sparse.major', '1')), rawEntry('GNUSparseFile.0/disk.img', '0', 'map'), Buffer.alloc(1024)])
+    const pax = Buffer.concat([rawEntry('PaxHeader', 'x', paxRecord('GNU.sparse.name', 'disk.img') + paxRecord('GNU.sparse.major', '1')), rawEntry('GNUSparseFile.0/disk.img', '0', 'map'), TAR_END])
     await expect(filesOf(Readable.from([pax]))).rejects.toThrow('is a sparse file')
-    await expect(filesOf(Readable.from([Buffer.concat([rawEntry('disk.img', 'S', ''), Buffer.alloc(1024)])]))).rejects.toThrow('disk.img is an entry of an unknown type')
+    await expect(filesOf(Readable.from([Buffer.concat([rawEntry('disk.img', 'S', ''), TAR_END])]))).rejects.toThrow('disk.img is an entry of an unknown type')
+  })
+
+  it('refuses a PAX size that is not a whole number of bytes', async () => {
+    const archive = Buffer.concat([rawEntry('PaxHeader', 'x', paxRecord('size', '0.5')), rawEntry('a.txt', '0', 'a'), TAR_END])
+    await expect(filesOf(Readable.from([archive]))).rejects.toThrow('a.txt is an entry of an invalid size 0.5')
   })
 
   it('refuses what is not a tar archive', async () => {

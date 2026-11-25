@@ -3,12 +3,13 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { Readable } from 'node:stream'
-import { createGzip } from 'node:zlib'
+import { createGzip, gzipSync } from 'node:zlib'
 import { DeleteObjectsCommand, GetObjectCommand, ListObjectsV2Command, PutObjectCommand, type S3Client } from '@aws-sdk/client-s3'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { transformed } from '../../src/archive.js'
 import { type BucketObject, objectsOfTar, restoreBucket, snapshotBucketTar } from '../../src/buckets.js'
 import { writeTar } from '../../src/tar.js'
+import { paxRecord, rawEntry, TAR_END } from './tar-fixtures.js'
 
 let folder: string
 
@@ -107,6 +108,13 @@ describe('native bucket archives', () => {
   it('leaves the bucket as it is when the archive cannot be read', async () => {
     const target = new Map<string, StoredObject>([['kept.txt', { body: Buffer.from('kept'), contentType: 'text/plain' }]])
     await expect(restoreBucket(memoryClient(target), 'uploads', objectsOfTar(Readable.from([Buffer.from('not gzip')])))).rejects.toThrow()
+    expect([...target.keys()]).toEqual(['kept.txt'])
+  })
+
+  it('leaves the bucket as it is when the first entry of the archive has an invalid size', async () => {
+    const target = new Map<string, StoredObject>([['kept.txt', { body: Buffer.from('kept'), contentType: 'text/plain' }]])
+    const archive = gzipSync(Buffer.concat([rawEntry('PaxHeader', 'x', paxRecord('size', '0.5')), rawEntry('a.txt', '0', 'a'), TAR_END]))
+    await expect(restoreBucket(memoryClient(target), 'uploads', objectsOfTar(Readable.from([archive])))).rejects.toThrow('invalid size 0.5')
     expect([...target.keys()]).toEqual(['kept.txt'])
   })
 })
