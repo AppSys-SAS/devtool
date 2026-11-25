@@ -40,7 +40,7 @@ features:
   - icon: 🔄
     title: Shared environment
     details: Pull configuration files, databases and buckets from a CDN, S3, SFTP or git, encrypted if you want, so a new developer is ready in three commands.
-    link: /configuration/environment
+    link: /configuration/environment/
     linkText: Environment
   - icon: 🔀
     title: Pull requests and issues

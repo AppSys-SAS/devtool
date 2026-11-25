@@ -77,7 +77,7 @@ only the ones you name. See the [CLI](/reference/cli).
 The load balancer serves the new certificate right away, without a restart.
 
 ::: tip Share the renewed certificate with the team
-When `crt` and `key` are [synchronized files of the environment](/configuration/environment), the
+When `crt` and `key` are [synchronized files of the environment](/configuration/environment/), the
 Server page offers to push them to their backend after a renewal. Your teammates then get the new certificate
 with their next pull.
 :::

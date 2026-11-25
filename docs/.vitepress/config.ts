@@ -1,11 +1,13 @@
 import { copyFile, mkdir } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vitepress'
 import { groupIconMdPlugin, groupIconVitePlugin } from 'vitepress-plugin-group-icons'
-import { zipExamples } from './examples.js'
+import { exampleArchiveAt, zipExamples } from './examples.js'
 
 const require = createRequire(import.meta.url)
+const examplesFolder = fileURLToPath(new URL('../examples', import.meta.url))
 const schemaFile = require.resolve('@appsys/devtool-config/schema/config.schema.json')
 const repository = 'https://github.com/AppSys-SAS/devtool'
 
@@ -16,7 +18,7 @@ export default defineConfig({
   lang: 'en-US',
   base: '/devtool/',
   cleanUrls: true,
-  srcExclude: ['examples/**'],
+  srcExclude: ['examples/*/**'],
   lastUpdated: true,
   head: [
     ['link', { rel: 'icon', type: 'image/svg+xml', href: '/devtool/logo.svg' }],
@@ -31,7 +33,28 @@ export default defineConfig({
     }
   },
   vite: {
-    plugins: [groupIconVitePlugin()]
+    plugins: [
+      groupIconVitePlugin(),
+      {
+        name: 'devtool-example-archives',
+        /**
+         * Serves the zip archives of the examples from the development server, built on each request.
+         * @param server The development server.
+         */
+        configureServer (server) {
+          server.middlewares.use((req, res, next) => {
+            exampleArchiveAt(examplesFolder, req.url ?? '').then(archive => {
+              if (!archive) {
+                next()
+                return
+              }
+              res.setHeader('Content-Type', 'application/zip')
+              res.end(archive)
+            }, next)
+          })
+        }
+      }
+    ]
   },
   themeConfig: {
     logo: '/logo.svg',
@@ -41,6 +64,7 @@ export default defineConfig({
       { text: 'Configuration', link: '/configuration/overview', activeMatch: '/configuration/' },
       { text: 'Configurator', link: '/configuration/configurator' },
       { text: 'Agents', link: '/agents/coding-agents', activeMatch: '/agents/' },
+      { text: 'Examples', link: '/examples/', activeMatch: '/examples/' },
       { text: 'CLI', link: '/reference/cli', activeMatch: '/reference/' }
     ],
     sidebar: [
@@ -62,16 +86,38 @@ export default defineConfig({
           { text: 'Projects', link: '/configuration/projects' },
           { text: 'Commands and scripts', link: '/configuration/commands' },
           { text: 'Automation and secrets', link: '/configuration/automation' },
-          { text: 'Services', link: '/configuration/services' },
-          { text: 'Network and DNS', link: '/configuration/network' },
-          { text: 'Certificates', link: '/configuration/certificates' },
-          { text: 'Integrations', link: '/configuration/integrations' },
           { text: 'Files', link: '/configuration/files' },
-          { text: 'Environment', link: '/configuration/environment' },
-          { text: 'Backends', link: '/configuration/backends' },
-          { text: 'Encryption', link: '/configuration/encryption' },
+          { text: 'Integrations', link: '/configuration/integrations' },
           { text: 'Sign-in', link: '/configuration/auth' },
-          { text: 'CDN', link: '/configuration/cdn' },
+          {
+            text: 'Network',
+            collapsed: true,
+            items: [
+              { text: 'Services', link: '/configuration/services' },
+              { text: 'Network and DNS', link: '/configuration/network' },
+              { text: 'Certificates', link: '/configuration/certificates' }
+            ]
+          },
+          {
+            text: 'Environment',
+            collapsed: false,
+            items: [
+              { text: 'Overview', link: '/configuration/environment/' },
+              { text: 'Backends', link: '/configuration/environment/backends' },
+              {
+                text: 'Backend types',
+                collapsed: false,
+                items: [
+                  { text: 'CDN', link: '/configuration/environment/cdn' },
+                  { text: 'S3', link: '/configuration/environment/s3' },
+                  { text: 'SFTP', link: '/configuration/environment/sftp' },
+                  { text: 'git', link: '/configuration/environment/git' },
+                  { text: 'scripts', link: '/configuration/environment/scripts' }
+                ]
+              },
+              { text: 'Encryption', link: '/configuration/environment/encryption' }
+            ]
+          },
           { text: 'Agent permissions (MCP)', link: '/configuration/mcp' },
           { text: 'All keys', link: '/configuration/reference' }
         ]
@@ -82,6 +128,25 @@ export default defineConfig({
           { text: 'Coding agents', link: '/agents/coding-agents' },
           { text: 'MCP server', link: '/agents/mcp-server' },
           { text: 'Agent skills', link: '/agents/skills' }
+        ]
+      },
+      {
+        text: 'Examples',
+        items: [
+          { text: 'Overview', link: '/examples/' },
+          {
+            text: 'Environment',
+            items: [
+              { text: 'Run a CDN server', link: '/examples/cdn-server' },
+              { text: 'Backend scripts', link: '/examples/backend-scripts' }
+            ]
+          },
+          {
+            text: 'Integrations',
+            items: [
+              { text: 'Recommended tools', link: '/examples/dev-tools' }
+            ]
+          }
         ]
       },
       {

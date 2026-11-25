@@ -25,6 +25,21 @@ export async function zipFolder (folder: string): Promise<Uint8Array> {
 }
 
 /**
+ * Gives the zip archive of the example a web address asks for, `.../examples/<folder>.zip`.
+ * @param examples The folder holding the examples.
+ * @param url The web address asked.
+ * @returns The bytes of the archive, null when the address names no example.
+ */
+export async function exampleArchiveAt (examples: string, url: string): Promise<Uint8Array | null> {
+  const name = /\/examples\/([\w-]+)\.zip(?:\?.*)?$/.exec(url)?.[1]
+  if (!name) {
+    return null
+  }
+  const folder = path.join(examples, name)
+  return (await stat(folder).then(found => found.isDirectory(), () => false)) ? zipFolder(folder) : null
+}
+
+/**
  * Writes a zip archive of every folder of the examples, `<target>/<folder>.zip`.
  * @param examples The folder holding the examples.
  * @param target The folder receiving the archives.

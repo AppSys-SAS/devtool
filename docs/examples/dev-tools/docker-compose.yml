@@ -1,0 +1,111 @@
+# Tools of a local development environment: databases, a mail catcher, an S3 server and their consoles.
+# Start them with `docker compose up -d`; every port listens on this machine only.
+name: dev-tools
+
+services:
+  postgres:
+    image: postgres:17
+    container_name: postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: dev
+      POSTGRES_PASSWORD: dev
+      POSTGRES_DB: app
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    ports:
+      - 127.0.0.1:5432:5432
+
+  mariadb:
+    image: mariadb:11.4
+    container_name: mariadb
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: dev
+      MARIADB_DATABASE: app
+      MARIADB_USER: dev
+      MARIADB_PASSWORD: dev
+    volumes:
+      - mariadb:/var/lib/mysql
+    ports:
+      - 127.0.0.1:3306:3306
+
+  redis:
+    image: redis:8
+    container_name: redis
+    restart: unless-stopped
+    volumes:
+      - redis:/data
+    ports:
+      - 127.0.0.1:6379:6379
+
+  # Catches every mail the apps send: SMTP on 1025, web interface on 8025.
+  mailpit:
+    image: axllent/mailpit
+    container_name: mailpit
+    restart: unless-stopped
+    environment:
+      MP_DATABASE: /data/mailpit.db
+      MP_MAX_MESSAGES: 5000
+      MP_SMTP_AUTH_ACCEPT_ANY: 1
+      MP_SMTP_AUTH_ALLOW_INSECURE: 1
+    volumes:
+      - mailpit:/data
+    ports:
+      - 127.0.0.1:8025:8025
+      - 127.0.0.1:1025:1025
+
+  # S3-compatible storage (a maintained MinIO build): API on 9000, console on 9001.
+  s3:
+    image: docker.io/pgsty/silo:latest
+    container_name: s3
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - s3:/data
+    ports:
+      - 127.0.0.1:9000:9000
+      - 127.0.0.1:9001:9001
+
+  # Browses and edits Redis, the local one being declared up front.
+  redisinsight:
+    image: redis/redisinsight:latest
+    container_name: redisinsight
+    restart: unless-stopped
+    environment:
+      RI_REDIS_HOST: redis
+      RI_REDIS_PORT: 6379
+      RI_REDIS_ALIAS: dev
+    volumes:
+      - redisinsight:/data
+    ports:
+      - 127.0.0.1:5540:5540
+    depends_on:
+      - redis
+
+  # One console for PostgreSQL, MariaDB, Redis and many other databases, built from its repository.
+  db-studio:
+    build: https://github.com/husamql3/db-studio.git#v2.2.1
+    image: db-studio:2.2.1
+    container_name: db-studio
+    restart: unless-stopped
+    environment:
+      HOST: 0.0.0.0
+      DB_STUDIO_PASSWORD: dev
+      DB_STUDIO_TELEMETRY: 0
+    volumes:
+      - db-studio:/home/node/config
+    ports:
+      - 127.0.0.1:3333:3333
+
+volumes:
+  postgres:
+  mariadb:
+  redis:
+  mailpit:
+  s3:
+  redisinsight:
+  db-studio:

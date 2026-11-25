@@ -112,7 +112,7 @@ builds these files from forms.
 | [Introduction](https://appsys-sas.github.io/devtool/guide/introduction) | what the devtool does and how it is organized |
 | [Getting started](https://appsys-sas.github.io/devtool/guide/getting-started) | install, first configuration, first start |
 | [Configuration](https://appsys-sas.github.io/devtool/configuration/overview) | every setting, explained with examples |
-| [Environment](https://appsys-sas.github.io/devtool/configuration/environment) | share files and databases with the team |
+| [Environment](https://appsys-sas.github.io/devtool/configuration/environment/) | share files and databases with the team |
 | [Agents](https://appsys-sas.github.io/devtool/agents/mcp-server) | connect a coding agent and decide what it may do |
 | [CLI](https://appsys-sas.github.io/devtool/reference/cli) | every `devtool` command |
 

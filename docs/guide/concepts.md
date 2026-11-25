@@ -34,8 +34,8 @@ config.yml
 | Service | A host name, such as `api.example.dev`, and where its requests go, such as port `3000`. | [Services](/configuration/services) |
 | Files | A folder you can browse and edit from the interface, or a folder of agent skills. | [Files](/configuration/files) |
 | Integration | A web tool shown inside the devtool, or the pull requests and issues of a repository. | [Integrations](/configuration/integrations) |
-| Environment | The files, database dumps and bucket snapshots every developer needs, kept in a local folder. | [Environment](/configuration/environment) |
-| Backend | Where the team stores the environment: a CDN, an S3 bucket, an SFTP server, a git repository or your own scripts. Each can encrypt what it stores. | [Backends](/configuration/backends) |
+| Environment | The files, database dumps and bucket snapshots every developer needs, kept in a local folder. | [Environment](/configuration/environment/) |
+| Backend | Where the team stores the environment: a CDN, an S3 bucket, an SFTP server, a git repository or your own scripts. Each can encrypt what it stores. | [Backends](/configuration/environment/backends) |
 | Sign-in | Your session with the identity provider of the team, used by the CDN backends and readable by commands. | [Sign-in](/configuration/auth) |
 | Agent | A coding agent, such as Claude Code, that drives the devtool through its MCP server. | [MCP server](/agents/mcp-server) |
 
@@ -69,7 +69,7 @@ browser ── https://api.example.dev ──▶ devtool proxy (:443)
                                   target 127.0.0.1:3000   (your dev server)
 ```
 
-1. The [local DNS](/configuration/network#local-dns), or your own, resolves `api.example.dev` to your
+1. The [local DNS](/configuration/network#the-local-dns), or your own, resolves `api.example.dev` to your
    machine.
 2. `devtool proxy` listens on the HTTPS port `443` and forwards the connection to the load balancer.
    You can also open the load balancer port directly.
