@@ -1,7 +1,18 @@
 {
-  "name": "@appsys/devtool-cli",
+  "name": "@appsys/devtool",
   "version": "0.1.1",
+  "description": "A local development environment: one server running your projects, their terminals and their shared environment, with a web interface.",
+  "license": "Apache-2.0",
+  "homepage": "https://appsys-sas.github.io/devtool/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AppSys-SAS/devtool.git",
+    "directory": "apps/cli"
+  },
   "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
   "bin": {
     "devtool": "./lib/index.js"
   },
@@ -23,6 +34,7 @@
     "@appsys/devtool-server": "workspace:*",
     "@appsys/devtool-shared": "workspace:*",
     "@appsys/devtool-skills": "workspace:*",
+    "@appsys/devtool-ui": "workspace:*",
     "@inquirer/prompts": "^8.7.4",
     "commander": "^15.0.0"
   },

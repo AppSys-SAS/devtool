@@ -37,10 +37,12 @@ bun add -g @appsys/devtool
 
 :::
 
-::: info Not on npm yet
-The package is about to be published. Until then, run the devtool from its sources: see
-[Contributing](/reference/contributing).
-:::
+The package brings the command, its server and its built interface. Terminals use prebuilt binaries for
+macOS and Linux (x64 and arm64), so the install compiles nothing and needs no build tools. Run the same
+command again to update.
+
+npm may warn that `ssh2` and `cpu-features` have install scripts it did not run: they only build optional
+speedups of the SFTP backend, the devtool works without them.
 
 Check that it works:
 

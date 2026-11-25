@@ -1,5 +1,5 @@
 import { fileURLToPath } from 'node:url'
-import { spawn as spawnPty, type IPty } from 'node-pty'
+import { spawn as spawnPty, type IPty } from '@lydell/node-pty'
 
 const TERMINAL_SCRIPT = fileURLToPath(new URL('../bin/op-terminal.mjs', import.meta.url))
 const ANSWER = /@@(\d+) ([A-Za-z0-9+/=]*)@@/
