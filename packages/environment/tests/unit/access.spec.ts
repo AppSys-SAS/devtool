@@ -1,25 +1,36 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { type AuthOptions, sessionStatus } from '@appsys-sas/devtool-auth'
+import fs from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { AuthOptions } from '@appsys-sas/devtool-auth'
 import { mergeTransferGroups, readTransferGroups, TransferGate } from '../../src/access.js'
 import type { BackendContext, EnvironmentBackend } from '../../src/backends/backend.js'
 import { Environment, type EnvironmentItem } from '../../src/environment.js'
 
-vi.mock('@appsys-sas/devtool-auth', () => ({ sessionStatus: vi.fn() }))
+const AUTH: AuthOptions = { type: 'openid', name: null, issuer: 'https://auth.example.dev', clientId: 'devtool', callbackPort: 0, scopes: [] }
 
-const AUTH = { type: 'openid', name: null } as unknown as AuthOptions
+let folder: string
 
 /**
- * Makes the saved session hold a developer of some groups.
- * @param groups - The groups, null for no signed-in developer.
+ * Saves the session of a developer of some groups in the configuration folder.
+ * @param groups - The groups, null to save no session.
  */
-function signIn (groups: string[] | null): void {
-  vi.mocked(sessionStatus).mockResolvedValue(groups === null
-    ? { signedIn: false, user: null }
-    : { signedIn: true, user: { name: 'Dev', username: 'dev', groups } })
+async function signIn (groups: string[] | null): Promise<void> {
+  if (groups === null) {
+    return
+  }
+  const session = { issuer: AUTH.issuer, clientId: AUTH.clientId, accessToken: 'token', expiresAt: Date.now() + 3_600_000, refreshToken: null, user: { name: 'Dev', username: 'dev', groups } }
+  await fs.writeFile(path.join(folder, 'session.json'), JSON.stringify(session))
 }
 
-beforeEach(() => {
-  vi.mocked(sessionStatus).mockReset()
+beforeEach(async () => {
+  folder = await fs.mkdtemp(path.join(os.tmpdir(), 'devtool-access-'))
+  vi.stubEnv('ADT_CONFIG_FOLDER', folder)
+})
+
+afterEach(async () => {
+  vi.unstubAllEnvs()
+  await fs.rm(folder, { recursive: true, force: true })
 })
 
 describe('readTransferGroups', () => {
@@ -50,23 +61,21 @@ describe('mergeTransferGroups', () => {
 })
 
 describe('TransferGate', () => {
-  it('lets everyone in without groups, and nobody with false, without reading the session', async () => {
+  it('lets everyone in without groups, and nobody with false, without any session', async () => {
     const gate = new TransferGate(AUTH)
     expect(await gate.refusal(null, 'pull')).toBeNull()
     expect(await gate.refusal(false, 'push')).toBe('push is disabled')
-    expect(sessionStatus).not.toHaveBeenCalled()
   })
 
   it('lets in the members of one of the groups only', async () => {
-    signIn(['developers'])
+    await signIn(['developers'])
     const gate = new TransferGate(AUTH)
     expect(await gate.refusal(['admins', 'developers'], 'pull')).toBeNull()
     expect(await gate.refusal(['admins'], 'push')).toBe('push needs one of the groups admins')
-    expect(sessionStatus).toHaveBeenCalledTimes(1)
   })
 
   it('asks for a sign-in when no developer is signed in, and names a missing auth section', async () => {
-    signIn(null)
+    await signIn(null)
     expect(await new TransferGate(AUTH).refusal(['admins'], 'pull')).toBe('pull needs one of the groups admins: sign in with `devtool login`')
     expect(await new TransferGate(null).refusal(['admins'], 'pull')).toBe('pull needs one of the groups admins, and the configuration declares no auth section')
   })
@@ -94,7 +103,7 @@ describe('Environment groups', () => {
   }
 
   it('refuses a transfer the groups of the developer do not allow before reaching the backend', async () => {
-    signIn(['developers'])
+    await signIn(['developers'])
     const { environment, item } = environmentWith({ pull: ['admins'], push: false })
 
     await expect(environment.pull({ item, tables: null })).rejects.toThrow('api/config.yml: pull needs one of the groups admins')
@@ -104,7 +113,7 @@ describe('Environment groups', () => {
   })
 
   it('refuses to read the copy of the backend for a key comparison without the pull groups', async () => {
-    signIn(['developers'])
+    await signIn(['developers'])
     const { environment, item } = environmentWith({ pull: ['admins'], push: null })
 
     await expect(environment.diffKeys(item)).rejects.toThrow('api/config.yml: pull needs one of the groups admins')
@@ -112,7 +121,7 @@ describe('Environment groups', () => {
   })
 
   it('transfers when the groups of the developer allow it', async () => {
-    signIn(['developers'])
+    await signIn(['developers'])
     const { environment, item } = environmentWith({ pull: ['developers'], push: null })
 
     expect(await environment.pull({ item, tables: null })).toEqual({ done: false, detail: 'absent from team' })
