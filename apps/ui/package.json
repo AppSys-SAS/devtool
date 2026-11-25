@@ -1,6 +1,6 @@
 {
   "name": "@appsys-sas/devtool-ui",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "private": true,
   "description": "The built web interface of the devtool, served by its server.",
   "license": "Apache-2.0",
