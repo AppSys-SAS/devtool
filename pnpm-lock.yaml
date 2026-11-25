@@ -310,6 +310,9 @@ importers:
       ssh2-sftp-client:
         specifier: ^12.1.1
         version: 12.1.1
+      tar-stream:
+        specifier: ^3.3.0
+        version: 3.3.0(bare-buffer@3.7.3)
       tree-kill:
         specifier: ^1.2.2
         version: 1.2.2
