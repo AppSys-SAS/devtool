@@ -82,7 +82,8 @@ environment:
       groups: { push: false }
 ```
 
-Pushes of its items, and `devtool env file push` and `rm`, are then refused before any command runs.
+Pushes of its items, even those naming their own groups, and `devtool env file push` and `rm`, are then
+refused before any command runs.
 
 ## Reference
 

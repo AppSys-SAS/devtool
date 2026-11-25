@@ -7,7 +7,7 @@ import { createGzip } from 'node:zlib'
 import { DeleteObjectsCommand, GetObjectCommand, ListObjectsV2Command, PutObjectCommand, type S3Client } from '@aws-sdk/client-s3'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { transformed } from '../../src/archive.js'
-import { objectsOfTar, restoreBucket, snapshotBucketTar } from '../../src/buckets.js'
+import { type BucketObject, objectsOfTar, restoreBucket, snapshotBucketTar } from '../../src/buckets.js'
 import { writeTar } from '../../src/tar.js'
 
 let folder: string
@@ -86,6 +86,22 @@ describe('native bucket archives', () => {
       objects.push([key, contentType])
     }
     expect(objects).toEqual([['blob.unknownext', 'application/octet-stream']])
+  })
+
+  it('closes the objects when storing one fails', async () => {
+    let closed = false
+    const objects = (async function* (): AsyncGenerator<BucketObject> {
+      try {
+        yield { key: 'a.txt', size: 1, contentType: 'text/plain', body: Readable.from([Buffer.from('a')]) }
+        yield { key: 'b.txt', size: 1, contentType: 'text/plain', body: Readable.from([Buffer.from('b')]) }
+      } finally {
+        closed = true
+      }
+    })()
+    const client = { send: async (command: unknown) => (command instanceof PutObjectCommand ? Promise.reject(new Error('disk full')) : { Contents: [] }) } as unknown as S3Client
+
+    await expect(restoreBucket(client, 'uploads', objects)).rejects.toThrow('disk full')
+    expect(closed).toBe(true)
   })
 
   it('leaves the bucket as it is when the archive cannot be read', async () => {

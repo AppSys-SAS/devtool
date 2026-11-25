@@ -512,15 +512,15 @@ describe('readEnvironmentOptions', () => {
       expect(options.backends.map(backend => backend.groups)).toEqual([{ pull: ['developers'], push: false }, { pull: null, push: null }])
     })
 
-    it('gives each item the groups of its backend, its own groups replacing them direction by direction', () => {
+    it('gives each item the groups of its backend, its own groups replacing them except where the backend refuses everyone', () => {
       const options = read({
         backends,
-        files: ['api/config.yml', { path: 'api/keys.yml', groups: { push: ['admins'] } }],
+        files: ['api/config.yml', { path: 'api/keys.yml', groups: { pull: ['admins'], push: ['admins'] } }],
         databases: [{ path: 'api/db.gz', engine: 'postgres', container: 'postgres', backend: 'nas', groups: { pull: false } }]
       })
       expect(options.items.map(item => [item.path, item.groups])).toEqual([
         ['api/config.yml', { pull: ['developers'], push: false }],
-        ['api/keys.yml', { pull: ['developers'], push: ['admins'] }],
+        ['api/keys.yml', { pull: ['admins'], push: false }],
         ['api/db.gz', { pull: false, push: null }]
       ])
     })

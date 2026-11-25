@@ -538,7 +538,6 @@ export class Environment {
    */
   async pull (selection: EnvironmentSelection): Promise<TransferResult> {
     const { item, tables } = selection
-    await this.assertAllowed(item, 'pull')
     if (item.kind === 'file' && (selection.keys || await this.mergesWhole(item))) {
       return this.pullKeys(item, selection.keys ?? null)
     }
@@ -628,6 +627,17 @@ export class Environment {
    */
   private async restoreNative (item: Extract<EnvironmentItem, { kind: 'database' }>, localPath: string, tables: string[] | null): Promise<TransferResult> {
     const engine = databaseEngine(item.engine)
+    const head = Buffer.alloc(engine.nativeMagic.length)
+    const file = await fs.open(localPath)
+    try {
+      await file.read(head, 0, head.length, 0)
+    } finally {
+      await file.close()
+    }
+    if (!head.equals(engine.nativeMagic)) {
+      throw new Error(`${item.path} is not a native ${item.engine} archive`)
+    }
+
     if (tables === null) {
       await engine.reset(item)
     } else {
@@ -901,13 +911,15 @@ export class Environment {
   }
 
   /**
-   * Downloads the copy of an item on its backend to a local file, replaced only once the download is complete.
+   * Downloads the copy of an item on its backend to a local file, replaced only once the download is
+   * complete, when the groups of the developer let them pull the item.
    *
    * @param item - The item.
    * @param localPath - The local file, its mirror in the environment directory by default.
    * @returns False when the backend has no such file.
    */
   private async download (item: EnvironmentItem, localPath = localPathOf(this._options.folder, item.path)): Promise<boolean> {
+    await this.assertAllowed(item, 'pull')
     const content = await this.backendFor(item).download(item.path)
     if (!content) {
       return false
