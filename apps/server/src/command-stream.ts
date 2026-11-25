@@ -1,13 +1,12 @@
 import { spawn as spawnDetached } from 'node:child_process'
 import { EventEmitter } from 'node:events'
-import { chmodSync, existsSync, readdirSync, statSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import path from 'node:path'
-import { createRequire } from 'node:module'
+import { spawn as spawnPty, type IPty } from '@lydell/node-pty'
 import xtermHeadless, { type Terminal as ScreenTerminal } from '@xterm/headless'
-import { spawn as spawnPty, type IPty } from 'node-pty'
 import treeKill from 'tree-kill'
-import type { CommandArg, CommandInputValue, PortConflict, PortConflictAction, StreamOutputLine, StreamUpdatePayload } from '@appsys/devtool-shared'
-import { expandCommandArgs, logger, missingCommandInputs, replaceVariables } from '@appsys/devtool-shared'
+import type { CommandArg, CommandInputValue, PortConflict, PortConflictAction, StreamOutputLine, StreamUpdatePayload } from '@appsys-sas/devtool-shared'
+import { expandCommandArgs, logger, missingCommandInputs, replaceVariables } from '@appsys-sas/devtool-shared'
 import type { WebSocket } from 'ws'
 import { AnswerMatcher, type CommandAutomation, CommandSecrets } from './command-automation.js'
 import { killPortOwners, PortConflictWatcher } from './ports.js'
@@ -127,46 +126,6 @@ function areArgsEqual (left: CommandArg[] | null, right: string[]): boolean {
   }
 
   return true
-}
-
-let didCheckNodePtyPermissions = false
-
-function ensureNodePtySpawnHelperExecutable (): void {
-  if (didCheckNodePtyPermissions || process.platform !== 'darwin') {
-    return
-  }
-  didCheckNodePtyPermissions = true
-
-  try {
-    const require = createRequire(import.meta.url)
-    const entry = require.resolve('node-pty')
-    const packageRoot = path.dirname(path.dirname(entry))
-    const prebuildsDir = path.join(packageRoot, 'prebuilds')
-
-    if (!existsSync(prebuildsDir)) {
-      return
-    }
-
-    for (const directory of readdirSync(prebuildsDir)) {
-      if (!directory.startsWith('darwin-')) {
-        continue
-      }
-
-      const spawnHelperPath = path.join(prebuildsDir, directory, 'spawn-helper')
-      if (!existsSync(spawnHelperPath)) {
-        continue
-      }
-
-      const mode = statSync(spawnHelperPath).mode
-      if ((mode & 0o111) !== 0) {
-        continue
-      }
-
-      chmodSync(spawnHelperPath, mode | 0o755)
-    }
-  } catch {
-    // Silent fallback: spawn logic below will surface detailed errors if it still fails.
-  }
 }
 
 export class DevtoolCommandStream {
@@ -568,7 +527,6 @@ export class DevtoolCommandStream {
    * @throws When no shell can start it.
    */
   private startDetached (): void {
-    ensureNodePtySpawnHelperExecutable()
     const finalArgs = this.replaceVariables(expandCommandArgs(this._template ?? this.args, this._inputs))
     const env = { ...process.env, ...this.defaultEnv, ...this.env }
     let child = null as ReturnType<typeof spawnDetached> | null
@@ -635,7 +593,6 @@ export class DevtoolCommandStream {
     args?: string[]
     notifications?: boolean
   } = {}): Promise<void> {
-    ensureNodePtySpawnHelperExecutable()
     const template = this._template ?? args
     const finalArgs = this.replaceVariables(expandCommandArgs(template, this._inputs))
     if (this.proc) {

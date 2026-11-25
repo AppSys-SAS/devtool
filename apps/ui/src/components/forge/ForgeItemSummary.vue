@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { CircleCheck, CircleX, LoaderCircle, MessageSquare } from '@lucide/vue'
-import type { ForgeEntry } from '@appsys/devtool-shared'
+import type { ForgeEntry } from '@appsys-sas/devtool-shared'
 import { Badge } from '@/components/ui/badge'
 import { formatRelativeDate } from '@/lib/format'
 

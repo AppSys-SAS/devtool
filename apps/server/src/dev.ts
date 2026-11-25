@@ -1,6 +1,6 @@
 import runServer, { relaunchUnderApp } from './index.js'
-import { loadMergedConfig } from '@appsys/devtool-config'
-import { logger } from '@appsys/devtool-shared'
+import { loadMergedConfig } from '@appsys-sas/devtool-config'
+import { logger } from '@appsys-sas/devtool-shared'
 import { DEV_UI_PATH } from './dev-options.js'
 
 void (async () => {

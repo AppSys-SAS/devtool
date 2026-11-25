@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { type Component, computed } from 'vue'
 import { Circle, CircleX, Eye, FilePen, GitCommitHorizontal, GitMerge, Link, LoaderCircle, Pencil, RotateCcw, Tag, Upload, UserPlus } from '@lucide/vue'
-import type { ForgeEventKind, ForgeReviewState, ForgeTimelineEvent } from '@appsys/devtool-shared'
+import type { ForgeEventKind, ForgeReviewState, ForgeTimelineEvent } from '@appsys-sas/devtool-shared'
 import MarkdownPreview from '@/components/files/MarkdownPreview.vue'
 import ForgeReviewThread from '@/components/forge/ForgeReviewThread.vue'
 import { Badge } from '@/components/ui/badge'

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { Eye, EyeOff } from '@lucide/vue'
-import type { EnvironmentKeyPayload, EnvironmentKeyValuePayload } from '@appsys/devtool-shared'
+import type { EnvironmentKeyPayload, EnvironmentKeyValuePayload } from '@appsys-sas/devtool-shared'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'

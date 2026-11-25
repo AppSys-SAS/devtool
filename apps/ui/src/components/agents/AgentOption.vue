@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Icon } from '@iconify/vue'
-import type { AgentDefinition } from '@appsys/devtool-shared'
+import type { AgentDefinition } from '@appsys-sas/devtool-shared'
 
 defineProps<{
   agent: AgentDefinition

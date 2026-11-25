@@ -1,5 +1,5 @@
 import { computed, shallowRef } from 'vue'
-import type { SecretRequestPayload } from '@appsys/devtool-shared'
+import type { SecretRequestPayload } from '@appsys-sas/devtool-shared'
 import wsStore from './ws'
 
 /**

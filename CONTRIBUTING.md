@@ -23,7 +23,7 @@ The repository is a pnpm workspace:
 
 | Folder | Content |
 |---|---|
-| `apps/cli` | the `devtool` command |
+| `apps/cli` | the `devtool` command, published as `@appsys-sas/devtool` |
 | `apps/server` | the API and WebSocket server, command streams and load balancer |
 | `apps/proxy` | the TCP proxy forwarding port 443 to the load balancer |
 | `apps/ui` | the web interface (Vue, Vite, Tailwind, shadcn-vue) |

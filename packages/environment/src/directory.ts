@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { resolveConfigFolder } from '@appsys/devtool-config'
+import { resolveConfigFolder } from '@appsys-sas/devtool-config'
 
 /**
  * Gives the folder of the environment when the configuration names none: the parent of the configuration folder.

@@ -17,8 +17,8 @@ import type {
   McpSessionPayload,
   McpSettings,
   McpStatePayload
-} from '@appsys/devtool-shared'
-import { logger } from '@appsys/devtool-shared'
+} from '@appsys-sas/devtool-shared'
+import { logger } from '@appsys-sas/devtool-shared'
 
 const HISTORY_LIMIT = 1000
 const GRANTS_FILE = 'mcp-grants.json'

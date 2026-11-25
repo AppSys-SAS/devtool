@@ -1,4 +1,4 @@
-import type { ForgeKind, ForgeLabel, ForgeTimelinePage, PullRequestChecks, PullRequestReview } from '@appsys/devtool-shared'
+import type { ForgeKind, ForgeLabel, ForgeTimelinePage, PullRequestChecks, PullRequestReview } from '@appsys-sas/devtool-shared'
 import { ForgeError, type GitForge, requestJson } from './forge.js'
 import {
   GITHUB_REVIEW_THREADS_QUERY,

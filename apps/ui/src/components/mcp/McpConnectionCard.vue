@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { Icon } from '@iconify/vue'
 import { Unplug } from '@lucide/vue'
-import type { McpClientStatus } from '@appsys/devtool-shared'
+import type { McpClientStatus } from '@appsys-sas/devtool-shared'
 import McpSetupGuide from '@/components/mcp/McpSetupGuide.vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'

@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { stripAnsi, type PortConflict, type PortOwner } from '@appsys/devtool-shared'
+import { stripAnsi, type PortConflict, type PortOwner } from '@appsys-sas/devtool-shared'
 
 const execFileAsync = promisify(execFile)
 

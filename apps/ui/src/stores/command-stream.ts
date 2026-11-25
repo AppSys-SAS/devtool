@@ -1,4 +1,4 @@
-import type { PortConflict, StreamUpdatePayload } from '@appsys/devtool-shared'
+import type { PortConflict, StreamUpdatePayload } from '@appsys-sas/devtool-shared'
 import type { CommandStream } from '@/types'
 
 export const STREAM_STATUS = {

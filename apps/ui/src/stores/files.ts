@@ -1,5 +1,5 @@
 import { ref } from 'vue'
-import type { FilePayload, FileTreePayload } from '@appsys/devtool-shared'
+import type { FilePayload, FileTreePayload } from '@appsys-sas/devtool-shared'
 
 /**
  * Gives the key of a file of a file space.

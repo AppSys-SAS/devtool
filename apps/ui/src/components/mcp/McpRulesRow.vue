@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { isMcpFilesSetting, MCP_ACTIONS, mcpLevelsFor, type McpAction, type McpLevel, type McpRules, type McpTarget } from '@appsys/devtool-shared'
+import { isMcpFilesSetting, MCP_ACTIONS, mcpLevelsFor, type McpAction, type McpLevel, type McpRules, type McpTarget } from '@appsys-sas/devtool-shared'
 import McpLevelSelect from '@/components/mcp/McpLevelSelect.vue'
 import { Badge } from '@/components/ui/badge'
 import { changeKey, LEVELS, shortPath, type McpEditMode, type McpLevelChange } from '@/lib/mcp'

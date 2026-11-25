@@ -1,7 +1,7 @@
-import type { ConfigSources, RawConfig } from '@appsys/devtool-config'
+import type { ConfigSources, RawConfig } from '@appsys-sas/devtool-config'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import type { McpUiMessage } from '@appsys/devtool-mcp'
-import type { CommandInputValue, FileEntryPayload, PortConflictAction, RuntimeConfig, SidebarOrderChange } from '@appsys/devtool-shared'
+import type { McpUiMessage } from '@appsys-sas/devtool-mcp'
+import type { CommandInputValue, FileEntryPayload, PortConflictAction, RuntimeConfig, SidebarOrderChange } from '@appsys-sas/devtool-shared'
 import type { WebSocket } from 'ws'
 import type { EnvironmentTarget } from './environment.js'
 

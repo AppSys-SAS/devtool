@@ -1,6 +1,12 @@
 {
-  "name": "@appsys/devtool-environment",
+  "name": "@appsys-sas/devtool-environment",
   "version": "0.1.1",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AppSys-SAS/devtool.git",
+    "directory": "packages/environment"
+  },
   "type": "module",
   "main": "./lib/index.js",
   "types": "./lib/index.d.ts",
@@ -18,8 +24,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@appsys/devtool-auth": "workspace:*",
-    "@appsys/devtool-config": "workspace:*",
+    "@appsys-sas/devtool-auth": "workspace:*",
+    "@appsys-sas/devtool-config": "workspace:*",
     "@aws-sdk/client-s3": "^3.1154.0",
     "@decimalturn/toml-patch": "^3.3.3",
     "@xmldom/xmldom": "^0.9.12",

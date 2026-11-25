@@ -1,5 +1,5 @@
 import net from 'node:net'
-import { logger } from '@appsys/devtool-shared'
+import { logger } from '@appsys-sas/devtool-shared'
 
 export interface ProxyOptions {
   adtSecurePort?: number

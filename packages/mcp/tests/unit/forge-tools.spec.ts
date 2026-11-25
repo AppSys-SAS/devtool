@@ -1,4 +1,4 @@
-import type { IntegrationDefinition, McpLevel, McpRules } from '@appsys/devtool-shared'
+import type { IntegrationDefinition, McpLevel, McpRules } from '@appsys-sas/devtool-shared'
 import { describe, expect, it, vi } from 'vitest'
 import type { McpPermission } from '../../src/approvals.js'
 import { environmentTools } from '../../src/environment.js'

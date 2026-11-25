@@ -1,5 +1,5 @@
 import { computed, shallowRef } from 'vue'
-import type { CommandInputValue, DirectoryExtra } from '@appsys/devtool-shared'
+import type { CommandInputValue, DirectoryExtra } from '@appsys-sas/devtool-shared'
 
 /** A command waiting for the values of its inputs. */
 export interface CommandInputsRequest {

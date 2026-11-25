@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, shallowRef, watch } from 'vue'
 import { Loader2, RefreshCw, ShieldCheck, TriangleAlert } from '@lucide/vue'
-import type { CertificatePayload } from '@appsys/devtool-shared'
+import type { CertificatePayload } from '@appsys-sas/devtool-shared'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'

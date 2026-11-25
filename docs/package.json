@@ -1,5 +1,5 @@
 {
-  "name": "@appsys/devtool-docs",
+  "name": "@appsys-sas/devtool-docs",
   "private": true,
   "type": "module",
   "license": "Apache-2.0",
@@ -10,7 +10,7 @@
     "typecheck": "vue-tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@appsys/devtool-config": "workspace:*",
+    "@appsys-sas/devtool-config": "workspace:*",
     "ajv": "^8.20.0",
     "fflate": "^0.8.3",
     "yaml": "^2.9.1"

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, shallowRef } from 'vue'
-import type { McpGrantPayload } from '@appsys/devtool-shared'
+import type { McpGrantPayload } from '@appsys-sas/devtool-shared'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'

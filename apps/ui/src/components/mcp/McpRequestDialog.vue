@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import { DialogContent, DialogDescription, DialogOverlay, DialogPortal, DialogRoot, DialogTitle } from 'reka-ui'
-import type { CommandInputValue, McpAnswer } from '@appsys/devtool-shared'
+import type { CommandInputValue, McpAnswer } from '@appsys-sas/devtool-shared'
 import McpRequestDetails from '@/components/mcp/McpRequestDetails.vue'
 import mcpStore from '@/stores/mcp'
 

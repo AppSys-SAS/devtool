@@ -1,4 +1,4 @@
-import type { ForgeEventKind, ForgeLabel, ForgeReviewThread, ForgeTimelineEvent, PullRequestReview } from '@appsys/devtool-shared'
+import type { ForgeEventKind, ForgeLabel, ForgeReviewThread, ForgeTimelineEvent, PullRequestReview } from '@appsys-sas/devtool-shared'
 import { type ForgeItems, type GitForge, requestJson } from './forge.js'
 import type { ForgeRepository } from './repository.js'
 

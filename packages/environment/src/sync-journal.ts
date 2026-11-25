@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { resolveConfigFolder } from '@appsys/devtool-config'
+import { resolveConfigFolder } from '@appsys-sas/devtool-config'
 
 /** Both copies of an item when they were last made equal by a pull or a push. */
 export interface SyncRecord {

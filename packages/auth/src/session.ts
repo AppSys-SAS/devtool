@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
-import { resolveConfigFolder } from '@appsys/devtool-config'
+import { resolveConfigFolder } from '@appsys-sas/devtool-config'
 import type { AuthSession } from './types.js'
 
 const LOCK_STALE_MS = 30_000

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Icon } from '@iconify/vue'
 import { RouterLink } from 'vue-router'
-import type { IntegrationDefinition } from '@appsys/devtool-shared'
+import type { IntegrationDefinition } from '@appsys-sas/devtool-shared'
 import { hasIntegrationPage, integrationRoute } from '@/lib/shortcuts'
 
 defineProps<{

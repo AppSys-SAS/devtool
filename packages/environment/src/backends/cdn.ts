@@ -2,7 +2,7 @@ import { createReadStream } from 'node:fs'
 import fs from 'node:fs/promises'
 import { pipeline, Readable, Transform, type TransformCallback } from 'node:stream'
 import type { ReadableStream as WebReadableStream } from 'node:stream/web'
-import { accessToken, type AuthOptions } from '@appsys/devtool-auth'
+import { accessToken, type AuthOptions } from '@appsys-sas/devtool-auth'
 import { type BackendSettings, type BackendType, type EnvironmentBackend, readText, type RemoteFile } from './backend.js'
 
 /** Settings of a CDN serving the devtool files API under `<url>/devtool`. */

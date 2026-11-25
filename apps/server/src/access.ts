@@ -1,5 +1,5 @@
 import type { Socket } from 'node:net'
-import { type HostAccess, isLoopback } from '@appsys/devtool-shared'
+import { type HostAccess, isLoopback } from '@appsys-sas/devtool-shared'
 
 const relayedClients = new Map<number, string>()
 
