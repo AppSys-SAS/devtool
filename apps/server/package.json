@@ -14,6 +14,7 @@
   "exports": {
     ".": {
       "types": "./lib/index.d.ts",
+      "development": "./src/index.ts",
       "import": "./lib/index.js"
     }
   },
@@ -21,8 +22,8 @@
     "build": "tsc -b tsconfig.json --force",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "dev": "pnpm run \"/^dev:/\"",
-    "dev:server": "tsx watch src/dev.ts",
-    "dev:lb": "tsx src/dev-lb.ts"
+    "dev:server": "tsx watch --conditions=development src/dev.ts",
+    "dev:lb": "tsx --conditions=development src/dev-lb.ts"
   },
   "dependencies": {
     "@appsys-sas/devtool-auth": "workspace:*",
