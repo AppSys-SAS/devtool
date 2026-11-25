@@ -114,7 +114,7 @@ function normalizeProjectsShape (config: RawConfig): RawConfig {
  * @param options The startup options.
  * @returns The configuration the server runs with.
  */
-export function createRuntimeConfig (raw: RawConfig, options: Pick<ServerBootstrapOptions, 'serverPort' | 'loadBalancerPort'> & { ssl: string | null, uiPath: string | null }): RawConfig {
+export function createRuntimeConfig (raw: RawConfig, options: Pick<ServerBootstrapOptions, 'serverPort' | 'loadBalancerPort' | 'dnsPort'> & { ssl: string | null, uiPath: string | null }): RawConfig {
   const adtRuntimeOverrides: Record<string, unknown> = {}
 
   const portOverrides: Record<string, number> = {}
@@ -141,7 +141,8 @@ export function createRuntimeConfig (raw: RawConfig, options: Pick<ServerBootstr
     },
     raw,
     {
-      adt: adtRuntimeOverrides
+      adt: adtRuntimeOverrides,
+      ...(Number.isInteger(options.dnsPort) && (options.dnsPort!) > 0 ? { dns: { port: options.dnsPort } } : {})
     }
   ) as RawConfig
 
@@ -182,17 +183,18 @@ function resolveConfigPaths (configPaths: string[] | undefined): string[] {
 
 /**
  * Creates the loader of the merged configuration files, with the runtime overrides applied.
- * @param options Ports, SSL domain and UI path overriding the configuration files.
+ * @param options Ports of the server, load balancer and DNS, SSL domain and UI path overriding the configuration files.
  * @param configPaths Paths of the configuration files.
  * @returns The configuration loader.
  */
-function createConfigProvider ({ serverPort, loadBalancerPort, ssl, uiPath }: ServerBootstrapOptions, configPaths: string[]): ConfigProvider {
+function createConfigProvider ({ serverPort, loadBalancerPort, dnsPort, ssl, uiPath }: ServerBootstrapOptions, configPaths: string[]): ConfigProvider {
   return async () => {
     const { config, loadedPaths, sources, localPath } = await loadMergedConfig(configPaths)
     return {
       raw: createRuntimeConfig(config, {
         serverPort,
         loadBalancerPort,
+        dnsPort,
         ssl: ssl ?? null,
         uiPath: uiPath ?? null
       }),

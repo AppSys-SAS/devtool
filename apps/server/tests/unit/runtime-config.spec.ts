@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createRuntimeConfig } from '../../src/index.js'
 
-const OPTIONS = { serverPort: undefined, loadBalancerPort: undefined, ssl: null, uiPath: null }
+const OPTIONS = { serverPort: undefined, loadBalancerPort: undefined, dnsPort: undefined, ssl: null, uiPath: null }
 
 /**
  * Builds the runtime configuration of the sections and projects of a merged configuration.
@@ -13,6 +13,20 @@ function sectionsOf (raw: Record<string, unknown>): Record<string, Record<string
 }
 
 describe('createRuntimeConfig', () => {
+  it('replaces the ports of the configuration by those given at startup', () => {
+    const raw = { adt: { ports: { server: 1, loadBalancer: 2 } }, dns: { port: 53, records: { local: { names: ['*.example.dev'] } } } }
+    const config = createRuntimeConfig(raw, { ...OPTIONS, serverPort: 7000, loadBalancerPort: 7001, dnsPort: 5353 })
+    expect(config.adt).toMatchObject({ ports: { server: 7000, loadBalancer: 7001 } })
+    expect(config.dns).toEqual({ port: 5353, records: { local: { names: ['*.example.dev'] } } })
+  })
+
+  it('keeps the ports of the configuration when none is given at startup', () => {
+    const raw = { adt: { ports: { server: 1, loadBalancer: 2 } }, dns: { port: 5300 } }
+    const config = createRuntimeConfig(raw, OPTIONS)
+    expect(config.adt).toMatchObject({ ports: { server: 1, loadBalancer: 2 } })
+    expect(config.dns).toEqual({ port: 5300 })
+  })
+
   it('places a project naming no section in the uncategorized section, under the workspace', () => {
     const sections = sectionsOf({
       workspace: '/work',
