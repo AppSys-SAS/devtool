@@ -9,6 +9,7 @@ import { AGENT_SKILL_FILE, agentSkillFolderOf, type AgentSkillSummary, type File
 export const CONFIGS_SPACE = 'configs'
 
 const YAML_EXTENSION = /\.ya?ml$/
+const GIT_FOLDER = '.git'
 const LOCAL_YAML_EXTENSION = /\.local\.ya?ml$/
 
 /**
@@ -64,14 +65,26 @@ export abstract class FileSpace {
    * @param id - Identifier of the space.
    * @param root - Absolute path of its root.
    * @param editable - Whether files and folders can be created, renamed and removed.
+   * @param showHidden - Whether the files and folders whose name starts with a dot are reachable, `.git` never being.
    * @param afterWrite - Runs once a file of the space is written.
    */
   constructor (
     readonly id: string,
     readonly root: string,
     readonly editable: boolean,
+    readonly showHidden: boolean,
     readonly afterWrite: ((filePath: string) => Promise<void>) | null = null
   ) {}
+
+  /**
+   * Tells whether a file or folder name is out of reach for being hidden.
+   *
+   * @param name - The name.
+   * @returns True when it is hidden from the space.
+   */
+  protected isHidden (name: string): boolean {
+    return name === GIT_FOLDER || (name.startsWith('.') && !this.showHidden)
+  }
 
   /**
    * Lists the files and folders of the space, the root existing.
@@ -212,14 +225,15 @@ export abstract class FileSpace {
 
   /**
    * Gives the absolute path of a path of the space, refusing anything outside of it: absolute paths,
-   * parent, current or hidden segments, and symbolic links among the existing segments.
+   * parent, current or hidden segments (unless the space shows them), and symbolic links among the
+   * existing segments.
    *
    * @param filePath - The path, relative to the root.
    * @returns The absolute path.
    */
   protected async resolve (filePath: string): Promise<string> {
     const segments = filePath.split('/')
-    if (!filePath || path.isAbsolute(filePath) || segments.some(segment => !segment || segment.startsWith('.') || segment.includes('\\') || segment.includes('\0'))) {
+    if (!filePath || path.isAbsolute(filePath) || segments.some(segment => !segment || segment === '.' || segment === '..' || this.isHidden(segment) || segment.includes('\\') || segment.includes('\0'))) {
       throw new Error(`${filePath} is not a path of ${this.id}`)
     }
 
@@ -267,7 +281,7 @@ export class ListedFileSpace extends FileSpace {
     private readonly _paths: string[],
     afterWrite: ((filePath: string) => Promise<void>) | null = null
   ) {
-    super(id, root, false, afterWrite)
+    super(id, root, false, true, afterWrite)
   }
 
   /**
@@ -312,13 +326,14 @@ export class TreeFileSpace extends FileSpace {
   /**
    * @param id - Identifier of the space.
    * @param root - Absolute path of its root.
+   * @param showHidden - Whether the files and folders whose name starts with a dot are listed.
    */
-  constructor (id: string, root: string) {
-    super(id, root, true)
+  constructor (id: string, root: string, showHidden = false) {
+    super(id, root, true, showHidden)
   }
 
   /**
-   * Lists the files and folders under the root, hidden ones and symbolic links left out.
+   * Lists the files and folders under the root, hidden ones unless shown and symbolic links left out.
    *
    * @returns The entries, sorted by path.
    */
@@ -326,7 +341,7 @@ export class TreeFileSpace extends FileSpace {
     const entries: FileEntryPayload[] = []
     const visit = async (folder: string): Promise<void> => {
       for (const dirent of await fs.readdir(path.join(this.root, folder), { withFileTypes: true })) {
-        if (dirent.name.startsWith('.') || dirent.isSymbolicLink()) {
+        if (this.isHidden(dirent.name) || dirent.isSymbolicLink()) {
           continue
         }
 
@@ -443,7 +458,7 @@ export class DevtoolFileSpaces {
       for (const directory of Object.values(project.directories)) {
         for (const files of Object.values(directory.files)) {
           const id = `${project.slug}/${directory.slug}/${files.slug}`
-          spaces.set(id, files.type === 'agentSkills' ? new AgentSkillsFileSpace(id, files.path) : new TreeFileSpace(id, files.path))
+          spaces.set(id, files.type === 'agentSkills' ? new AgentSkillsFileSpace(id, files.path, files.showHidden) : new TreeFileSpace(id, files.path, files.showHidden))
         }
       }
     }

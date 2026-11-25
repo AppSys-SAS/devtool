@@ -1649,7 +1649,8 @@ describe('files', () => {
       commands: ['pull'],
       mcp: configure.adt.mcp.files,
       mcpTarget: { path: ['projects', 'api', 'files', 'data', 'mcp'], declaredIn: null },
-      mcpSkills: null
+      mcpSkills: null,
+      showHidden: false
     })
     expect(files.skills).toMatchObject({ name: 'skills', type: 'agentSkills', path: path.join(workspace, 'api', '.claude/skills'), restore: null, commands: [] })
     expect(files.home.path).toBe('/opt/shared')

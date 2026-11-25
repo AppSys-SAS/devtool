@@ -14,3 +14,25 @@ playwright-report
 docs/.vitepress/cache
 
 *.tsbuildinfo
+
+# Personal and generated files of coding agents (their shared settings, rules and skills stay tracked)
+# Claude Code
+**/.claude/settings.local.json
+CLAUDE.local.md
+.claude/worktrees/
+.claude/agent-memory-local/
+.claude/.cc-writes/
+.claude/launch.json
+# GitHub Copilot CLI
+.github/copilot/settings.local.json
+# Qwen Code
+.qwen/QWEN.local.md
+# Devin Desktop (Windsurf)
+AGENTS.local.md
+# Aider (its .aider.conf.yml and .aiderignore stay tracked)
+.aider.chat.history.md
+.aider.input.history
+.aider.llm.history
+.aider.tags.cache.v*/
+# OpenCode
+.opencode/node_modules/

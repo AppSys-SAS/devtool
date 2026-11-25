@@ -553,6 +553,7 @@
         "name": { "type": "string" },
         "path": { "type": "string", "description": "Folder, relative to the project. It may not exist yet." },
         "type": { "type": "string", "enum": ["files", "agentSkills"], "default": "files", "description": "agentSkills edits one agent skill per folder." },
+        "showHidden": { "type": "boolean", "default": false, "description": "Show the files and folders whose name starts with a dot (.env, .github...); .git is never shown." },
         "mcpSkills": {
           "description": "agentSkills: serve its skills over MCP (Skills extension), all of them with true or the skill folders matching globs.",
           "oneOf": [

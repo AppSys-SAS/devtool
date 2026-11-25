@@ -554,6 +554,8 @@ export interface DirectoryFiles {
   mcpTarget: McpTarget
   /** For agent skills, the globs of the skill folders served to the agents, null to serve none. */
   mcpSkills: string[] | null
+  /** Whether the files and folders whose name starts with a dot are shown, `.git` never being. */
+  showHidden: boolean
 }
 
 export interface DirectoryDefinition {

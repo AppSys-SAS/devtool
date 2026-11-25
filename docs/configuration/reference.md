@@ -134,6 +134,7 @@ The schema is also published with the npm package, as `@appsys/devtool-config/sc
 | `files.<slug>.restore` | command slug | none | [Files](/configuration/files) |
 | `files.<slug>.commands` | list of command slugs | none | [Files](/configuration/files) |
 | `files.<slug>.mcp` | rules | `adt.mcp.files` | [Agent permissions](/configuration/mcp) |
+| `files.<slug>.showHidden` | boolean | `false` | [Files](/configuration/files#reference) |
 | `files.<slug>.mcpSkills` | `true`, list of globs | `false` | [Agent skills](/agents/skills#serve-them-over-mcp) |
 | `integrations.<slug>` | map | | [Integrations](/configuration/integrations) |
 
