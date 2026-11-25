@@ -1,6 +1,6 @@
 {
   "name": "@appsys-sas/devtool",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A local development environment: one server running your projects, their terminals and their shared environment, with a web interface.",
   "license": "Apache-2.0",
   "homepage": "https://appsys-sas.github.io/devtool/",
