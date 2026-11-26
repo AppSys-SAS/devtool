@@ -264,7 +264,8 @@ export function readEnvironmentOptions (section: unknown): EnvironmentOptions | 
     if (canonical !== item.path) {
       throw new Error(`invalid path of ${item.path} in the environment: write it ${canonical}`)
     }
-    const twin = items.find(other => foldedPath(other.path) === foldedPath(item.path))
+    const folded = foldedPath(item.path)
+    const twin = items.find(other => foldedPath(other.path) === folded)
     if (twin?.path === item.path) {
       throw new Error(`${item.path} is declared twice in the environment`)
     }
@@ -367,25 +368,27 @@ export function parseTargets (options: EnvironmentOptions, targets: string[]): E
  * Gives the canonical form of the path of a file in a backend, the one items are declared with.
  *
  * @param filePath - The path, possibly with `./`, a leading `/`, repeated or `..` segments.
+ * @param written - The path as written, named when it leaves the backend.
  * @returns The canonical path.
  */
-export function canonicalBackendPath (filePath: string): string {
+export function canonicalBackendPath (filePath: string, written = filePath): string {
   const canonical = path.posix.normalize(filePath).replace(/^(?:\.?\/)+/, '')
   if (canonical === '' || canonical === '.' || canonical === '..' || canonical.startsWith('../')) {
-    throw new Error(`${filePath} is not a path inside the backend`)
+    throw new Error(`${written} is not a path inside the backend`)
   }
   return canonical
 }
 
 /**
  * Folds a path so that spellings a case-insensitive or normalizing store, or one taking backslashes
- * for separators, takes for one file are equal.
+ * for separators, takes for one file are equal, in their canonical form; fails on a path leaving
+ * the backend once read that way.
  *
  * @param filePath - The path.
  * @returns Its folded form.
  */
 function foldedPath (filePath: string): string {
-  return filePath.replaceAll('\\', '/').normalize('NFKD').toUpperCase().toLowerCase()
+  return canonicalBackendPath(filePath.normalize('NFKD').toUpperCase().toLowerCase().replaceAll('\\', '/'), filePath)
 }
 
 /**

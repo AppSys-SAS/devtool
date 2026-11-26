@@ -517,7 +517,12 @@ describe('readEnvironmentOptions', () => {
         'API/config.yml and api/config.yml differ only by letter case, Unicode form or separators, which a backend or a disk may store as one file: declare one of them'
       )
       expect(() => readEnvironmentOptions({ files: ['api/café.yml'.normalize('NFC'), 'api/café.yml'.normalize('NFD')] })).toThrow('differ only by letter case, Unicode form or separators')
-      expect(() => readEnvironmentOptions({ files: ['api/config.yml', 'api\\config.yml'] })).toThrow('differ only by letter case, Unicode form or separators')
+      for (const outside of ['x\\..', '..\\x', '‥/x']) {
+        expect(() => readEnvironmentOptions({ files: [outside] }), outside).toThrow(`${outside} is not a path inside the backend`)
+      }
+      for (const alias of ['api\\config.yml', 'api\\.\\config.yml', 'api\\other\\..\\config.yml']) {
+        expect(() => readEnvironmentOptions({ files: ['api/config.yml', alias] }), alias).toThrow('differ only by letter case, Unicode form or separators')
+      }
     })
   })
 
@@ -606,6 +611,10 @@ describe('itemStoredAt', () => {
     const aliases: [string, string][] = [
       ['api/café.gz'.normalize('NFC'), 'api/café.gz'.normalize('NFD')],
       ['api/config.yml', 'api\\config.yml'],
+      ['api/config.yml', 'api\\.\\config.yml'],
+      ['api/config.yml', 'api\\\\config.yml'],
+      ['api/config.yml', 'api\\other\\..\\config.yml'],
+      ['api/config.yml', '.\\API\\config.yml'],
       ['api/nested/config.yml', 'api\\nested/config.yml'],
       ['api/straße.gz', 'api/strasse.gz'],
       ['api/ſecret.gz', 'api/secret.gz'],
