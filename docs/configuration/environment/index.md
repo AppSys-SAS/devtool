@@ -141,7 +141,8 @@ A pull drops and recreates the database. A push dumps it, then sends the archive
 
 A pull of a database, a bucket or a Redis database replaces the local copy of the archive, and records
 the item as synchronized, only once its data is restored: after a restore that fails, the item still
-shows behind its backend.
+shows behind its backend. A pull records an item as synchronized only when the copy of its backend did
+not change while it ran; otherwise its result says so, and the item stays behind its backend.
 
 ### Several databases in one container
 
@@ -189,23 +190,31 @@ of the engine: a pull interrupted while the archive is sent changes nothing. An 
 refuses, because it is of another engine, truncated or corrupted, leaves the database as it was:
 
 - `postgres` restores the archive into a new database, which takes the place of the database only once
-  wholly restored. Sequences keep the values of the archive.
-- `mongodb` restores the archive into a temporary database first, then into the database: a restore
-  takes twice the time, and the room of one more copy of the database meanwhile.
-
-The databases a restore creates for itself are named `adt_staging_` or `adt_replaced_` followed by 16
-random hexadecimal digits; a restore never drops a database it did not create.
+  wholly restored. Sequences keep the values of the archive. The privileges the archive grants apply
+  to the roles the server has; those granted to other roles are skipped. Objects belong to
+  `POSTGRES_USER`. Should the former database not be dropped once replaced, the pull succeeds and
+  names it.
+- `mongodb` restores the archive into a temporary database first, then saves the database and
+  restores the archive into it, putting the saved copy back when that restore fails: a restore takes
+  three times the time, and the room of two more copies of the database meanwhile.
 - `mariadb` saves the database first, and puts it back when the server refuses a step of the restore.
-  Should it not be put back either, the error names the file of the container keeping its dump. The
-  database keeps its character set and collation. A database `mariadb-dump` cannot save, such as one
-  holding a view of a dropped table, is not replaced (`the database could not be saved before its
+  The database keeps its character set and collation. A database `mariadb-dump` cannot save, such as
+  one holding a view of a dropped table, is not replaced (`the database could not be saved before its
   restore`): repair it, or drop it to restore the archive into a new database.
 
+Should a saved database not be put back either, the error names the file of the container keeping
+its dump. The databases a restore creates for itself are named `adt_staging_` or `adt_replaced_`
+followed by 16 random hexadecimal digits; a restore never drops a database it did not create. A pull
+replaces the data of the database: stop the applications writing to it first, since what they write
+while the pull runs may be lost, even when the database is put back.
+
 The tables you can choose are those holding rows: the partitions of a partitioned `postgres` table,
-not the table itself. A pull of some tables restores only those, every one having to be in the archive: their collections
-replaced for `mongodb`; their rows replaced in one transaction for `postgres`, the sequences they own,
-or that the tables they inherit from or are partitions of own, set after their highest value. A native `mariadb` archive is a SQL script, restored whole only. A push
-always dumps the whole database: the tables of a native archive cannot be replaced one by one.
+not the table itself. A pull of some tables restores only those, every one having to be in the
+archive: their collections replaced for `mongodb`; their rows replaced in one transaction for
+`postgres`, the sequences they own, or that the tables they inherit from or are partitions of own, set
+after their highest value in the same transaction. A native `mariadb` archive is a SQL script,
+restored whole only. A push always dumps the whole database: the tables of a native archive cannot be
+replaced one by one.
 
 ## Buckets and S3
 
@@ -461,7 +470,9 @@ Environment page shows the error and `devtool env` stops.
   connections.*.lastUsedAt`, `... needs a YAML, JSON, TOML, XML or .env file`: see [Ignored keys](#ignored-keys).
 - `invalid format of <path> in the environment: must be devtool or native`
 - `invalid path of <path> in the environment: write it <canonical path>`: a path without `./`, leading
-  `/` or `..` segments; `<path> is declared twice in the environment`: each item has its own path.
+  `/` or `..` segments; `<path> is declared twice in the environment`: each item has its own path;
+  `<path> and <path> differ only by letter case or Unicode form`: a backend or a disk ignoring letter
+  case would store them as one file.
 - `invalid groups of <path> in the environment: ...`: `pull` and `push` take a non-empty list of groups,
   or `false`.
 
