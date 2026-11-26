@@ -680,7 +680,8 @@ export class Environment {
   }
 
   /**
-   * Replaces the local data of an item by an archive of it.
+   * Replaces the local data of an item by an archive of it. An archive of the devtool is read whole
+   * first, so a truncated or corrupted one changes nothing.
    *
    * @param item - The database, bucket or Redis item.
    * @param archivePath - The archive, which nothing else reads or writes.
@@ -688,6 +689,13 @@ export class Environment {
    * @returns What was done.
    */
   private async restore (item: Exclude<EnvironmentItem, { kind: 'file' }>, archivePath: string, tables: string[] | null): Promise<TransferResult> {
+    if (item.kind === 'redis' || item.format === 'devtool') {
+      for await (const { body } of item.kind === 'bucket' ? objectsOfArchive(readArchive(archivePath)) : readArchive(archivePath)) {
+        for await (const chunk of body) {
+          void chunk
+        }
+      }
+    }
     if (item.kind === 'bucket' && item.format === 'native') {
       return this.restoreBucketTar(item, archivePath)
     }

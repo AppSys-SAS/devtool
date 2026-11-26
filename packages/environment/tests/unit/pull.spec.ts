@@ -4,6 +4,7 @@ import path from 'node:path'
 import { Readable } from 'node:stream'
 import { gzipSync } from 'node:zlib'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { ArchiveWriter } from '../../src/archive.js'
 import type { BackendContext, EnvironmentBackend, RemoteFile } from '../../src/backends/backend.js'
 import { Environment, type EnvironmentItem } from '../../src/environment.js'
 import { readSyncJournal, type SyncRecord, writeSyncRecord } from '../../src/sync-journal.js'
@@ -77,6 +78,21 @@ afterEach(async () => {
 })
 
 describe('pull of an item holding local data', () => {
+  it('reads a whole devtool archive before touching the database, so a truncated one changes nothing', async () => {
+    const item: EnvironmentItem = { ...postgresItem, format: 'devtool' }
+    const archivePath = path.join(folder, 'whole.gz')
+    const writer = new ArchiveWriter(archivePath)
+    await writer.add({ type: 'database', engine: 'postgres' })
+    await writer.add({ type: 'schema' }, Readable.from([Buffer.from('CREATE TABLE t (id int);\n')]))
+    await writer.add({ type: 'table', name: 'public.t' }, Readable.from([Buffer.from('x'.repeat(100_000))]))
+    await writer.close()
+    const whole = await fs.readFile(archivePath)
+
+    await expect(environmentOf(item, whole.subarray(0, Math.floor(whole.length / 2))).pull({ item, tables: null })).rejects.toThrow()
+    await expect(fs.access(path.join(folder, 'seen'))).rejects.toThrow()
+    expect(await localState()).toEqual({ files: ['db.dump'], copy: 'previous copy' })
+  })
+
   it('replaces the local copy and records the synchronization only once the data is restored', async () => {
     expect(await environmentOf(postgresItem, Buffer.from('new archive')).pull({ item: postgresItem, tables: null })).toEqual({ done: true, detail: 'database restored in db' })
 

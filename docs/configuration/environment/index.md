@@ -139,9 +139,10 @@ loaded, so tables can come back in any order.
 
 A pull drops and recreates the database. A push dumps it, then sends the archive.
 
-A pull of a database, a bucket or a Redis database replaces the local copy of the archive, and records
-the item as synchronized, only once its data is restored: after a restore that fails, the item still
-shows behind its backend. A pull records an item as synchronized only when the copy of its backend was
+A pull of a database, a bucket or a Redis database reads the whole archive first, so a truncated or
+corrupted one changes nothing, and replaces the local copy of the archive, and records the item as
+synchronized, only once its data is restored: after a restore that fails, the item still shows behind
+its backend. A pull records an item as synchronized only when the copy of its backend was
 listed before it ran and did not change meanwhile; otherwise its result says so, and the item stays
 behind its backend.
 
@@ -191,26 +192,31 @@ of the engine: a pull interrupted while the archive is sent changes nothing. An 
 refuses, because it is of another engine, truncated or corrupted, leaves the database as it was:
 
 - `postgres` restores the archive into a new database, which takes the place of the database only once
-  wholly restored. Sequences keep the values of the archive. The privileges the archive grants apply
-  to the roles the server has; those granted to other roles are skipped. Objects belong to
-  `POSTGRES_USER`. Should the former database not be dropped once replaced, the pull succeeds and
+  wholly restored, keeping its encoding, locale and owner. Sequences keep the values of the archive.
+  The privileges the archive grants apply to the roles the server has; those granted to other roles
+  are skipped. Objects belong to `POSTGRES_USER`. Should the former database not be dropped once replaced, the pull succeeds and
   names it.
 - `mongodb` restores the archive into a temporary database first, then saves the database and
   restores the archive into it, putting the saved copy back when that restore fails: a restore takes
   three times the time, and the room of two more copies of the database meanwhile.
 - `mariadb` saves the database first, and puts it back when the server refuses a step of the restore.
-  The dump is loaded by a temporary account holding privileges on that database only, so the server
-  refuses its statements reaching another database, wherever they stand in the dump. The database
-  keeps its character set and collation. A database `mariadb-dump` cannot save, such as
-  one holding a view of a dropped table, is not replaced (`the database could not be saved before its
-  restore`): repair it, or drop it to restore the archive into a new database.
+  The dump is loaded in the sandbox mode of the client, without local files: it can neither run
+  commands nor read files of the container. The sandbox mode needs MariaDB 10.5.25, 10.6.18, 10.11.8,
+  11.4.2 or later. The database keeps its character set and collation. A
+  database `mariadb-dump` cannot save, such as one holding a view of a dropped table, is not replaced
+  (`the database could not be saved before its restore`): repair it, or drop it to restore the
+  archive into a new database.
 
 Should a saved database not be put back either, the error names the file of the container keeping
-its dump. The databases and accounts a restore creates for itself are named `adt_staging_`,
-`adt_replaced_` or `adt_loader_` followed by 16 random hexadecimal digits; a restore never drops a
-database it did not create, and a pull that cannot drop them succeeds and names them. A pull
-replaces the data of the database: stop the applications writing to it first, since what they write
-while the pull runs may be lost, even when the database is put back.
+its dump. The temporary databases a restore creates are named `adt_staging_` or `adt_replaced_`
+followed by 16 random hexadecimal digits; a restore drops no other database than the one it
+replaces, and a pull that cannot drop a temporary database succeeds and names it. A pull replaces the
+data of the database: stop the applications writing to it first, since what they write while the
+pull runs may be lost, even when the database is put back.
+
+A native archive is run by the engine with the rights of its administrator, as when you restore it
+by hand: its statements may reach other databases of the container. Pull native archives only from
+a backend whose pushes you trust, and restrict who may push them with [groups](#who-may-pull-and-push).
 
 The tables you can choose are those holding rows: the partitions of a partitioned `postgres` table,
 not the table itself. A pull of some tables restores only those, every one having to be in the
@@ -281,6 +287,10 @@ the copy of a backend, to compare the keys of a configuration file for instance,
 too.
 The Environment page hides Pull or Push when they are refused for the selected items, `devtool env`
 without target skips the refused items, and a scheduled pull reports them as skipped.
+
+Groups are checked by the devtool, from the groups of your session: they keep developers from
+transferring by mistake, they do not replace the access rights of the backend itself. Give a backend
+storing sensitive data credentials that only the right people hold.
 
 ## Redis
 

@@ -186,6 +186,16 @@ describe.skipIf(!hasDocker)('native archives of real databases', { timeout: TEST
       expect(state()).toBe('2,3,1,2,3,100')
     })
 
+    it('keeps the encoding, locale and owner of the database it replaces', async () => {
+      const kept = { container: target.container, database: 'kept' }
+      sqlIn('postgres', `CREATE DATABASE kept TEMPLATE template0 ENCODING 'LATIN1' LC_COLLATE 'C' LC_CTYPE 'C' OWNER reader`)
+      await engine.restoreNative(kept, await stored(archive), null)
+
+      expect(sqlIn('postgres', `SELECT concat_ws(',', pg_encoding_to_char(encoding), datcollate, pg_get_userbyid(datdba)) FROM pg_database WHERE datname = 'kept'`)).toBe('LATIN1,C,reader')
+      expect(await engine.listTables(kept)).toContain('public.users')
+      sqlIn('postgres', 'DROP DATABASE kept')
+    })
+
     it.each([
       ['truncated', (whole: Buffer) => whole.subarray(0, Math.floor(whole.length / 2))],
       ['of another format', () => Buffer.from('-- a plain SQL dump\nCREATE TABLE t (id int);\n')],
@@ -329,28 +339,21 @@ describe.skipIf(!hasDocker)('native archives of real databases', { timeout: TEST
     })
 
     it.each([
-      ['a USE hidden after another statement', 'SELECT 1; USE other; DELETE FROM kept;'],
-      ['a DROP SCHEMA behind a comment', '/* cleanup */ DROP SCHEMA other;'],
-      ['a write to a table of another database', 'DELETE FROM other.kept;']
-    ])('puts the database back when the dump reaches another database with %s, which the server refuses', async (_case, statement) => {
-      const dump = gzipSync(`-- MariaDB dump\nCREATE TABLE half (id int);\n${statement}\n`)
+      ['run a command of the container', '\\! touch /tmp/adt-sandbox-proof'],
+      ['read a file of the container', `LOAD DATA LOCAL INFILE '/etc/hostname' INTO TABLE half;`]
+    ])('puts the database back when the dump tries to %s, which the sandbox mode of the client refuses', async (_case, statement) => {
+      const dump = gzipSync(`-- MariaDB dump\nCREATE TABLE half (line text);\n${statement}\n`)
       await expect(engine.restoreNative(target, await stored(dump), null)).rejects.toThrow('the database was put back as it was')
 
       expect(state()).toBe('2,2,1')
       expect(tablesNamed('half')).toBe('0')
-      expect(sql('SELECT COUNT(*) FROM other.kept')).toBe('3')
+      expect(exec(target.container, ['sh', '-c', 'ls /tmp/adt-sandbox-proof 2> /dev/null || echo absent'])).toBe('absent')
     })
 
-    it('limits the loading account to a database whose name holds wildcards of privilege targets', async () => {
-      const wildcard = { container: target.container, database: 'under_score' }
-      sql('CREATE DATABASE underXscore; CREATE TABLE underXscore.k (id int)', 'mysql')
-      await expect(engine.restoreNative(wildcard, await stored(gzipSync('-- dump\nCREATE TABLE t (id int);\nINSERT INTO underXscore.k VALUES (1);\n')), null)).rejects.toThrow('was removed')
+    it('grants the account of the container a database whose name holds wildcards of privilege targets as that name only', async () => {
+      await engine.restoreNative({ container: target.container, database: 'under_score' }, await stored(gzipSync('-- dump\nCREATE TABLE t (id int);\n')), null)
 
-      expect(sql('SELECT COUNT(*) FROM underXscore.k', 'mysql')).toBe('0')
-    })
-
-    it('leaves no account loading a dump behind', () => {
-      expect(sql(`SELECT COUNT(*) FROM mysql.user WHERE User LIKE 'adt\\_%'`, 'mysql')).toBe('0')
+      expect(sql('SHOW GRANTS FOR app', 'mysql')).toContain('ON `under\\\\_score`.*')
     })
 
     it('refuses a truncated archive without touching the database', async () => {
