@@ -199,13 +199,16 @@ refuses, because it is of another engine, truncated or corrupted, leaves the dat
   restores the archive into it, putting the saved copy back when that restore fails: a restore takes
   three times the time, and the room of two more copies of the database meanwhile.
 - `mariadb` saves the database first, and puts it back when the server refuses a step of the restore.
-  The database keeps its character set and collation. A database `mariadb-dump` cannot save, such as
+  The dump is loaded by a temporary account holding privileges on that database only, so the server
+  refuses its statements reaching another database, wherever they stand in the dump. The database
+  keeps its character set and collation. A database `mariadb-dump` cannot save, such as
   one holding a view of a dropped table, is not replaced (`the database could not be saved before its
   restore`): repair it, or drop it to restore the archive into a new database.
 
 Should a saved database not be put back either, the error names the file of the container keeping
-its dump. The databases a restore creates for itself are named `adt_staging_` or `adt_replaced_`
-followed by 16 random hexadecimal digits; a restore never drops a database it did not create. A pull
+its dump. The databases and accounts a restore creates for itself are named `adt_staging_`,
+`adt_replaced_` or `adt_loader_` followed by 16 random hexadecimal digits; a restore never drops a
+database it did not create, and a pull that cannot drop them succeeds and names them. A pull
 replaces the data of the database: stop the applications writing to it first, since what they write
 while the pull runs may be lost, even when the database is put back.
 
@@ -472,8 +475,8 @@ Environment page shows the error and `devtool env` stops.
 - `invalid format of <path> in the environment: must be devtool or native`
 - `invalid path of <path> in the environment: write it <canonical path>`: a path without `./`, leading
   `/` or `..` segments; `<path> is declared twice in the environment`: each item has its own path;
-  `<path> and <path> differ only by letter case or Unicode form`: a backend or a disk ignoring letter
-  case would store them as one file.
+  `<path> and <path> differ only by letter case, Unicode form or separators`: a backend or a disk
+  ignoring letter case, or taking `\` for `/`, would store them as one file.
 - `invalid groups of <path> in the environment: ...`: `pull` and `push` take a non-empty list of groups,
   or `false`.
 

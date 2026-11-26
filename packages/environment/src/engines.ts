@@ -50,15 +50,21 @@ const MONGODUMP_TERMINATOR = -1
 const BSON_MIN_DOCUMENT_BYTES = 5
 const BSON_MAX_DOCUMENT_BYTES = 16 * 1024 * 1024 + 16 * 1024
 const SQL_LINE_HEAD_BYTES = 64
-const SQL_DATABASE_STATEMENT = /^\s*(?:\/\*!\d+\s+)?(?:USE[\s`]|(?:CREATE|DROP)\s+DATABASE\b)/i
+const SQL_DATABASE_STATEMENT = /^\s*(?:\/\*M?!\d+\s+)?(?:USE[\s`]|(?:CREATE(?:\s+OR\s+REPLACE)?|DROP)\s+(?:DATABASE|SCHEMA)\b)/i
 const SQL_DELIMITER_LINE = /^DELIMITER\s+(\S+)/i
 
 /**
  * Beginning of the scripts restoring an archive, after the setup of their engine: the archive is
  * read on the standard input into the file `$ARCHIVE`, removed at exit by `cleanup`, and the script
  * stops before changing anything unless the file holds the number of bytes given as first argument.
+ * `leftover` reports what could not be cleaned up on both outputs, the standard output being read
+ * when the script succeeds and the error output when it fails.
  */
 const RECEIVE_ARCHIVE = `ARCHIVE=$(mktemp)
+leftover() {
+  echo "$1"
+  echo "$1" >&2
+}
 cleanup() { rm -f "$ARCHIVE"; }
 trap cleanup EXIT
 cat > "$ARCHIVE"
@@ -242,11 +248,12 @@ function textStream (text: string): AsyncIterable<Buffer> {
 }
 
 /**
- * Reads a whole SQL dump of one database, failing when a statement of the dump selects, creates or
- * drops a database: such a dump, as `--databases` makes, loads elsewhere than in the database it is
- * restored into. The bodies of routines, triggers and events, written between `DELIMITER` lines, are
- * not read, their lines being no statements of the dump. It guards against that mistake of the one
- * dumping, not against what the statements of a dump written by hand may do.
+ * Reads a whole SQL dump of one database, failing when a line of the dump starts by selecting,
+ * creating or dropping a database, as a dump made with `--databases` does, so such a dump is refused
+ * before the database changes. The bodies of routines, triggers and events, written between
+ * `DELIMITER` lines, are not read, their lines being no statements of the dump. Statements reaching
+ * another database elsewhere in a line are refused by the server, the dump being loaded by an
+ * account limited to its database.
  *
  * @param sql - The dump, each statement starting a line.
  * @returns The size of the dump, in bytes.
@@ -387,7 +394,7 @@ GRANTS="$ARCHIVE.grants"
 created=
 cleanup() {
   rm -f "$ARCHIVE" "$GRANTS"
-  [ -z "$created" ] || dropdb -U "$POSTGRES_USER" --force --if-exists "$STAGING" || echo "the temporary database $STAGING could not be dropped: drop it by hand" >&2
+  [ -z "$created" ] || dropdb -U "$POSTGRES_USER" --force --if-exists "$STAGING" || leftover "the temporary database $STAGING could not be dropped: drop it by hand"
 }
 createdb -U "$POSTGRES_USER" "$STAGING"
 created=1
@@ -408,7 +415,7 @@ SQL
 )
 created=
 if [ "$swapped" = replaced ]; then
-  dropdb -U "$POSTGRES_USER" --force "$REPLACED" 2> /dev/null || echo "its former copy $REPLACED could not be dropped: drop it by hand"
+  dropdb -U "$POSTGRES_USER" --force "$REPLACED" 2> /dev/null || leftover "its former copy $REPLACED could not be dropped: drop it by hand"
 fi
 `
 
@@ -487,28 +494,42 @@ const postgres: DatabaseEngine = {
 }
 
 /**
- * Prefix of the MariaDB scripts: `$DB`, the database, the root password, `empty`, dropping the
- * database and creating it again without table, with the options of `CREATE DATABASE` given as
- * argument, and `grant`, giving the account of the container, when it declares one, every privilege
- * on the database.
+ * Prefix of the MariaDB scripts: `$DB`, the database, the root password, `$GRANTED`, the database
+ * as a privilege target matching itself only, `empty`, dropping the database and creating it again
+ * without table, with the options of `CREATE DATABASE` given as argument, and `grant`, giving the
+ * account of the container, when it declares one, every privilege on the database.
  */
 const MARIADB_SETUP = `${databaseSetup('MARIADB_DATABASE')}export MYSQL_PWD="$MARIADB_ROOT_PASSWORD"
 QUOTED=$(printf '%s' "$DB" | sed 's/\`/\`\`/g')
+GRANTED=$(printf '%s' "$QUOTED" | sed 's/[_%\\\\]/\\\\&/g')
 empty() {
   mariadb -uroot -e "DROP DATABASE IF EXISTS \\\`$QUOTED\\\`; CREATE DATABASE \\\`$QUOTED\\\`$1"
 }
 grant() {
-  [ -z "$MARIADB_USER" ] || mariadb -uroot -e "GRANT ALL PRIVILEGES ON \\\`$QUOTED\\\`.* TO '$MARIADB_USER'@'%'"
+  [ -z "$MARIADB_USER" ] || mariadb -uroot -e "GRANT ALL PRIVILEGES ON \\\`$GRANTED\\\`.* TO '$MARIADB_USER'@'%'"
 }
 `
 
 /**
  * Replaces the database by the received SQL dump, keeping its character set and collation: the
+ * dump is loaded by a temporary account holding privileges on the database only, besides naming the
+ * definers of its objects, so the server refuses its statements addressing another database. The
  * database is saved first, and put back when the server refuses a step of the restore. Its saved
  * dump is kept in the container when it cannot be put back.
  */
 const MARIADB_WHOLE_RESTORE = `saved=$(mktemp)
-cleanup() { rm -f "$ARCHIVE" "$saved"; }
+${UNIQUE_SUFFIX}LOADER="adt_loader_$SUFFIX"
+LOADER_PASSWORD=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \\n')
+loader=
+kept=
+cleanup() {
+  rm -f "$ARCHIVE"
+  [ -n "$kept" ] || rm -f "$saved"
+  [ -z "$loader" ] || mariadb -uroot -e "DROP USER IF EXISTS '$LOADER'@'localhost'" || leftover "the account $LOADER could not be dropped: drop it by hand"
+}
+mariadb -uroot -e "CREATE USER '$LOADER'@'localhost' IDENTIFIED BY '$LOADER_PASSWORD'" || { echo "the account loading the dump could not be created: nothing was changed" >&2; exit 1; }
+loader=1
+mariadb -uroot -e "GRANT ALL PRIVILEGES ON \\\`$GRANTED\\\`.* TO '$LOADER'@'localhost'; GRANT SET USER ON *.* TO '$LOADER'@'localhost'" || { echo "the account loading the dump could not be granted the database: nothing was changed" >&2; exit 1; }
 existed=
 options=
 if found=$(mariadb -uroot -N -B -e "USE \\\`$QUOTED\\\`; SELECT @@character_set_database, @@collation_database" 2> "$saved"); then
@@ -523,13 +544,13 @@ elif ! grep -q '^ERROR 1049 ' "$saved"; then
   echo "the server could not tell whether the database exists: nothing was changed" >&2
   exit 1
 fi
-empty "$options" && grant && mariadb -uroot "$DB" < "$ARCHIVE" && exit 0
+empty "$options" && grant && MYSQL_PWD="$LOADER_PASSWORD" mariadb -u"$LOADER" "$DB" < "$ARCHIVE" > /dev/null && exit 0
 if [ -z "$existed" ]; then
   mariadb -uroot -e "DROP DATABASE IF EXISTS \\\`$QUOTED\\\`" && echo "the restore was refused: the database, which did not exist, was removed" >&2
-elif empty "$options" && mariadb -uroot "$DB" < "$saved"; then
+elif empty "$options" && mariadb -uroot "$DB" < "$saved" > /dev/null; then
   echo "the restore was refused: the database was put back as it was" >&2
 else
-  cleanup() { rm -f "$ARCHIVE"; }
+  kept=1
   echo "the restore was refused and the database could not be put back: its dump is kept in the container, in $saved" >&2
 fi
 exit 1
@@ -585,8 +606,7 @@ const mariadb: DatabaseEngine = {
     if (size === 0) {
       throw new Error('the archive holds an empty dump: a dump of an empty database still holds its header')
     }
-    await scriptInput(target, `${MARIADB_SETUP}${RECEIVE_ARCHIVE}${MARIADB_WHOLE_RESTORE}`, dump(), [String(size)])
-    return null
+    return (await scriptInput(target, `${MARIADB_SETUP}${RECEIVE_ARCHIVE}${MARIADB_WHOLE_RESTORE}`, dump(), [String(size)])) || null
   }
 }
 
@@ -735,16 +755,14 @@ whole="$1"; shift
 ${UNIQUE_SUFFIX}export STAGING="adt_staging_$SUFFIX"
 SAVED="$ARCHIVE.saved"
 created=
+kept=
 drop() {
   auth mongosh --quiet --eval "db.getSiblingDB(process.env.$1).dropDatabase()" > /dev/null
 }
-left() {
-  echo "the temporary database $STAGING could not be dropped: drop it by hand"
-  echo "the temporary database $STAGING could not be dropped: drop it by hand" >&2
-}
 cleanup() {
-  rm -f "$ARCHIVE" "$SAVED"
-  [ -z "$created" ] || drop STAGING || left
+  rm -f "$ARCHIVE"
+  [ -n "$kept" ] || rm -f "$SAVED"
+  [ -z "$created" ] || drop STAGING || leftover "the temporary database $STAGING could not be dropped: drop it by hand"
 }
 restore_into() {
   into="$1"; shift
@@ -766,10 +784,7 @@ fi
 if drop DB && auth mongorestore --archive="$SAVED" --gzip --stopOnError; then
   echo "the restore was refused: the database was put back as it was" >&2
 else
-  cleanup() {
-    rm -f "$ARCHIVE"
-    [ -z "$created" ] || drop STAGING || left
-  }
+  kept=1
   echo "the restore was refused and the database could not be put back: its dump is kept in the container, in $SAVED" >&2
 fi
 exit 1

@@ -269,7 +269,7 @@ export function readEnvironmentOptions (section: unknown): EnvironmentOptions | 
       throw new Error(`${item.path} is declared twice in the environment`)
     }
     if (twin) {
-      throw new Error(`${item.path} and ${twin.path} differ only by letter case or Unicode form, which a backend or a disk may store as one file: declare one of them`)
+      throw new Error(`${item.path} and ${twin.path} differ only by letter case, Unicode form or separators, which a backend or a disk may store as one file: declare one of them`)
     }
     items.push(item)
     const autoPull = readAutoPull(item.path, pull)
@@ -378,18 +378,19 @@ export function canonicalBackendPath (filePath: string): string {
 }
 
 /**
- * Folds a path so that spellings a case-insensitive or normalizing store takes for one file are equal.
+ * Folds a path so that spellings a case-insensitive or normalizing store, or one taking backslashes
+ * for separators, takes for one file are equal.
  *
  * @param filePath - The path.
  * @returns Its folded form.
  */
 function foldedPath (filePath: string): string {
-  return filePath.normalize('NFKD').toUpperCase().toLowerCase()
+  return filePath.replaceAll('\\', '/').normalize('NFKD').toUpperCase().toLowerCase()
 }
 
 /**
  * Finds the item a backend stores at a path. A path differing from the one of an item by its letter
- * case or Unicode form only is refused, since a backend may store both as one file.
+ * case, Unicode form or separators only is refused, since a backend may store both as one file.
  *
  * @param items - The items of the environment.
  * @param backend - The name of the backend.
@@ -401,7 +402,7 @@ export function itemStoredAt (items: EnvironmentItem[], backend: string, filePat
   const exact = stored.find(item => item.path === filePath)
   const alias = exact ? undefined : stored.find(item => foldedPath(item.path) === foldedPath(filePath))
   if (alias) {
-    throw new Error(`${filePath} names the item ${alias.path} in another letter case or Unicode form: write its path exactly`)
+    throw new Error(`${filePath} names the item ${alias.path} in another letter case, Unicode form or separators: write its path exactly`)
   }
   return exact ?? null
 }

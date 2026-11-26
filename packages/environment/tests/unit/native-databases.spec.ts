@@ -328,6 +328,31 @@ describe.skipIf(!hasDocker)('native archives of real databases', { timeout: TEST
       expect(sql('SELECT COUNT(*) FROM other.kept')).toBe('3')
     })
 
+    it.each([
+      ['a USE hidden after another statement', 'SELECT 1; USE other; DELETE FROM kept;'],
+      ['a DROP SCHEMA behind a comment', '/* cleanup */ DROP SCHEMA other;'],
+      ['a write to a table of another database', 'DELETE FROM other.kept;']
+    ])('puts the database back when the dump reaches another database with %s, which the server refuses', async (_case, statement) => {
+      const dump = gzipSync(`-- MariaDB dump\nCREATE TABLE half (id int);\n${statement}\n`)
+      await expect(engine.restoreNative(target, await stored(dump), null)).rejects.toThrow('the database was put back as it was')
+
+      expect(state()).toBe('2,2,1')
+      expect(tablesNamed('half')).toBe('0')
+      expect(sql('SELECT COUNT(*) FROM other.kept')).toBe('3')
+    })
+
+    it('limits the loading account to a database whose name holds wildcards of privilege targets', async () => {
+      const wildcard = { container: target.container, database: 'under_score' }
+      sql('CREATE DATABASE underXscore; CREATE TABLE underXscore.k (id int)', 'mysql')
+      await expect(engine.restoreNative(wildcard, await stored(gzipSync('-- dump\nCREATE TABLE t (id int);\nINSERT INTO underXscore.k VALUES (1);\n')), null)).rejects.toThrow('was removed')
+
+      expect(sql('SELECT COUNT(*) FROM underXscore.k', 'mysql')).toBe('0')
+    })
+
+    it('leaves no account loading a dump behind', () => {
+      expect(sql(`SELECT COUNT(*) FROM mysql.user WHERE User LIKE 'adt\\_%'`, 'mysql')).toBe('0')
+    })
+
     it('refuses a truncated archive without touching the database', async () => {
       await expect(engine.restoreNative(target, await stored(archive.subarray(0, archive.length - 20)), null)).rejects.toThrow()
       expect(state()).toBe('2,2,1')

@@ -64,21 +64,26 @@ function entryEnd (header: Header): number {
 }
 
 /**
- * Reads the regular files of a tar archive, folders being skipped and any other entry refused. The
- * archive must end with its two empty blocks after the body of its last entry: one that stops
- * before is refused once its last entry is read.
+ * Reads the regular files of a tar archive, folders being skipped and any other entry refused. After
+ * the body of its last entry, the archive must hold its two empty blocks and nothing but zero bytes:
+ * one that stops before, or ends with a header of no entry, is refused once its last entry is read.
  *
  * @param source - The uncompressed archive.
  * @returns The files, in their order in the archive.
  */
 export async function* readTar (source: AsyncIterable<Buffer>): AsyncGenerator<TarEntry> {
-  let tail: Buffer = Buffer.alloc(0)
   let received = 0
+  let lastNonZero = -1
   let lastEnd = 0
   const watched = async function* (): AsyncGenerator<Buffer> {
     for await (const chunk of source) {
+      for (let index = chunk.length - 1; index >= 0; index -= 1) {
+        if (chunk[index] !== 0) {
+          lastNonZero = received + index
+          break
+        }
+      }
       received += chunk.length
-      tail = chunk.length >= END_BYTES ? chunk.subarray(-END_BYTES) : Buffer.concat([tail, chunk]).subarray(-END_BYTES)
       yield chunk
     }
   }
@@ -99,7 +104,7 @@ export async function* readTar (source: AsyncIterable<Buffer>): AsyncGenerator<T
       }
       entry.resume()
     }
-    if (received - lastEnd < END_BYTES || tail.some(byte => byte !== 0)) {
+    if (received - lastEnd < END_BYTES || lastNonZero >= lastEnd) {
       throw new Error('not a complete tar archive: it does not end with its two empty blocks')
     }
   } finally {
