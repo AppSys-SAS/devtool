@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -170,6 +171,18 @@ describe('pull of an item holding local data', () => {
 
     expect(result).toEqual({ done: true, detail: 'database restored in db, but its former copy adt_replaced_0123 could not be dropped: drop it by hand' })
     expect((await readSyncJournal()).get(ITEM_PATH)).toMatchObject({ remoteVersion: 'v2' })
+  })
+
+  it('refuses a pull and a push while another process transfers the item, changing nothing', async () => {
+    const environment = environmentOf(postgresItem, Buffer.from('new archive'))
+    const key = createHash('sha256').update(path.join(folder, 'env', ITEM_PATH)).digest('hex')
+    await fs.mkdir(path.join(folder, 'locks'))
+    await fs.writeFile(path.join(folder, 'locks', `${key}.lock`), String(process.ppid))
+
+    await expect(environment.pull({ item: postgresItem, tables: null })).rejects.toThrow(`api/db.dump is in use by another process (${process.ppid})`)
+    await expect(environment.push({ item: postgresItem, tables: null })).rejects.toThrow('api/db.dump is in use by another process')
+    expect(downloads).toBe(0)
+    expect(await localState()).toEqual({ files: ['db.dump'], copy: 'previous copy' })
   })
 
   it('refuses some tables of an archive restoring the whole database only, before downloading it', async () => {

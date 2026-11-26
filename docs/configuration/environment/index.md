@@ -144,7 +144,10 @@ corrupted one changes nothing, and replaces the local copy of the archive, and r
 synchronized, only once its data is restored: after a restore that fails, the item still shows behind
 its backend. A pull records an item as synchronized only when the copy of its backend was
 listed before it ran and did not change meanwhile; otherwise its result says so, and the item stays
-behind its backend.
+behind its backend. One transfer of an item runs at a time, whether from the CLI, the server or an
+agent: another one is refused until it ends, with `<path> is being transferred` from the same
+process, or `<path> is in use by another process`. That second message names the lock, a file of
+the cache folder: remove it should a transfer stopped abruptly leave it behind.
 
 ### Several databases in one container
 
@@ -192,7 +195,7 @@ of the engine: a pull interrupted while the archive is sent changes nothing. An 
 refuses, because it is of another engine, truncated or corrupted, leaves the database as it was:
 
 - `postgres` restores the archive into a new database, which takes the place of the database only once
-  wholly restored, keeping its encoding, locale and owner. Sequences keep the values of the archive.
+  wholly restored, keeping its encoding, locale, locale provider and owner. Sequences keep the values of the archive.
   The privileges the archive grants apply to the roles the server has; those granted to other roles
   are skipped. Objects belong to `POSTGRES_USER`. Should the former database not be dropped once replaced, the pull succeeds and
   names it.

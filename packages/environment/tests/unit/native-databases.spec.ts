@@ -134,7 +134,8 @@ describe.skipIf(!hasDocker)('native archives of real databases', { timeout: TEST
       (SELECT count(*) FROM ONLY public.parent), (SELECT count(*) FROM public.child), (SELECT last_value FROM public.users_id_seq))`)
 
     beforeAll(async () => {
-      target = { container: await start('postgres:17', { POSTGRES_PASSWORD: 'secret' }, ['pg_isready', '-U', 'postgres', '-h', '127.0.0.1']), database: 'sales=2026' }
+      const env = { POSTGRES_PASSWORD: 'secret', POSTGRES_INITDB_ARGS: '--locale-provider=icu --icu-locale=en-US' }
+      target = { container: await start('postgres:17', env, ['pg_isready', '-U', 'postgres', '-h', '127.0.0.1']), database: 'sales=2026' }
       exec(target.container, ['createdb', '-U', 'postgres', 'sales=2026'])
       exec(target.container, ['createdb', '-U', 'postgres', 'other'])
       sqlIn('other', 'CREATE TABLE kept (id int); INSERT INTO kept VALUES (1), (2), (3)')
@@ -186,14 +187,23 @@ describe.skipIf(!hasDocker)('native archives of real databases', { timeout: TEST
       expect(state()).toBe('2,3,1,2,3,100')
     })
 
-    it('keeps the encoding, locale and owner of the database it replaces', async () => {
+    it('keeps the encoding, locale, libc provider and owner of the database it replaces, on a server whose default provider is ICU', async () => {
       const kept = { container: target.container, database: 'kept' }
-      sqlIn('postgres', `CREATE DATABASE kept TEMPLATE template0 ENCODING 'LATIN1' LC_COLLATE 'C' LC_CTYPE 'C' OWNER reader`)
+      sqlIn('postgres', `CREATE DATABASE kept TEMPLATE template0 ENCODING 'LATIN1' LOCALE_PROVIDER libc LC_COLLATE 'C' LC_CTYPE 'C' OWNER reader`)
       await engine.restoreNative(kept, await stored(archive), null)
 
-      expect(sqlIn('postgres', `SELECT concat_ws(',', pg_encoding_to_char(encoding), datcollate, pg_get_userbyid(datdba)) FROM pg_database WHERE datname = 'kept'`)).toBe('LATIN1,C,reader')
+      expect(sqlIn('postgres', `SELECT concat_ws(',', pg_encoding_to_char(encoding), datcollate, pg_get_userbyid(datdba), datlocprovider) FROM pg_database WHERE datname = 'kept'`)).toBe('LATIN1,C,reader,c')
       expect(await engine.listTables(kept)).toContain('public.users')
       sqlIn('postgres', 'DROP DATABASE kept')
+    })
+
+    it('keeps the ICU locale provider and locale of the database it replaces', async () => {
+      const icu = { container: target.container, database: 'icu' }
+      sqlIn('postgres', `CREATE DATABASE icu TEMPLATE template0 LOCALE_PROVIDER icu ICU_LOCALE 'fr-FR' LOCALE 'C'`)
+      await engine.restoreNative(icu, await stored(archive), null)
+
+      expect(sqlIn('postgres', `SELECT concat_ws(',', datlocprovider, datlocale) FROM pg_database WHERE datname = 'icu'`)).toBe('i,fr-FR')
+      sqlIn('postgres', 'DROP DATABASE icu')
     })
 
     it.each([
@@ -354,6 +364,16 @@ describe.skipIf(!hasDocker)('native archives of real databases', { timeout: TEST
       await engine.restoreNative({ container: target.container, database: 'under_score' }, await stored(gzipSync('-- dump\nCREATE TABLE t (id int);\n')), null)
 
       expect(sql('SHOW GRANTS FOR app', 'mysql')).toContain('ON `under\\\\_score`.*')
+    })
+
+    it('dumps and restores a database named like a client option as that database only', async () => {
+      const named = { container: target.container, database: '--all-databases' }
+      await engine.restoreNative(named, await stored(gzipSync('-- dump\nCREATE TABLE mine (id int);\n')), null)
+      const dump = gunzipSync(await bytesOf(engine.dumpNative(named))).toString('utf-8')
+
+      expect(await engine.listTables(named)).toEqual(['mine'])
+      expect(dump).toContain('CREATE TABLE `mine`')
+      expect(dump).not.toContain('CREATE TABLE `items`')
     })
 
     it('refuses a truncated archive without touching the database', async () => {
