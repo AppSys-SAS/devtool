@@ -38,6 +38,7 @@ import pkg from '../package.json' with { type: 'json' }
 import { agentSkillFolders, distinctFolders, foreignSkills, type SkillInstallMode, syncSkills, wasSynced } from './skills.js'
 
 const UI_PATH = fileURLToPath(new URL(process.env.DEVTOOL_UI_FOLDER ?? '../../ui/dist', import.meta.url))
+const MAX_PORT = 65535
 
 /**
  * Reads the identity provider of the configuration of the devtool installation.
@@ -374,14 +375,26 @@ async function syncAgentSkills (flags: { target?: string[], copy?: boolean, link
   }
 }
 
+/**
+ * Reads a port given on the command line.
+ * @param input The value given.
+ * @param label What the port is for, in the error message.
+ * @returns The port, between 1 and 65535.
+ */
 function parsePort (input: string, label: string): number {
   const parsed = Number(input)
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    throw new Error(`Invalid ${label}: ${input}`)
+  if (!Number.isInteger(parsed) || parsed <= 0 || parsed > MAX_PORT) {
+    throw new Error(`Invalid ${label}: ${input}, must be between 1 and ${MAX_PORT}`)
   }
   return parsed
 }
 
+/**
+ * Reads a port given on the command line, when one is.
+ * @param input The value given, undefined when the option is left out.
+ * @param label What the port is for, in the error message.
+ * @returns The port, undefined when none is given.
+ */
 function parseOptionalPort (input: string | undefined, label: string): number | undefined {
   if (typeof input !== 'string') {
     return undefined
@@ -414,6 +427,7 @@ async function main (): Promise<void> {
     .option('-s, --ssl <domain>', 'enable SSL for the domain given')
     .option('-g, --server-port <port>', 'server port')
     .option('-l, --load-balancer-port <port>', 'load balancer port')
+    .option('--dns-port <port>', 'DNS port, instead of dns.port of the configuration')
     .option('--log-level <level>', 'set log level (error|warn|info|debug)', 'info')
     .action(async (configurations: string[], options: Record<string, string | undefined>) => {
       const invocationCwd = process.env.INIT_CWD?.length ? process.env.INIT_CWD : process.cwd()
@@ -428,6 +442,7 @@ async function main (): Promise<void> {
       await runServer({
         serverPort: parseOptionalPort(options.serverPort, 'server port'),
         loadBalancerPort: parseOptionalPort(options.loadBalancerPort, 'load balancer port'),
+        dnsPort: parseOptionalPort(options.dnsPort, 'DNS port'),
         ssl: options.ssl ?? null,
         uiPath: UI_PATH,
         configPaths
