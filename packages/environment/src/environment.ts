@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import fs from 'node:fs/promises'
 import path from 'node:path'
@@ -8,7 +8,7 @@ import { ArchiveWriter, readArchive, type RecordHeader } from './archive.js'
 import { type BackendContext, type BackendOptions, encrypted, EncryptionSecret, type EncryptionSettings, type EnvironmentBackend, readBackends, readEncryption, type RemoteFile } from './backends/index.js'
 import { plainLengthOf } from './backends/encryption.js'
 import { checkTar, createS3Client, objectsOfArchive, objectsOfTar, restoreBucket, type S3Options, snapshotBucket, snapshotBucketTar } from './buckets.js'
-import { defaultEnvironmentFolder, localPathOf, writeLocalFile } from './directory.js'
+import { defaultEnvironmentFolder, localPathOf, withFileLock, writeLocalFile } from './directory.js'
 import { databaseEngine, type DatabaseEngineName, isDatabaseEngineName } from './engines.js'
 import { listRedisGroups, redisDatabaseName, redisRecordGroup, restoreRedis, snapshotRedis } from './redis.js'
 import { readSyncJournal, type SyncRecord, writeSyncRecord } from './sync-journal.js'
@@ -611,14 +611,51 @@ export class Environment {
    * Replaces the local data an item holds by the copy of its backend, then its local copy once that
    * data is restored: a restore that fails leaves the local copy and its synchronization record as
    * they were. The item is recorded as synchronized only when the copy of the backend did not change
-   * during the pull; a record that cannot be written is reported in the result.
+   * during the pull; a record that cannot be written is reported in the result. One transfer of an
+   * item runs at a time, across processes.
    *
    * @param selection - The item, the tables or key groups to restore, or the keys to take for a configuration file.
    * @returns What was done.
    */
   async pull (selection: EnvironmentSelection): Promise<TransferResult> {
+    await this.assertAllowed(selection.item, 'pull')
+    return this.locked(selection.item, async () => this.pullItem(selection))
+  }
+
+  /**
+   * Sends the local copy of an item to its backend, after dumping the local data it holds. For some
+   * tables of a database, only their rows are replaced in the stored archive. One transfer of an
+   * item runs at a time, across processes.
+   *
+   * @param selection - The item, the tables or key groups to dump, or the keys to send for a configuration file.
+   * @returns What was done.
+   */
+  async push (selection: EnvironmentSelection): Promise<TransferResult> {
+    await this.assertAllowed(selection.item, 'push')
+    return this.locked(selection.item, async () => this.pushItem(selection))
+  }
+
+  /**
+   * Runs a transfer of an item while no other transfer of it runs, in any process; the lock lives
+   * in the cache folder, named after the local copy of the item.
+   *
+   * @param item - The item.
+   * @param transfer - The transfer.
+   * @returns What the transfer did.
+   */
+  private async locked (item: EnvironmentItem, transfer: () => Promise<TransferResult>): Promise<TransferResult> {
+    const key = createHash('sha256').update(localPathOf(this._options.folder, item.path)).digest('hex')
+    return withFileLock(path.join(this._context.cacheDir, 'locks', `${key}.lock`), item.path, transfer)
+  }
+
+  /**
+   * Pulls an item, once its transfer is locked.
+   *
+   * @param selection - The item, the tables or key groups to restore, or the keys to take for a configuration file.
+   * @returns What was done.
+   */
+  private async pullItem (selection: EnvironmentSelection): Promise<TransferResult> {
     const { item, tables } = selection
-    await this.assertAllowed(item, 'pull')
     const localPath = localPathOf(this._options.folder, item.path)
     if (item.kind === 'database' && tables !== null && !transfersParts(item, 'pull')) {
       throw new Error(`${item.path} is a native ${item.engine} archive: pull the whole database, its tables cannot be restored one by one`)
@@ -805,14 +842,13 @@ export class Environment {
   }
 
   /**
-   * Sends the local copy of an item to its backend, after dumping the local data it holds. For some tables of a database, only their rows are replaced in the stored archive.
+   * Pushes an item, once its transfer is locked.
    *
    * @param selection - The item, the tables or key groups to dump, or the keys to send for a configuration file.
    * @returns What was done.
    */
-  async push (selection: EnvironmentSelection): Promise<TransferResult> {
+  private async pushItem (selection: EnvironmentSelection): Promise<TransferResult> {
     const { item, tables } = selection
-    await this.assertAllowed(item, 'push')
     if (item.kind === 'file' && (selection.keys || await this.mergesWhole(item))) {
       return this.pushKeys(item, selection.keys ?? null)
     }

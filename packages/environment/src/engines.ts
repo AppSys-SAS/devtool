@@ -398,7 +398,14 @@ cleanup() {
 }
 psql -U "$POSTGRES_USER" -d template1 -X -q -v ON_ERROR_STOP=1 -v staging="$STAGING" -v target="$DB" <<'SQL'
 SELECT coalesce(
-  (SELECT format('CREATE DATABASE %I TEMPLATE template0 ENCODING %L LC_COLLATE %L LC_CTYPE %L OWNER %I', :'staging', pg_encoding_to_char(encoding), datcollate, datctype, pg_get_userbyid(datdba)) FROM pg_database WHERE datname = :'target'),
+  (SELECT format('CREATE DATABASE %I TEMPLATE template0 ENCODING %L LC_COLLATE %L LC_CTYPE %L OWNER %I', :'staging', pg_encoding_to_char(encoding), datcollate, datctype, pg_get_userbyid(datdba))
+    || CASE l->>'datlocprovider'
+      WHEN 'i' THEN format(' LOCALE_PROVIDER icu ICU_LOCALE %L', coalesce(l->>'datlocale', l->>'daticulocale')) || coalesce(' ICU_RULES ' || quote_literal(l->>'daticurules'), '')
+      WHEN 'b' THEN format(' LOCALE_PROVIDER builtin BUILTIN_LOCALE %L', l->>'datlocale')
+      WHEN 'c' THEN ' LOCALE_PROVIDER libc'
+      ELSE ''
+    END
+    FROM pg_database d, to_jsonb(d) l WHERE datname = :'target'),
   format('CREATE DATABASE %I', :'staging')
 ) \\gexec
 SQL
@@ -408,7 +415,10 @@ pg_restore -l "$ARCHIVE" > "$work/toc"
 grep -E '^[0-9]+; [0-9]+ [0-9]+ (DEFAULT )?ACL ' "$work/toc" > "$work/grants" || true
 if [ -s "$work/grants" ]; then
   pg_restore -L "$work/grants" -f "$work/grants.sql" "$ARCHIVE"
-  psql -U "$POSTGRES_USER" -d "dbname='$STAGING'" -X -q -f "$work/grants.sql" > /dev/null 2> "$work/grants.err" || true
+  psql -U "$POSTGRES_USER" -d "dbname='$STAGING'" -X -q -f "$work/grants.sql" > /dev/null 2> "$work/grants.err" || {
+    cat "$work/grants.err" >&2
+    exit 1
+  }
   if grep 'ERROR:' "$work/grants.err" | grep -qv 'ERROR:  role ".*" does not exist'; then
     cat "$work/grants.err" >&2
     echo "the privileges of the archive could not be applied: nothing was changed" >&2
@@ -469,7 +479,7 @@ const postgres: DatabaseEngine = {
     return scriptOutput(target, `${POSTGRES_SETUP}pg_dump -U "$POSTGRES_USER" --data-only --no-owner --no-privileges -t "$1" -d "$CONN"`, [table])
   },
   async reset (target) {
-    await scriptText(target, `${POSTGRES_SETUP}dropdb -U "$POSTGRES_USER" --force --if-exists "$DB" && createdb -U "$POSTGRES_USER" "$DB"`)
+    await scriptText(target, `${POSTGRES_SETUP}dropdb -U "$POSTGRES_USER" --force --if-exists -- "$DB" && createdb -U "$POSTGRES_USER" -- "$DB"`)
   },
   async importSchema (target, sql) {
     await scriptInput(target, `${POSTGRES_SETUP}${POSTGRES_CLIENT}`, sql)
@@ -540,7 +550,7 @@ options=
 if found=$(mariadb -uroot -N -B -e "USE \\\`$QUOTED\\\`; SELECT @@character_set_database, @@collation_database" 2> "$saved"); then
   existed=1
   options=" CHARACTER SET $(printf '%s' "$found" | cut -f1) COLLATE $(printf '%s' "$found" | cut -f2)"
-  mariadb-dump -uroot --single-transaction --routines --triggers --events "$DB" > "$saved" || {
+  mariadb-dump -uroot --single-transaction --routines --triggers --events -- "$DB" > "$saved" || {
     echo "the database could not be saved before its restore, so nothing was changed: repair it, or drop it to restore the archive into a new database" >&2
     exit 1
   }
@@ -549,10 +559,10 @@ elif ! grep -q '^ERROR 1049 ' "$saved"; then
   echo "the server could not tell whether the database exists: nothing was changed" >&2
   exit 1
 fi
-empty "$options" && grant && mariadb -uroot --sandbox --local-infile=0 "$DB" < "$ARCHIVE" > /dev/null && exit 0
+empty "$options" && grant && mariadb -uroot --sandbox --local-infile=0 -- "$DB" < "$ARCHIVE" > /dev/null && exit 0
 if [ -z "$existed" ]; then
   mariadb -uroot -e "DROP DATABASE IF EXISTS \\\`$QUOTED\\\`" && echo "the restore was refused: the database, which did not exist, was removed" >&2
-elif empty "$options" && mariadb -uroot "$DB" < "$saved" > /dev/null; then
+elif empty "$options" && mariadb -uroot -- "$DB" < "$saved" > /dev/null; then
   echo "the restore was refused: the database was put back as it was" >&2
 else
   kept=1
@@ -574,33 +584,33 @@ function quoteMariadb (name: string): string {
 /** MariaDB of the official image: root account, credentials from the container environment. */
 const mariadb: DatabaseEngine = {
   async listTables (target) {
-    const text = await scriptText(target, `${MARIADB_SETUP}mariadb -uroot -N -B -e "SHOW FULL TABLES WHERE Table_type = 'BASE TABLE'" "$DB"`)
+    const text = await scriptText(target, `${MARIADB_SETUP}mariadb -uroot -N -B -e "SHOW FULL TABLES WHERE Table_type = 'BASE TABLE'" -- "$DB"`)
     return text
       .split('\n')
       .filter(line => line !== '')
       .map(line => line.split('\t')[0])
   },
   dumpSchema (target) {
-    return scriptOutput(target, `${MARIADB_SETUP}mariadb-dump -uroot --no-data --routines --triggers --events --skip-comments "$DB"`)
+    return scriptOutput(target, `${MARIADB_SETUP}mariadb-dump -uroot --no-data --routines --triggers --events --skip-comments -- "$DB"`)
   },
   dumpTable (target, table) {
-    return scriptOutput(target, `${MARIADB_SETUP}mariadb-dump -uroot --no-create-info --skip-triggers --skip-comments --single-transaction "$DB" "$1"`, [table])
+    return scriptOutput(target, `${MARIADB_SETUP}mariadb-dump -uroot --no-create-info --skip-triggers --skip-comments --single-transaction -- "$DB" "$1"`, [table])
   },
   async reset (target) {
     await scriptText(target, `${MARIADB_SETUP}empty && grant`)
   },
   async importSchema (target, sql) {
-    await scriptInput(target, `${MARIADB_SETUP}mariadb -uroot "$DB"`, sql)
+    await scriptInput(target, `${MARIADB_SETUP}mariadb -uroot -- "$DB"`, sql)
   },
   async importTable (target, table, sql, replace) {
     const preamble = `SET FOREIGN_KEY_CHECKS = 0;\n${replace ? `DELETE FROM ${quoteMariadb(table)};\n` : ''}`
-    await scriptInput(target, `${MARIADB_SETUP}mariadb -uroot "$DB"`, prefixed(preamble, sql))
+    await scriptInput(target, `${MARIADB_SETUP}mariadb -uroot -- "$DB"`, prefixed(preamble, sql))
   },
   finish () {
     return Promise.resolve()
   },
   dumpNative (target) {
-    return transformed(scriptOutput(target, `${MARIADB_SETUP}mariadb-dump -uroot --single-transaction --routines --triggers --events "$DB"`), createGzip())
+    return transformed(scriptOutput(target, `${MARIADB_SETUP}mariadb-dump -uroot --single-transaction --routines --triggers --events -- "$DB"`), createGzip())
   },
   async restoreNative (target, archivePath, tables) {
     if (tables !== null) {

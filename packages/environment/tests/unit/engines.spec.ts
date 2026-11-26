@@ -346,13 +346,14 @@ describe('postgres whole restore script', () => {
   })
 
   it.each([
-    ['skips privileges granted to roles the server lacks', 'ERROR:  role "departed" does not exist', 0],
-    ['refuses the archive, changing nothing, when another privilege is refused', 'ERROR:  permission denied for schema private', 1]
-  ])('%s', async (_case, error, code) => {
+    ['skips privileges granted to roles the server lacks', 'echo \'psql:grants.sql:3: ERROR:  role "departed" does not exist\' >&2', 0],
+    ['refuses the archive, changing nothing, when another privilege is refused', 'echo \'psql:grants.sql:3: ERROR:  permission denied for schema private\' >&2', 1],
+    ['refuses the archive, changing nothing, when the client applying the privileges fails', 'echo \'psql: error: connection to server lost\' >&2; exit 2', 1]
+  ])('%s', async (_case, grants, code) => {
     const run = await runScript(call, 'archive', {
       ...pg,
       pg_restore: 'case "$*" in "-l "*) echo "9; 0 0 ACL public TABLE users postgres" ;; esac',
-      psql: `case "$*" in *" -f "*) echo 'psql:grants.sql:3: ${error}' >&2 ;; *) ${pg.psql} ;; esac`
+      psql: `case "$*" in *" -f "*) ${grants} ;; *) ${pg.psql} ;; esac`
     })
     expect(run.code).toBe(code)
     expect(run.calls.some(line => line.includes(' -v replaced='))).toBe(code === 0)
@@ -439,6 +440,29 @@ describe('mariadb native archives', () => {
   const mariadb = databaseEngine('mariadb')
   const target = { container: 'db', database: 'shop' }
 
+  it('ends the options of every client before a database or table name, so a name like an option stays a name', async () => {
+    const named = { container: 'db', database: '--all-databases' }
+    await mariadb.listTables(named)
+    for (const output of [mariadb.dumpSchema(named), mariadb.dumpTable(named, '--t')]) {
+      for await (const chunk of output) {
+        void chunk
+      }
+    }
+    await mariadb.importSchema(named, Readable.from([]))
+    await mariadb.importTable(named, '--t', Readable.from([]), false)
+    for await (const chunk of mariadb.dumpNative(named)) {
+      void chunk
+    }
+
+    const calls = await dockerCalls()
+    const ends: string[] = []
+    for (const call of calls) {
+      const run = await runScript(call, '', { 'mariadb': 'cat > /dev/null', 'mariadb-dump': 'exit 0' })
+      ends.push(run.calls.map(line => line.slice(line.indexOf(' -- '))).join(''))
+    }
+    expect(ends).toEqual([' -- --all-databases', ' -- --all-databases', ' -- --all-databases --t', ' -- --all-databases', ' -- --all-databases', ' -- --all-databases'])
+  })
+
   describe('restore script', () => {
     const dump = '-- ARCHIVE DUMP\nCREATE TABLE t (id int);\n'
     const probeLatin1 = 'printf \'latin1\\tlatin1_swedish_ci\\n\''
@@ -471,10 +495,10 @@ esac`
       expect([run.code, run.stdout, run.stderr, run.leftovers]).toEqual([0, '', '', []])
       expect(run.calls).toEqual([
         'mariadb -uroot -N -B -e USE `shop`; SELECT @@character_set_database, @@collation_database',
-        'mariadb-dump -uroot --single-transaction --routines --triggers --events shop',
+        'mariadb-dump -uroot --single-transaction --routines --triggers --events -- shop',
         'mariadb -uroot -e DROP DATABASE IF EXISTS `shop`; CREATE DATABASE `shop` CHARACTER SET latin1 COLLATE latin1_swedish_ci',
         'mariadb -uroot -e GRANT ALL PRIVILEGES ON `shop`.* TO \'app\'@\'%\'',
-        'mariadb -uroot --sandbox --local-infile=0 shop'
+        'mariadb -uroot --sandbox --local-infile=0 -- shop'
       ])
     })
 
@@ -498,7 +522,7 @@ esac`
       expect([run.code, run.stderr.trim(), run.leftovers]).toEqual([1, 'the restore was refused: the database was put back as it was', []])
       expect(run.calls.slice(-2)).toEqual([
         'mariadb -uroot -e DROP DATABASE IF EXISTS `shop`; CREATE DATABASE `shop` CHARACTER SET latin1 COLLATE latin1_swedish_ci',
-        'mariadb -uroot shop'
+        'mariadb -uroot -- shop'
       ])
     })
 

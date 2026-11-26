@@ -98,7 +98,8 @@ describe('Environment groups', () => {
    */
   function environmentWith (groups: EnvironmentItem['groups']): { environment: Environment, item: EnvironmentItem } {
     const item: EnvironmentItem = { kind: 'file', path: 'api/config.yml', backend: 'team', encryption: null, groups, ignore: null }
-    const environment = new Environment(new Map([['team', backend]]), { folder: '/example/env', backends: [], defaultBackend: 'team', items: [item], configFiles: [], autoPulls: [], s3: null }, context)
+    const options = { folder: path.join(folder, 'env'), backends: [], defaultBackend: 'team', items: [item], configFiles: [], autoPulls: [], s3: null }
+    const environment = new Environment(new Map([['team', backend]]), options, { ...context, cacheDir: path.join(folder, 'cache') })
     return { environment, item }
   }
 
@@ -111,6 +112,7 @@ describe('Environment groups', () => {
     expect(backend.list).not.toHaveBeenCalled()
     expect(backend.download).not.toHaveBeenCalled()
     expect(backend.upload).not.toHaveBeenCalled()
+    await expect(fs.access(path.join(folder, 'cache'))).rejects.toThrow()
   })
 
   it('refuses to read the copy of the backend for a key comparison without the pull groups', async () => {
