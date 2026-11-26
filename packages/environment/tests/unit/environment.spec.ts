@@ -506,22 +506,22 @@ describe('readEnvironmentOptions', () => {
       expect(() => readEnvironmentOptions({ files: [{ path: 'api/./config.yml', groups: { pull: ['admins'] } }] })).toThrow('invalid path of api/./config.yml in the environment: write it api/config.yml')
       expect(() => readEnvironmentOptions({ databases: [{ path: '/api/db.gz', engine: 'postgres', container: 'db' }] })).toThrow('write it api/db.gz')
       expect(() => readEnvironmentOptions({ files: ['../secrets.yml'] })).toThrow('is not a path inside the backend')
+      for (const outside of ['x\\..', '..\\x', '‥/x']) {
+        expect(() => readEnvironmentOptions({ files: [outside] }), outside).toThrow(`${outside} is not a path inside the backend`)
+      }
     })
 
     it('refuses an item path declared twice', () => {
       expect(() => readEnvironmentOptions({ files: ['api/config.yml'], buckets: [{ path: 'api/config.yml', bucket: 'b' }] })).toThrow('api/config.yml is declared twice in the environment')
     })
 
-    it('refuses item paths differing only by letter case, Unicode form or separators, which one store may hold as one file', () => {
+    it('refuses item paths differing only by letter case, Unicode form or path spelling, which one store may hold as one file', () => {
       expect(() => readEnvironmentOptions({ files: ['api/config.yml', 'API/config.yml'] })).toThrow(
-        'API/config.yml and api/config.yml differ only by letter case, Unicode form or separators, which a backend or a disk may store as one file: declare one of them'
+        'API/config.yml and api/config.yml differ only by letter case, Unicode form or path spelling, which a backend or a disk may store as one file: declare one of them'
       )
-      expect(() => readEnvironmentOptions({ files: ['api/café.yml'.normalize('NFC'), 'api/café.yml'.normalize('NFD')] })).toThrow('differ only by letter case, Unicode form or separators')
-      for (const outside of ['x\\..', '..\\x', '‥/x']) {
-        expect(() => readEnvironmentOptions({ files: [outside] }), outside).toThrow(`${outside} is not a path inside the backend`)
-      }
+      expect(() => readEnvironmentOptions({ files: ['api/café.yml'.normalize('NFC'), 'api/café.yml'.normalize('NFD')] })).toThrow('differ only by letter case, Unicode form or path spelling')
       for (const alias of ['api\\config.yml', 'api\\.\\config.yml', 'api\\other\\..\\config.yml']) {
-        expect(() => readEnvironmentOptions({ files: ['api/config.yml', alias] }), alias).toThrow('differ only by letter case, Unicode form or separators')
+        expect(() => readEnvironmentOptions({ files: ['api/config.yml', alias] }), alias).toThrow('differ only by letter case, Unicode form or path spelling')
       }
     })
   })
@@ -606,8 +606,8 @@ describe('itemStoredAt', () => {
     expect(itemStoredAt(items, 'team', 'api/config.yml')).toBeNull()
   })
 
-  it('refuses a path naming an item in another letter case, Unicode form or separators, which a backend may store as the same file', () => {
-    expect(() => itemStoredAt(items, 'team', 'API/db.gz')).toThrow('API/db.gz names the item api/db.gz in another letter case, Unicode form or separators: write its path exactly')
+  it('refuses a path naming an item in another letter case, Unicode form or path spelling, which a backend may store as the same file', () => {
+    expect(() => itemStoredAt(items, 'team', 'API/db.gz')).toThrow('API/db.gz names the item api/db.gz in another letter case, Unicode form or path spelling: write its path exactly')
     const aliases: [string, string][] = [
       ['api/café.gz'.normalize('NFC'), 'api/café.gz'.normalize('NFD')],
       ['api/config.yml', 'api\\config.yml'],

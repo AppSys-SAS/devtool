@@ -113,7 +113,7 @@ omitted. The files come decrypted by the encryption of the backend, but not by t
 The [groups](/configuration/environment/#who-may-pull-and-push) of the item stored at that path apply,
 else those of the backend: `pull` to download, `push` to upload or delete. Write the path of an item
 exactly as the environment declares it: a path differing from it by its letter case, Unicode form or
-separators only (`api\config.yml` for `api/config.yml`) is refused.
+path spelling only (`api\config.yml` or `api\.\config.yml` for `api/config.yml`) is refused.
 
 ## devtool cert renew
 

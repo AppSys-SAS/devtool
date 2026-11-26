@@ -485,8 +485,9 @@ Environment page shows the error and `devtool env` stops.
 - `invalid format of <path> in the environment: must be devtool or native`
 - `invalid path of <path> in the environment: write it <canonical path>`: a path without `./`, leading
   `/` or `..` segments; `<path> is declared twice in the environment`: each item has its own path;
-  `<path> and <path> differ only by letter case, Unicode form or separators`: a backend or a disk
-  ignoring letter case, or taking `\` for `/`, would store them as one file.
+  `<path> and <path> differ only by letter case, Unicode form or path spelling`: a backend or a disk
+  ignoring letter case, or taking `\` for `/`, would store them as one file (`api\.\config.yml` and
+  `api/config.yml`, for instance).
 - `invalid groups of <path> in the environment: ...`: `pull` and `push` take a non-empty list of groups,
   or `false`.
 
