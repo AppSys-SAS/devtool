@@ -17,6 +17,8 @@ afterEach(async () => {
 })
 
 describe('withFileLock', () => {
+  const ended = spawnSync(process.execPath, ['-e', '0']).pid
+
   it('runs the task holding the lock, then releases it, even when the task fails', async () => {
     const lockPath = path.join(folder, 'api/db.gz.lock')
     expect(await withFileLock(lockPath, 'api/db.gz', async () => fs.readFile(lockPath, 'utf-8'))).toBe(String(process.pid))
@@ -26,8 +28,10 @@ describe('withFileLock', () => {
 
   it.each([
     ['another running process', String(process.ppid), `in use by another process (${process.ppid})`],
-    ['a process still writing it', '', 'in use by another process']
-  ])('refuses the task while %s holds the lock, naming the lock to remove', async (_case, holder, refusal) => {
+    ['a process still writing it', '', 'in use by another process'],
+    ['a process that no longer runs', String(ended), `in use by another process (${ended})`],
+    ['an earlier process of the identifier of this one', String(process.pid), `in use by another process (${process.pid})`]
+  ])('refuses the task while a lock of %s is present, naming the lock to remove', async (_case, holder, refusal) => {
     const lockPath = path.join(folder, 'db.gz.lock')
     await fs.writeFile(lockPath, holder)
     let ran = false
@@ -59,13 +63,12 @@ describe('withFileLock', () => {
     expect(await withFileLock(lockPath, 'api/db.gz', async () => 'third')).toBe('third')
   })
 
-  it.each([
-    ['a process that no longer runs', () => String(spawnSync(process.execPath, ['-e', '0']).pid)],
-    ['an earlier process of the identifier of this one', () => String(process.pid)]
-  ])('takes over a lock left by %s', async (_case, holder) => {
+  it('runs the task once a lock left behind is removed', async () => {
     const lockPath = path.join(folder, 'db.gz.lock')
-    await fs.writeFile(lockPath, holder())
+    await fs.writeFile(lockPath, String(ended))
+    await expect(withFileLock(lockPath, 'api/db.gz', async () => 'done')).rejects.toThrow(`or remove ${lockPath} if none runs`)
 
+    await fs.rm(lockPath)
     expect(await withFileLock(lockPath, 'api/db.gz', async () => 'done')).toBe('done')
     await expect(fs.access(lockPath)).rejects.toThrow()
   })

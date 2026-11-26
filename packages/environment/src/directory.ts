@@ -23,27 +23,12 @@ export function localPathOf (folder: string, filePath: string): string {
   return path.join(folder, filePath)
 }
 
-/**
- * Tells whether a process runs.
- *
- * @param pid - The process identifier.
- * @returns True when the process runs, or when it cannot be told.
- */
-function runs (pid: number): boolean {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code !== 'ESRCH'
-  }
-}
-
 const heldLocks = new Set<string>()
 
 /**
- * Runs a task while holding a lock file, which holds the identifier of the holding process: the
- * task is refused while this process or another running one holds the lock, and a lock left by a
- * process that no longer runs, or by an earlier process of the same identifier, is taken over.
+ * Runs a task while holding a lock file, created exclusively and holding the identifier of the
+ * holding process: the task is refused while this process or another one holds the lock. A lock
+ * left by a process stopped abruptly stays until it is removed, as the refusal says.
  *
  * @param lockPath - The lock file.
  * @param name - What the lock protects, for the error message.
@@ -55,25 +40,16 @@ export async function withFileLock<T> (lockPath: string, name: string, task: () 
     throw new Error(`${name} is being transferred: try again once it ends`)
   }
   heldLocks.add(lockPath)
-  const take = async (): Promise<void> => fs.writeFile(lockPath, String(process.pid), { flag: 'wx', mode: 0o600 })
   try {
     await fs.mkdir(path.dirname(lockPath), { recursive: true, mode: 0o700 })
-    try {
-      await take()
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
-        throw error
-      }
-      const holder = Number(await fs.readFile(lockPath, 'utf-8').catch(() => ''))
-      if (!Number.isSafeInteger(holder) || holder <= 0 || (holder !== process.pid && runs(holder))) {
-        throw new Error(`${name} is in use by another process${holder > 0 ? ` (${holder})` : ''}: try again once it ends, or remove ${lockPath} if none runs`, { cause: error })
-      }
-      await fs.rm(lockPath, { force: true })
-      await take()
-    }
+    await fs.writeFile(lockPath, String(process.pid), { flag: 'wx', mode: 0o600 })
   } catch (error) {
     heldLocks.delete(lockPath)
-    throw error
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
+      throw error
+    }
+    const holder = (await fs.readFile(lockPath, 'utf-8').catch(() => '')).trim()
+    throw new Error(`${name} is in use by another process${holder === '' ? '' : ` (${holder})`}: try again once it ends, or remove ${lockPath} if none runs`, { cause: error })
   }
   try {
     return await task()
