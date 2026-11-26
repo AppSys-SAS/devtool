@@ -2,10 +2,9 @@ import { randomUUID } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { createGunzip } from 'node:zlib'
 import type { S3Client } from '@aws-sdk/client-s3'
 import { mergeTransferGroups, OPEN_ACCESS, type TransferAccess, type TransferDirection, TransferGate, readTransferGroups } from './access.js'
-import { ArchiveWriter, readArchive, type RecordHeader, transformed } from './archive.js'
+import { ArchiveWriter, readArchive, type RecordHeader } from './archive.js'
 import { type BackendContext, type BackendOptions, encrypted, EncryptionSecret, type EncryptionSettings, type EnvironmentBackend, readBackends, readEncryption } from './backends/index.js'
 import { plainLengthOf } from './backends/encryption.js'
 import { checkTar, createS3Client, objectsOfArchive, objectsOfTar, restoreBucket, type S3Options, snapshotBucket, snapshotBucketTar } from './buckets.js'
@@ -17,8 +16,6 @@ import { type ConfigFormat, configFormatOf, countChoices, diffConfig, IgnoredKey
 
 /** Path of the shared devtool configuration, the file declaring the environment. */
 export const SHARED_CONFIG_PATH = 'devtool/config.yml'
-
-const HEAD_BYTES = 64
 
 const MEDIA_TYPES: Record<string, string> = {
   '.yml': 'application/yaml',
@@ -377,6 +374,26 @@ export function canonicalBackendPath (filePath: string): string {
 }
 
 /**
+ * Finds the item a backend stores at a path. A path differing from the one of an item by its letter
+ * case or Unicode form only is refused, since a backend may store both as one file.
+ *
+ * @param items - The items of the environment.
+ * @param backend - The name of the backend.
+ * @param filePath - The path, in its canonical form.
+ * @returns The item, null when the backend stores no item there.
+ */
+export function itemStoredAt (items: EnvironmentItem[], backend: string, filePath: string): EnvironmentItem | null {
+  const folded = (value: string): string => value.normalize('NFKD').toUpperCase().toLowerCase()
+  const stored = items.filter(item => item.backend === backend)
+  const exact = stored.find(item => item.path === filePath)
+  const alias = exact ? undefined : stored.find(item => folded(item.path) === folded(filePath))
+  if (alias) {
+    throw new Error(`${filePath} names the item ${alias.path} in another letter case or Unicode form: write its path exactly`)
+  }
+  return exact ?? null
+}
+
+/**
  * Tells whether some tables of a database, or key groups of a Redis database, can be transferred
  * alone in a direction: never in a native archive pushed, nor in a native mariadb archive.
  *
@@ -413,27 +430,6 @@ export function sharedConfigItem (options: EnvironmentOptions): EnvironmentItem 
  */
 export async function listTables (item: Extract<EnvironmentItem, { kind: 'database' | 'redis' }>): Promise<string[]> {
   return item.kind === 'redis' ? listRedisGroups(item.url) : databaseEngine(item.engine).listTables(item)
-}
-
-/**
- * Reads the first bytes of a file, uncompressed when it is gzip-compressed.
- *
- * @param filePath - The file.
- * @param gzipped - Whether the file is gzip-compressed.
- * @returns Its first bytes, empty when it holds none or cannot be uncompressed.
- */
-async function readHead (filePath: string, gzipped: boolean): Promise<Buffer> {
-  const source = createReadStream(filePath, { end: gzipped ? undefined : HEAD_BYTES - 1 })
-  try {
-    for await (const chunk of gzipped ? transformed(source, createGunzip()) : source) {
-      return (chunk as Buffer).subarray(0, HEAD_BYTES)
-    }
-  } catch {
-    return Buffer.alloc(0)
-  } finally {
-    source.destroy()
-  }
-  return Buffer.alloc(0)
 }
 
 /**
@@ -595,7 +591,10 @@ export class Environment {
   }
 
   /**
-   * Replaces the local copy of an item, and the local data it holds, by the one of its backend.
+   * Replaces the local data an item holds by the copy of its backend, then its local copy once that
+   * data is restored: a restore that fails leaves the local copy and its synchronization record as
+   * they were. A synchronization record that cannot be written after a restore is reported in the
+   * result.
    *
    * @param selection - The item, the tables or key groups to restore, or the keys to take for a configuration file.
    * @returns What was done.
@@ -603,31 +602,57 @@ export class Environment {
   async pull (selection: EnvironmentSelection): Promise<TransferResult> {
     const { item, tables } = selection
     await this.assertAllowed(item, 'pull')
-    if (item.kind === 'file' && (selection.keys || await this.mergesWhole(item))) {
-      return this.pullKeys(item, selection.keys ?? null)
-    }
-
-    if (!(await this.download(item))) {
-      return { done: false, detail: `absent from ${item.backend}` }
-    }
-
     const localPath = localPathOf(this._options.folder, item.path)
-    await this.recordSync(item)
     if (item.kind === 'file') {
+      if (selection.keys || await this.mergesWhole(item)) {
+        return this.pullKeys(item, selection.keys ?? null)
+      }
+      if (!(await this.download(item))) {
+        return { done: false, detail: `absent from ${item.backend}` }
+      }
+      await this.recordSync(item)
       return { done: true, detail: localPath }
     }
+    if (item.kind === 'database' && tables !== null && !transfersParts(item, 'pull')) {
+      throw new Error(`${item.path} is a native ${item.engine} archive: pull the whole database, its tables cannot be restored one by one`)
+    }
 
+    const pulledPath = `${localPath}.${randomUUID()}.pull`
+    try {
+      if (!(await this.download(item, pulledPath))) {
+        return { done: false, detail: `absent from ${item.backend}` }
+      }
+      const result = await this.restore(item, pulledPath, tables)
+      await fs.rename(pulledPath, localPath)
+      return await this.recordSync(item).then(
+        () => result,
+        (error: unknown) => ({ ...result, detail: `${result.detail}, not recorded as synchronized: ${error instanceof Error ? error.message : String(error)}` })
+      )
+    } finally {
+      await fs.rm(pulledPath, { force: true })
+    }
+  }
+
+  /**
+   * Replaces the local data of an item by an archive of it.
+   *
+   * @param item - The database, bucket or Redis item.
+   * @param archivePath - The archive, which nothing else reads or writes.
+   * @param tables - The tables or key groups to restore, or null for the whole item.
+   * @returns What was done.
+   */
+  private async restore (item: Exclude<EnvironmentItem, { kind: 'file' }>, archivePath: string, tables: string[] | null): Promise<TransferResult> {
     if (item.kind === 'bucket' && item.format === 'native') {
-      return this.restoreBucketTar(item, localPath)
+      return this.restoreBucketTar(item, archivePath)
     }
 
     if (item.kind === 'bucket') {
-      const count = await restoreBucket(this.s3(), item.bucket, objectsOfArchive(readArchive(localPath)))
+      const count = await restoreBucket(this.s3(), item.bucket, objectsOfArchive(readArchive(archivePath)))
       return { done: true, detail: `${count} objects restored in ${item.bucket}` }
     }
 
     if (item.kind === 'redis') {
-      const records = readArchive(localPath)
+      const records = readArchive(archivePath)
       const first = await records.next()
       if (first.done || first.value.header.type !== 'redis') {
         throw new Error(`${item.path} is not a Redis archive`)
@@ -643,30 +668,23 @@ export class Environment {
       }
     }
 
-    return item.format === 'native' ? this.restoreNative(item, localPath, tables) : this.restoreDatabase(item, localPath, tables)
+    return item.format === 'native' ? this.restoreNative(item, archivePath, tables) : this.restoreDatabase(item, archivePath, tables)
   }
 
   /**
    * Replaces the objects of a bucket by those of a tar.gz archive, read whole first so that a
-   * truncated or corrupted archive leaves the bucket untouched; the bytes checked are those restored,
-   * from a private copy of the archive.
+   * truncated or corrupted archive leaves the bucket untouched.
    *
    * @param item - The bucket item.
-   * @param localPath - The archive.
+   * @param archivePath - The archive.
    * @returns What was done.
    */
-  private async restoreBucketTar (item: Extract<EnvironmentItem, { kind: 'bucket' }>, localPath: string): Promise<TransferResult> {
-    const copyPath = `${localPath}.${randomUUID()}.restore`
-    await fs.copyFile(localPath, copyPath)
-    try {
-      await checkTar(createReadStream(copyPath)).catch((error: unknown) => {
-        throw new Error(`${item.path} is not a complete tar.gz archive: ${error instanceof Error ? error.message : String(error)}`)
-      })
-      const count = await restoreBucket(this.s3(), item.bucket, objectsOfTar(createReadStream(copyPath)))
-      return { done: true, detail: `${count} objects restored in ${item.bucket}` }
-    } finally {
-      await fs.rm(copyPath, { force: true })
-    }
+  private async restoreBucketTar (item: Extract<EnvironmentItem, { kind: 'bucket' }>, archivePath: string): Promise<TransferResult> {
+    await checkTar(createReadStream(archivePath)).catch((error: unknown) => {
+      throw new Error(`${item.path} is not a complete tar.gz archive: ${error instanceof Error ? error.message : String(error)}`)
+    })
+    const count = await restoreBucket(this.s3(), item.bucket, objectsOfTar(createReadStream(archivePath)))
+    return { done: true, detail: `${count} objects restored in ${item.bucket}` }
   }
 
   /**
@@ -709,37 +727,20 @@ export class Environment {
   }
 
   /**
-   * Restores a local database from an archive of the engine's own tools, read whole first so that an
-   * archive of another engine, truncated or corrupted, leaves the database untouched; the bytes checked
-   * are those restored, from a private copy of the archive.
+   * Restores a local database from an archive of the engine's own tools; an archive the engine
+   * refuses, being of another engine, truncated or corrupted, leaves the database as it was.
    *
    * @param item - The database item.
-   * @param localPath - The archive.
+   * @param archivePath - The archive.
    * @param tables - The tables to restore, or null for the whole database.
    * @returns What was done.
    */
-  private async restoreNative (item: Extract<EnvironmentItem, { kind: 'database' }>, localPath: string, tables: string[] | null): Promise<TransferResult> {
+  private async restoreNative (item: Extract<EnvironmentItem, { kind: 'database' }>, archivePath: string, tables: string[] | null): Promise<TransferResult> {
     const engine = databaseEngine(item.engine)
-    const copyPath = `${localPath}.${randomUUID()}.restore`
-    await fs.copyFile(localPath, copyPath)
-    try {
-      if (!engine.isNativeHead(await readHead(copyPath, engine.nativeGzipped))) {
-        throw new Error(`${item.path} is not a native ${item.engine} archive`)
-      }
-      await engine.checkNative(item, createReadStream(copyPath)).catch((error: unknown) => {
-        throw new Error(`${item.path} is not a complete native ${item.engine} archive: ${error instanceof Error ? error.message : String(error)}`)
-      })
-
-      if (tables === null) {
-        await engine.reset(item)
-      } else {
-        assertKnownTables(tables, await engine.listTables(item), databaseNameOf(item))
-      }
-      await engine.restoreNative(item, () => createReadStream(copyPath), tables)
-      await engine.finish(item)
-    } finally {
-      await fs.rm(copyPath, { force: true })
+    if (tables !== null) {
+      assertKnownTables(tables, await engine.listTables(item), databaseNameOf(item))
     }
+    await engine.restoreNative(item, archivePath, tables)
 
     return { done: true, detail: tables === null ? `database restored in ${databaseNameOf(item)}` : `tables restored: ${tables.join(', ')}` }
   }

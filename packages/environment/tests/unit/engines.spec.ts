@@ -1,12 +1,15 @@
+import { spawnSync } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { Readable } from 'node:stream'
-import { gunzipSync, gzipSync } from 'node:zlib'
+import { gzipSync } from 'node:zlib'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { BackendContext, EnvironmentBackend } from '../../src/backends/backend.js'
-import { databaseEngine, splitPostgresName } from '../../src/engines.js'
-import { Environment, type EnvironmentItem } from '../../src/environment.js'
+import { assertDatabaseLessDump, databaseEngine, splitPostgresName } from '../../src/engines.js'
+
+const MAGIC = Buffer.from([0x6d, 0xe2, 0x99, 0x81])
+const TERMINATOR = Buffer.from([0xff, 0xff, 0xff, 0xff])
 
 let folder: string
 
@@ -17,6 +20,109 @@ let folder: string
 async function dockerCalls (): Promise<string[][]> {
   const log = await fs.readFile(path.join(folder, 'calls'), 'utf-8').catch(() => '')
   return log.split('\n').filter(line => line !== '').map(line => JSON.parse(line) as string[])
+}
+
+/**
+ * Gives the arguments a call passed to its script, after the script itself.
+ * @param call - The arguments of the call.
+ * @returns The arguments of the script.
+ */
+function scriptArguments (call: string[]): string[] {
+  return call.slice(call.indexOf('-c') + 3)
+}
+
+/**
+ * Gives the script a call ran.
+ * @param call - The arguments of the call.
+ * @returns The script.
+ */
+function scriptOf (call: string[]): string {
+  return call[call.indexOf('-c') + 1]
+}
+
+/**
+ * Builds a BSON document of string fields.
+ * @param fields - The fields.
+ * @returns The document.
+ */
+function bsonDocument (fields: Record<string, string>): Buffer {
+  const elements = Object.entries(fields).map(([name, value]) => {
+    const text = Buffer.from(`${value}\0`)
+    const length = Buffer.alloc(4)
+    length.writeInt32LE(text.length)
+    return Buffer.concat([Buffer.from([0x02]), Buffer.from(`${name}\0`), length, text])
+  })
+  const size = Buffer.alloc(4)
+  size.writeInt32LE(4 + elements.reduce((total, element) => total + element.length, 0) + 1)
+  return Buffer.concat([size, ...elements, Buffer.from([0])])
+}
+
+/**
+ * Builds the beginning of a `mongodump --archive --gzip` archive listing collections.
+ * @param collections - The collections, as `[database, collection]` pairs.
+ * @returns The gzip-compressed prelude.
+ */
+function mongodumpPrelude (collections: [string, string][]): Buffer {
+  return gzipSync(Buffer.concat([
+    MAGIC,
+    bsonDocument({ version: '0.1', server_version: '7.0.0' }),
+    ...collections.map(([db, collection]) => bsonDocument({ db, collection, metadata: '{}' })),
+    TERMINATOR
+  ]))
+}
+
+/**
+ * Writes an archive to a file.
+ * @param archive - The archive.
+ * @returns The path of the file.
+ */
+async function stored (archive: Buffer): Promise<string> {
+  const archivePath = path.join(folder, randomUUID())
+  await fs.writeFile(archivePath, archive)
+  return archivePath
+}
+
+/** What a script run outside its container did. */
+interface ScriptRun {
+  code: number | null
+  stderr: string
+  /** Each call of a fake command, as its name followed by its arguments. */
+  calls: string[]
+  /** The files the script left in its temporary folder. */
+  leftovers: string[]
+}
+
+/**
+ * Runs the script of a docker call outside any container, with fake commands in place of the tools
+ * of the engine, and temporary files made in a folder of their own; the database the call names is
+ * given to the script as in the container.
+ * @param call - The arguments of the docker call.
+ * @param input - The standard input of the script.
+ * @param commands - The shell body of each fake command, by name, run after the call is logged.
+ * @param env - The environment variables of the container.
+ * @returns What the script did.
+ */
+async function runScript (call: string[], input: string, commands: Record<string, string>, env: Record<string, string> = {}): Promise<ScriptRun> {
+  const bin = await fs.mkdtemp(path.join(folder, 'bin-'))
+  const temporary = await fs.mkdtemp(path.join(folder, 'tmp-'))
+  const log = path.join(bin, 'calls')
+  for (const [name, body] of Object.entries(commands)) {
+    await fs.writeFile(path.join(bin, name), `#!/bin/sh\necho "${name} $*" >> "${log}"\n${body}\n`, { mode: 0o755 })
+  }
+  await fs.writeFile(path.join(bin, 'mktemp'), `#!/bin/sh
+n=0
+while [ -e "$TMPDIR/tmp.$n" ]; do n=$((n + 1)); done
+if [ "$1" = -d ]; then mkdir "$TMPDIR/tmp.$n"; else : > "$TMPDIR/tmp.$n"; fi
+echo "$TMPDIR/tmp.$n"
+`, { mode: 0o755 })
+  const database = call.find(arg => arg.startsWith('ADT_DATABASE='))?.slice('ADT_DATABASE='.length)
+  const run = spawnSync('sh', ['-c', scriptOf(call), 'sh', ...scriptArguments(call)], {
+    input,
+    encoding: 'utf-8',
+    env: { PATH: `${bin}${path.delimiter}${process.env.PATH ?? ''}`, TMPDIR: temporary, ...(database === undefined ? {} : { ADT_DATABASE: database }), ...env }
+  })
+  const calls = await fs.readFile(log, 'utf-8').then(text => text.split('\n').filter(line => line !== ''), () => [])
+  return { code: run.status, stderr: run.stderr, calls, leftovers: await fs.readdir(temporary) }
 }
 
 beforeEach(async () => {
@@ -44,206 +150,308 @@ describe('splitPostgresName', () => {
   })
 })
 
-/**
- * Builds a BSON document of string and boolean fields.
- * @param fields - The fields.
- * @returns The document.
- */
-function bsonDocument (fields: Record<string, string | boolean>): Buffer {
-  const elements = Object.entries(fields).map(([name, value]) => {
-    if (typeof value === 'boolean') {
-      return Buffer.concat([Buffer.from([0x08]), Buffer.from(`${name}\0`), Buffer.from([value ? 1 : 0])])
-    }
-    const text = Buffer.from(`${value}\0`)
-    const length = Buffer.alloc(4)
-    length.writeInt32LE(text.length)
-    return Buffer.concat([Buffer.from([0x02]), Buffer.from(`${name}\0`), length, text])
-  })
-  const size = Buffer.alloc(4)
-  size.writeInt32LE(4 + elements.reduce((total, element) => total + element.length, 0) + 1)
-  return Buffer.concat([size, ...elements, Buffer.from([0])])
-}
+describe('mongodb native archives', () => {
+  const mongodb = databaseEngine('mongodb')
 
-const TERMINATOR = Buffer.from([0xff, 0xff, 0xff, 0xff])
-
-/**
- * Builds the uncompressed beginning of a `mongodump --archive` archive listing collections of a database.
- * @param db - The database the collections were dumped from.
- * @param collections - The collections.
- * @returns The magic number, the header and the list of collections.
- */
-function mongodumpPreludeBytes (db: string, collections: string[]): Buffer {
-  return Buffer.concat([
-    Buffer.from([0x6d, 0xe2, 0x99, 0x81]),
-    bsonDocument({ version: '0.1', server_version: '7.0.0' }),
-    ...collections.map(collection => bsonDocument({ db, collection, metadata: '{}' })),
-    TERMINATOR
-  ])
-}
-
-/**
- * Builds the beginning of a `mongodump --archive --gzip` archive listing collections of a database.
- * @param db - The database the collections were dumped from.
- * @param collections - The collections.
- * @returns The gzip-compressed prelude.
- */
-function mongodumpPrelude (db: string, collections: string[]): Buffer {
-  return gzipSync(mongodumpPreludeBytes(db, collections))
-}
-
-/**
- * Builds a whole `mongodump --archive --gzip` archive, one document per collection.
- * @param db - The database the collections were dumped from.
- * @param collections - The collections.
- * @returns The gzip-compressed archive.
- */
-function mongodumpArchive (db: string, collections: string[]): Buffer {
-  return gzipSync(Buffer.concat([
-    mongodumpPreludeBytes(db, collections),
-    ...collections.flatMap(collection => [
-      bsonDocument({ db, collection, EOF: false }), bsonDocument({ value: collection }), TERMINATOR,
-      bsonDocument({ db, collection, EOF: true }), TERMINATOR
-    ])
-  ]))
-}
-
-describe('database targets', () => {
-  it('passes the database of the item to the container, and nothing for the default one of the image', async () => {
-    const mongodb = databaseEngine('mongodb')
-    const archive = (): Readable => Readable.from([mongodumpPrelude('production', ['users', 'fs.users'])])
+  it('passes the database of the item to the container, and nothing for the one of the image', async () => {
+    const archive = await stored(mongodumpPrelude([['production', 'users']]))
     await mongodb.restoreNative({ container: 'mongo', database: 'catalog' }, archive, ['users'])
-    await mongodb.restoreNative({ container: 'mongo', database: null }, archive, null)
+    await mongodb.restoreNative({ container: 'mongo', database: null }, archive, ['users'])
 
-    const [named, unnamed] = await dockerCalls()
-    expect(named.slice(0, 4)).toEqual(['exec', '-i', '-e', 'ADT_DATABASE=catalog'])
-    expect(named[4]).toBe('mongo')
-    expect(named[7]).toContain('mongorestore --quiet --archive --gzip --drop')
-    expect(named.slice(-2)).toEqual(['--nsInclude', 'production.users'])
-    expect(unnamed.slice(0, 3)).toEqual(['exec', '-i', 'mongo'])
-    expect(unnamed[unnamed.length - 1]).toBe('sh')
+    const calls = await dockerCalls()
+    expect(calls[0].slice(0, 5)).toEqual(['exec', '-i', '-e', 'ADT_DATABASE=catalog', 'mongo'])
+    expect(calls[1].slice(0, 3)).toEqual(['exec', '-i', 'mongo'])
   })
 
-  it('accepts a whole mongodb archive and refuses a complete gzip stream holding an incomplete one', async () => {
-    const check = async (archive: Buffer): Promise<void> => databaseEngine('mongodb').checkNative({ container: 'mongo', database: null }, Readable.from([archive]))
-    await expect(check(mongodumpArchive('production', ['users', 'orders']))).resolves.toBeUndefined()
-    await expect(check(gzipSync(Buffer.from([0x6d, 0xe2, 0x99, 0x81])))).rejects.toThrow('no complete list of collections')
-    await expect(check(gzipSync(Buffer.concat([Buffer.from([0x6d, 0xe2, 0x99, 0x81]), TERMINATOR])))).rejects.toThrow('no header')
-    await expect(check(mongodumpPrelude('production', ['users']))).rejects.toThrow('production.users never ends')
-    const whole = gunzipSync(mongodumpArchive('production', ['users']))
-    await expect(check(gzipSync(whole.subarray(0, whole.length - 10)))).rejects.toThrow('not a mongodump archive: it ends in the middle of a document')
+  it('restores the exact collections asked into a database of its own first, then into the database, in one run of the container', async () => {
+    const prelude = mongodumpPrelude([['production', 'users'], ['production', 'fs.users'], ['production', 'orders']])
+    await mongodb.restoreNative({ container: 'mongo', database: 'catalog' }, await stored(prelude), ['users', 'orders'])
+
+    const [call, ...others] = await dockerCalls()
+    expect(others).toEqual([])
+    expect(scriptArguments(call)).toEqual([String(prelude.length), '0', '--nsInclude', 'production.users', '--nsInclude', 'production.orders'])
+    const script = scriptOf(call)
+    const steps = ['the archive was not received whole', 'restore_into "$STAGING" "$@"', '[ "$whole" = 0 ] || drop DB', 'restore_into "$DB" "$@"'].map(step => script.indexOf(step))
+    expect(steps).toEqual([...steps].sort((first, second) => first - second))
+    expect(steps[0]).toBeGreaterThan(0)
+    expect(script).toContain('--archive="$ARCHIVE"')
+  })
+
+  it('asks for the database to be emptied for a whole archive only', async () => {
+    const prelude = mongodumpPrelude([['production', 'users']])
+    await mongodb.restoreNative({ container: 'mongo', database: 'catalog' }, await stored(prelude), null)
+
+    expect((await dockerCalls()).map(scriptArguments)).toEqual([[String(prelude.length), '1']])
+  })
+
+  it('refuses an archive listing no collection, which would only empty the database', async () => {
+    const archive = await stored(mongodumpPrelude([]))
+    await expect(mongodb.restoreNative({ container: 'mongo', database: 'catalog' }, archive, null)).rejects.toThrow('the archive holds no collection')
     expect(await dockerCalls()).toEqual([])
   })
 
-  it('refuses a mongodb archive whose list of collections is corrupted, before running anything', async () => {
-    const header = Buffer.concat([Buffer.from([0x6d, 0xe2, 0x99, 0x81]), bsonDocument({ version: '0.1' })])
-    const zeroSize = gzipSync(Buffer.concat([header, Buffer.alloc(4)]))
-    const badLength = bsonDocument({ db: 'production', collection: 'users' })
-    badLength.writeInt32LE(1_000_000, 4 + 1 + 'db'.length + 1)
-    const outOfDocument = gzipSync(Buffer.concat([header, badLength]))
+  it('refuses to dump a database without collection, which mongodump would dump as an empty archive', async () => {
+    for await (const chunk of mongodb.dumpNative({ container: 'mongo', database: 'catalog' })) {
+      void chunk
+    }
+    const [call] = await dockerCalls()
+
+    const empty = await runScript(call, '', { mongosh: 'echo 0', mongodump: 'exit 0' })
+    expect([empty.code, empty.stderr.trim()]).toEqual([1, 'the database catalog has no collection: there is nothing to dump'])
+    expect(empty.calls.filter(line => line.startsWith('mongodump'))).toEqual([])
+
+    const filled = await runScript(call, '', { mongosh: 'echo 2', mongodump: 'exit 0' })
+    expect(filled.code).toBe(0)
+    expect(filled.calls.at(-1)).toBe('mongodump --quiet --archive --gzip --db catalog')
+  })
+
+  it('refuses an archive that is not gzip-compressed, naming the expected format', async () => {
+    await expect(mongodb.restoreNative({ container: 'mongo', database: 'catalog' }, await stored(Buffer.from('plain')), null)).rejects.toThrow('not a complete gzip-compressed archive')
+    expect(await dockerCalls()).toEqual([])
+  })
+
+  it('refuses an archive of several databases, whose collections would be mixed', async () => {
+    const archive = await stored(mongodumpPrelude([['east', 'users'], ['west', 'users']]))
+    await expect(mongodb.restoreNative({ container: 'mongo', database: 'catalog' }, archive, null)).rejects.toThrow('the archive holds several databases (east, west)')
+    await expect(mongodb.restoreNative({ container: 'mongo', database: 'catalog' }, archive, ['users'])).rejects.toThrow('several databases')
+    expect(await dockerCalls()).toEqual([])
+  })
+
+  it('refuses collections the archive does not hold', async () => {
+    const archive = await stored(mongodumpPrelude([['production', 'users']]))
+    await expect(mongodb.restoreNative({ container: 'mongo', database: 'catalog' }, archive, ['users', 'orders'])).rejects.toThrow('not in the archive: orders')
+    expect(await dockerCalls()).toEqual([])
+  })
+
+  it('refuses an archive whose list of collections is missing or corrupted', async () => {
+    const header = Buffer.concat([MAGIC, bsonDocument({ version: '0.1' })])
+    const farOverrun = bsonDocument({ db: 'production', collection: 'users' })
+    farOverrun.writeInt32LE(1_000_000, 4 + 1 + 'db'.length + 1)
     const smallOverrun = bsonDocument({ db: 'production', collection: 'users' })
     smallOverrun.writeInt32LE(smallOverrun.length - 8 - 2, 4 + 1 + 'db'.length + 1)
-    const overrunByFewBytes = gzipSync(Buffer.concat([header, smallOverrun]))
-    for (const archive of [zeroSize, outOfDocument, overrunByFewBytes]) {
-      await expect(databaseEngine('mongodb').restoreNative({ container: 'mongo', database: 'catalog' }, () => Readable.from([archive]), ['users'])).rejects.toThrow('not a mongodump archive')
+    const oversized = Buffer.alloc(4)
+    oversized.writeInt32LE(64 * 1024 * 1024)
+    const cases: [string, Buffer][] = [
+      ['not a mongodump archive', Buffer.from('-- MariaDB dump')],
+      ['no complete list of collections', MAGIC],
+      ['no header', Buffer.concat([MAGIC, TERMINATOR])],
+      ['one of its documents is corrupted', Buffer.concat([header, Buffer.alloc(4)])],
+      ['one of its documents is corrupted', Buffer.concat([header, oversized])],
+      ['one of its documents is corrupted', Buffer.concat([header, farOverrun])],
+      ['one of its documents is corrupted', Buffer.concat([header, smallOverrun])],
+      ['no complete list of collections', Buffer.concat([header, bsonDocument({ db: 'production', collection: 'users' })])]
+    ]
+    for (const [message, content] of cases) {
+      await expect(mongodb.restoreNative({ container: 'mongo', database: 'catalog' }, await stored(gzipSync(content)), null), message).rejects.toThrow(message)
     }
     expect(await dockerCalls()).toEqual([])
   })
+})
 
-  it('refuses to restore mongodb collections the archive does not hold, before running anything', async () => {
-    const archive = (): Readable => Readable.from([mongodumpPrelude('production', ['users'])])
-    await expect(databaseEngine('mongodb').restoreNative({ container: 'mongo', database: 'catalog' }, archive, ['users', 'orders'])).rejects.toThrow('not in the archive: orders')
-    expect(await dockerCalls()).toEqual([])
+describe('postgres native archives', () => {
+  const postgres = databaseEngine('postgres')
+
+  it('restores a whole archive into a database of its own, which then takes the place of the database', async () => {
+    await postgres.restoreNative({ container: 'pg', database: 'sales=2026' }, await stored(Buffer.from('archive')), null)
+
+    const [call, ...others] = await dockerCalls()
+    expect(others).toEqual([])
+    expect(call.slice(0, 5)).toEqual(['exec', '-i', '-e', 'ADT_DATABASE=sales=2026', 'pg'])
+    expect(scriptArguments(call)).toEqual(['7'])
+    const script = scriptOf(call)
+    const steps = ['the archive was not received whole', 'createdb -U "$POSTGRES_USER" "$STAGING"', `pg_restore -U "$POSTGRES_USER" -d "dbname='$STAGING'"`, 'ALTER DATABASE :"staging" RENAME TO :"target";'].map(step => script.indexOf(step))
+    expect(steps).toEqual([...steps].sort((first, second) => first - second))
+    expect(steps[0]).toBeGreaterThan(0)
+    expect(script).not.toContain('-d "$DB"')
   })
 
-  it('restores some postgres tables from a native archive as rows only, each schema and table paired', async () => {
-    await databaseEngine('postgres').restoreNative({ container: 'pg', database: null }, () => Readable.from([Buffer.from('archive')]), ['public.users', '"Sales"."Orders"'])
+  it('restores some tables as rows only, each schema and table paired, and repairs their sequences only', async () => {
+    await postgres.restoreNative({ container: 'pg', database: null }, await stored(Buffer.from('archive')), ['public.users', '"Sales"."Orders"'])
 
     const [call] = await dockerCalls()
-    expect(call.slice(call.indexOf('sh', 4) + 1)).toEqual([
-      'DELETE FROM public.users; DELETE FROM "Sales"."Orders";',
-      'public', 'users',
-      'Sales', 'Orders'
-    ])
-    const script = call.find(arg => arg.includes('pg_restore'))
+    const [size, before, after, ...pairs] = scriptArguments(call)
+    expect(size).toBe('7')
+    expect(before).toBe('DELETE FROM ONLY public.users; DELETE FROM ONLY "Sales"."Orders";')
+    expect(after).toContain(`SELECT unnest(ARRAY['public.users', '"Sales"."Orders"']::regclass[])::oid UNION SELECT i.inhparent FROM pg_inherits`)
+    expect(pairs).toEqual(['public', 'users', 'Sales', 'Orders'])
+    const script = scriptOf(call)
     expect(script).toContain('is not in the archive')
     expect(script).toContain('pg_restore -l -n "$1" -t "$2"')
     expect(script).toContain(`grep -E '^[0-9]+; [0-9]+ [0-9]+ TABLE DATA '`)
     expect(script).toContain('pg_restore --data-only -L')
   })
 
-  it('tells the native archives of each engine from those of the others', () => {
-    const heads = {
-      postgres: Buffer.from('PGDMP\u0001\u000e'),
-      mongodb: Buffer.from([0x6d, 0xe2, 0x99, 0x81, 0x00]),
-      mariadb: Buffer.from('/*M!999999\\- enable the sandbox mode */\n-- MariaDB dump')
+  it('names the database literally in every client call', async () => {
+    const target = { container: 'pg', database: 'sales=2026' }
+    await postgres.listTables(target)
+    for await (const chunk of postgres.dumpNative(target)) {
+      void chunk
     }
-    for (const engine of ['postgres', 'mongodb', 'mariadb'] as const) {
-      for (const [other, head] of Object.entries(heads)) {
-        expect(databaseEngine(engine).isNativeHead(head), `${engine} reading a ${other} archive`).toBe(engine === other)
-      }
+
+    for (const call of await dockerCalls()) {
+      expect(scriptOf(call)).toContain(`CONN="dbname='$(printf '%s' "$DB" | sed`)
+      expect(scriptOf(call)).toContain('-d "$CONN"')
     }
-    expect(databaseEngine('mariadb').isNativeHead(Buffer.from('-- MySQL dump 10.13'))).toBe(true)
-    expect([databaseEngine('postgres').nativeGzipped, databaseEngine('mongodb').nativeGzipped, databaseEngine('mariadb').nativeGzipped]).toEqual([false, true, true])
+  })
+})
+
+describe('postgres whole restore script', () => {
+  const pg = {
+    createdb: 'exit 0',
+    pg_restore: 'exit 0',
+    psql: 'cat > /dev/null; touch "$TMPDIR/../swapped"',
+    dropdb: 'case "$*" in *adt_replaced*) [ ! -e "$TMPDIR/../swapped" ] || exit 1 ;; esac'
+  }
+
+  it('fails, naming it, when the replaced database cannot be dropped', async () => {
+    await databaseEngine('postgres').restoreNative({ container: 'pg', database: 'sales' }, await stored(Buffer.from('archive')), null)
+    const [call] = await dockerCalls()
+
+    const run = await runScript(call, 'archive', pg)
+    expect(run.code).toBe(1)
+    expect(run.stderr).toMatch(/^the database was restored, but its former copy adt_replaced_\d+ could not be dropped: drop it by hand$/m)
+    expect(run.leftovers).toEqual([])
   })
 
-  it('refuses to restore some tables of a native mariadb archive', async () => {
-    await expect(databaseEngine('mariadb').restoreNative({ container: 'db', database: null }, () => Readable.from([]), ['users'])).rejects.toThrow('restores the whole database only')
+  it('changes nothing when the archive was not received whole', async () => {
+    await databaseEngine('postgres').restoreNative({ container: 'pg', database: 'sales' }, await stored(Buffer.from('archive')), null)
+    const [call] = await dockerCalls()
+
+    const run = await runScript(call, 'arch', pg)
+    expect([run.code, run.stderr.trim(), run.calls, run.leftovers]).toEqual([1, 'the archive was not received whole: nothing was changed', [], []])
+  })
+})
+
+describe('mariadb native archives', () => {
+  const mariadb = databaseEngine('mariadb')
+  const target = { container: 'db', database: 'shop' }
+
+  describe('restore script', () => {
+    const dump = '-- ARCHIVE DUMP\nCREATE TABLE t (id int);\n'
+    const probeLatin1 = 'printf \'latin1\\tlatin1_swedish_ci\\n\''
+    const probeMissing = 'echo "ERROR 1049 (42000) at line 1: Unknown database \'shop\'" >&2; exit 1'
+    let call: string[]
+
+    /**
+     * Runs the restore script with a fake server.
+     * @param behaviour - Shell commands of the fake server: `probe` answers the character set of the database, `save` dumps it, `grant`, `load` loads the archive, `putBack` loads the saved dump.
+     * @param input - The archive received.
+     * @returns What the script did.
+     */
+    async function restore (behaviour: { probe?: string, save?: string, grant?: string, load?: string, putBack?: string }, input = dump): Promise<ScriptRun> {
+      const mariadb = `case "$*" in
+  *@@character_set_database*) ${behaviour.probe ?? probeLatin1} ;;
+  *GRANT*) ${behaviour.grant ?? 'exit 0'} ;;
+  *"DROP DATABASE"*) exit 0 ;;
+  *) case "$(cat)" in *"ARCHIVE DUMP"*) ${behaviour.load ?? 'exit 0'} ;; *) ${behaviour.putBack ?? 'exit 0'} ;; esac ;;
+esac`
+      return runScript(call, input, { mariadb, 'mariadb-dump': `echo '-- SAVED DUMP'; ${behaviour.save ?? 'exit 0'}` }, { MARIADB_ROOT_PASSWORD: 'secret', MARIADB_USER: 'app' })
+    }
+
+    beforeEach(async () => {
+      await mariadb.restoreNative(target, await stored(gzipSync(dump)), null)
+      ;[call] = await dockerCalls()
+    })
+
+    it('saves the database, then recreates it with its character set and collation, grants it and loads the dump', async () => {
+      const run = await restore({})
+      expect([run.code, run.stderr, run.leftovers]).toEqual([0, '', []])
+      expect(run.calls).toEqual([
+        'mariadb -uroot -N -B -e USE `shop`; SELECT @@character_set_database, @@collation_database',
+        'mariadb-dump -uroot --single-transaction --routines --triggers --events shop',
+        'mariadb -uroot -e DROP DATABASE IF EXISTS `shop`; CREATE DATABASE `shop` CHARACTER SET latin1 COLLATE latin1_swedish_ci',
+        'mariadb -uroot -e GRANT ALL PRIVILEGES ON `shop`.* TO \'app\'@\'%\'',
+        'mariadb -uroot shop'
+      ])
+    })
+
+    it.each([
+      ['the dump', { load: 'exit 1' }],
+      ['the grant', { grant: 'exit 1' }]
+    ])('puts the saved database back when the server refuses %s', async (_step, behaviour) => {
+      const run = await restore(behaviour)
+      expect([run.code, run.stderr.trim(), run.leftovers]).toEqual([1, 'the restore was refused: the database was put back as it was', []])
+      expect(run.calls.at(-2)).toContain('CHARACTER SET latin1 COLLATE latin1_swedish_ci')
+    })
+
+    it('keeps the saved dump in the container when the database cannot be put back', async () => {
+      const run = await restore({ load: 'exit 1', putBack: 'exit 1' })
+      expect(run.code).toBe(1)
+      expect(run.stderr).toContain('the database could not be put back: its dump is kept in the container')
+      expect(run.leftovers).toHaveLength(1)
+    })
+
+    it('changes nothing when the database cannot be saved', async () => {
+      const run = await restore({ save: 'exit 1' })
+      expect([run.code, run.stderr.trim(), run.leftovers]).toEqual([1, 'the database could not be saved before its restore, so nothing was changed: repair it, or drop it to restore the archive into a new database', []])
+      expect(run.calls.some(line => line.includes('DROP DATABASE'))).toBe(false)
+    })
+
+    it('changes nothing when the server cannot tell whether the database exists', async () => {
+      const run = await restore({ probe: 'echo "ERROR 2002 (HY000): Can\'t connect to local server" >&2; exit 1' })
+      expect(run.code).toBe(1)
+      expect(run.stderr).toContain('the server could not tell whether the database exists: nothing was changed')
+      expect(run.calls).toHaveLength(1)
+    })
+
+    it('removes a database that did not exist when the dump is refused', async () => {
+      const run = await restore({ probe: probeMissing, load: 'exit 1' })
+      expect([run.code, run.stderr.trim(), run.leftovers]).toEqual([1, 'the restore was refused: the database, which did not exist, was removed', []])
+      expect(run.calls.some(line => line.startsWith('mariadb-dump'))).toBe(false)
+      expect(run.calls.at(-1)).toBe('mariadb -uroot -e DROP DATABASE IF EXISTS `shop`')
+    })
+
+    it('changes nothing when the dump was not received whole', async () => {
+      const run = await restore({}, dump.slice(0, 10))
+      expect([run.code, run.stderr.trim(), run.calls, run.leftovers]).toEqual([1, 'the archive was not received whole: nothing was changed', [], []])
+    })
+  })
+
+  it('refuses to restore some tables', async () => {
+    await expect(mariadb.restoreNative(target, await stored(gzipSync('-- dump')), ['users'])).rejects.toThrow('restores the whole database only')
     expect(await dockerCalls()).toEqual([])
   })
 
-  it('leaves a mariadb database untouched when its native archive is truncated', async () => {
+  it('refuses a truncated or uncompressed archive before reaching the container', async () => {
     const archive = gzipSync(`-- MariaDB dump\n${'INSERT INTO t VALUES (1);\n'.repeat(1000)}`)
-    const item: EnvironmentItem = { kind: 'database', path: 'api/db.sql.gz', backend: 'team', encryption: null, groups: { pull: null, push: null }, engine: 'mariadb', container: 'db', database: 'shop', format: 'native' }
-    const backend: EnvironmentBackend = {
-      list: async () => [],
-      download: async () => Readable.from([archive.subarray(0, archive.length - 40)]),
-      upload: async () => undefined,
-      remove: async () => undefined,
-      close: async () => undefined
-    }
-    const context: BackendContext = { resolve: async text => text, askSecret: async () => '', cacheDir: folder, configFolder: folder, auth: null }
-    const environment = new Environment(new Map([['team', backend]]), { folder, backends: [], defaultBackend: 'team', items: [item], configFiles: [], autoPulls: [], s3: null }, context)
-
-    await expect(environment.pull({ item, tables: null })).rejects.toThrow('api/db.sql.gz is not a complete native mariadb archive')
+    await expect(mariadb.restoreNative(target, await stored(archive.subarray(0, archive.length - 40)), null)).rejects.toThrow('not a complete gzip-compressed archive')
+    await expect(mariadb.restoreNative(target, await stored(Buffer.from('-- MariaDB dump\n')), null)).rejects.toThrow('not a complete gzip-compressed archive')
     expect(await dockerCalls()).toEqual([])
   })
 
   it.each([
-    ['postgres', Buffer.from('-- plain SQL dump')],
-    ['mongodb', gzipSync('-- MariaDB dump 10.19')],
-    ['mariadb', gzipSync(Buffer.from([0x6d, 0xe2, 0x99, 0x81, 0x00, 0x01]))]
-  ] as const)('leaves a %s database untouched when the pulled file is not one of its native archives', async (engine, content) => {
-    const item: EnvironmentItem = { kind: 'database', path: 'api/db.dump', backend: 'team', encryption: null, groups: { pull: null, push: null }, engine, container: 'db', database: 'shop', format: 'native' }
-    const backend: EnvironmentBackend = {
-      list: async () => [],
-      download: async () => Readable.from([content]),
-      upload: async () => undefined,
-      remove: async () => undefined,
-      close: async () => undefined
-    }
-    const context: BackendContext = { resolve: async text => text, askSecret: async () => '', cacheDir: folder, configFolder: folder, auth: null }
-    const environment = new Environment(new Map([['team', backend]]), { folder, backends: [], defaultBackend: 'team', items: [item], configFiles: [], autoPulls: [], s3: null }, context)
-
-    await expect(environment.pull({ item, tables: null })).rejects.toThrow(`api/db.dump is not a native ${engine} archive`)
+    'USE `shop`;',
+    'use shop;',
+    '  USE `shop`;',
+    'CREATE DATABASE /*!32312 IF NOT EXISTS*/ `shop`;',
+    '/*!40000 DROP DATABASE IF EXISTS `shop`*/;'
+  ])('refuses a dump naming its own database with %s', async statement => {
+    const dump = `-- MariaDB dump\n${'-- filler\n'.repeat(5000)}${statement}\nCREATE TABLE t (id int);\n`
+    await expect(mariadb.restoreNative(target, await stored(gzipSync(dump)), null)).rejects.toThrow('the dump names its own database')
     expect(await dockerCalls()).toEqual([])
   })
 
-  it.each([
-    ['a list of collections whose data never comes', mongodumpPrelude('production', ['users'])],
-    ['no header', gzipSync(Buffer.concat([Buffer.from([0x6d, 0xe2, 0x99, 0x81]), TERMINATOR]))]
-  ])('leaves a mongodb database untouched when the pulled archive is complete gzip but a mongodump with %s', async (_case, content) => {
-    const item: EnvironmentItem = { kind: 'database', path: 'api/db.archive.gz', backend: 'team', encryption: null, groups: { pull: null, push: null }, engine: 'mongodb', container: 'mongo', database: 'shop', format: 'native' }
-    const backend: EnvironmentBackend = {
-      list: async () => [],
-      download: async () => Readable.from([content]),
-      upload: async () => undefined,
-      remove: async () => undefined,
-      close: async () => undefined
-    }
-    const context: BackendContext = { resolve: async text => text, askSecret: async () => '', cacheDir: folder, configFolder: folder, auth: null }
-    const environment = new Environment(new Map([['team', backend]]), { folder, backends: [], defaultBackend: 'team', items: [item], configFiles: [], autoPulls: [], s3: null }, context)
+  it('accepts statements that only look like a database statement inside a line', async () => {
+    const dump = `-- MariaDB dump\nINSERT INTO t VALUES ('USE \`shop\`;'), ('CREATE DATABASE x');\nCREATE TABLE user_agents (id int);\n`
+    await mariadb.restoreNative(target, await stored(gzipSync(dump)), null)
+    expect(await dockerCalls()).toHaveLength(1)
+  })
 
-    await expect(environment.pull({ item, tables: null })).rejects.toThrow('api/db.archive.gz is not a complete native mongodb archive')
-    expect(await dockerCalls()).toEqual([])
+  it('leaves alone the body of a routine, which may drop a database of its own', async () => {
+    const routine = 'DELIMITER ;;\nCREATE PROCEDURE cleanup()\nBEGIN\n  /*\n  Use this to clean up.\n  */\nDROP DATABASE IF EXISTS scratch;\nEND ;;\nDELIMITER ;\n'
+    const accepted = `-- dump\n${routine}CREATE TABLE t (id int);\n`
+    await expect(assertDatabaseLessDump(Readable.from([Buffer.from(accepted)]))).resolves.toBe(accepted.length)
+    await expect(assertDatabaseLessDump(Readable.from([Buffer.from(`-- dump\n${routine}USE \`shop\`;\n`)]))).rejects.toThrow('the dump names its own database')
+  })
+
+  it('finds a database statement wherever the dump is cut into chunks', async () => {
+    const refused = Buffer.from(`-- MariaDB dump\n${'x'.repeat(100)}\nUSE \`shop\`;\nCREATE TABLE t (id int);`)
+    const accepted = Buffer.from(`-- MariaDB dump\n${'x'.repeat(100)} USE \`shop\`;\nINSERT INTO t VALUES ('\\nUSE x');\nCREATE TABLE user_agents (id int)`)
+    for (let cut = 0; cut <= refused.length; cut += 1) {
+      await expect(assertDatabaseLessDump(Readable.from([refused.subarray(0, cut), refused.subarray(cut)])), `cut at ${cut}`).rejects.toThrow('the dump names its own database (USE `shop`;)')
+    }
+    for (let cut = 0; cut <= accepted.length; cut += 1) {
+      await expect(assertDatabaseLessDump(Readable.from([accepted.subarray(0, cut), accepted.subarray(cut)])), `cut at ${cut}`).resolves.toBe(accepted.length)
+    }
   })
 })

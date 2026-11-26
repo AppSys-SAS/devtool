@@ -139,6 +139,10 @@ loaded, so tables can come back in any order.
 
 A pull drops and recreates the database. A push dumps it, then sends the archive.
 
+A pull of a database, a bucket or a Redis database replaces the local copy of the archive, and records
+the item as synchronized, only once its data is restored: after a restore that fails, the item still
+shows behind its backend.
+
 ### Several databases in one container
 
 The database is the one the image creates (`POSTGRES_DB`, `MARIADB_DATABASE`,
@@ -172,14 +176,33 @@ environment:
     - { path: shop/catalog.archive.gz, engine: mongodb, container: mongo, database: catalog, format: native }
 ```
 
-A MongoDB archive dumped from a database of another name is restored into the database of the item.
-A pulled file is read whole before the database is touched: an archive of another engine, truncated
-or corrupted, is refused and the database stays as it is.
+A native archive holds one database, dumped as the table shows: a MongoDB archive of several databases,
+or a MariaDB dump made with `--databases`, is refused. Dumped from a database of another name, a
+MongoDB or PostgreSQL archive is restored into the database of the item.
 
-A pull of some tables restores only those: their collections replaced for `mongodb`; their rows
-replaced in one transaction for `postgres`, every table having to be in the archive. A native `mariadb`
-archive is a SQL script, restored whole only. A push always dumps the whole database: the tables of a
-native archive cannot be replaced one by one.
+MongoDB dumps a database that does not exist as an empty archive: a push of a `mongodb` database
+without collection is refused (`the database <name> has no collection`), and so is a pull of an archive
+listing no collection.
+
+The archive is sent whole into the container before anything changes, then restored there by the tool
+of the engine: a pull interrupted while the archive is sent changes nothing. An archive the engine
+refuses, because it is of another engine, truncated or corrupted, leaves the database as it was:
+
+- `postgres` restores the archive into a new database, which takes the place of the database only once
+  wholly restored. Sequences keep the values of the archive.
+- `mongodb` restores the archive into a temporary database first, then into the database: a restore
+  takes twice the time, and the room of one more copy of the database meanwhile.
+- `mariadb` saves the database first, and puts it back when the server refuses a step of the restore.
+  Should it not be put back either, the error names the file of the container keeping its dump. The
+  database keeps its character set and collation. A database `mariadb-dump` cannot save, such as one
+  holding a view of a dropped table, is not replaced (`the database could not be saved before its
+  restore`): repair it, or drop it to restore the archive into a new database.
+
+The tables you can choose are those holding rows: the partitions of a partitioned `postgres` table,
+not the table itself. A pull of some tables restores only those, every one having to be in the archive: their collections
+replaced for `mongodb`; their rows replaced in one transaction for `postgres`, the sequences they own,
+or that the tables they inherit from or are partitions of own, set after their highest value. A native `mariadb` archive is a SQL script, restored whole only. A push
+always dumps the whole database: the tables of a native archive cannot be replaced one by one.
 
 ## Buckets and S3
 
@@ -190,14 +213,18 @@ environment:
   s3: { endpoint: "http://localhost:9000", accessKeyId: minioadmin, secretAccessKey: minioadmin }
 ```
 
-A bucket is saved as a snapshot, media types kept, and emptied before a pull restores it. `s3` tells
-where your local S3 server is; `region` defaults to `us-east-1`.
+A bucket is saved as a snapshot, media types kept. A pull stores every object of the snapshot, then
+deletes the objects the bucket held before and the snapshot does not hold; an object the server refuses
+to delete fails the pull, naming it. A key an S3 server could store under another key or refuse,
+starting with `/` or holding an empty, `.` or `..` segment, is refused by a push and by a pull. `s3` tells where your local S3 server is;
+`region` defaults to `us-east-1`.
 
 With `format: native`, the snapshot is a `tar.gz` of the objects, the path of each file in the archive
 being its key, without the `./` the tar command writes before it. A pull reads the whole archive first,
-so a truncated or corrupted one leaves the bucket as it is, then empties the bucket and stores every
-file with the media type of its extension; a push writes the objects of the bucket to the archive, each
-behind `./`, as `tar -czf uploads.tar.gz -C <folder> .` does.
+so a truncated or corrupted one leaves the bucket as it is, then stores every file with the media type
+of its extension; a push writes the objects of the bucket to the archive, each behind `./`, as
+`tar -czf uploads.tar.gz -C <folder> .` does. Folders of the archive are skipped; links, which have no
+object to become, are refused.
 
 ```yaml [config.yml]
 environment:
@@ -285,9 +312,9 @@ devtool env pull api/db.gz:public.user,public.session
 devtool env push -i                       # choose items and tables
 ```
 
-- `devtool env pull [targets...]` replaces the local copies by those of their backends, then restores
-  the databases, buckets and Redis data they hold. It asks before replacing local data, unless you pass
-  `--yes`.
+- `devtool env pull [targets...]` restores the databases, buckets and Redis data from the copies of
+  their backends, then replaces the local copies, and replaces the local configuration files. It asks
+  before replacing local data, unless you pass `--yes`.
 - `devtool env push [targets...]` dumps the local databases, buckets and Redis data, then sends the local
   copies to their backends. You need write rights on them.
 - A target is a path, tables of a database (`api/db.gz:public.user,public.session`) or key groups of a
@@ -435,6 +462,10 @@ Environment page shows the error and `devtool env` stops.
 - `invalid groups of <path> in the environment: ...`: `pull` and `push` take a non-empty list of groups,
   or `false`.
 
-When a transfer is refused, the item reports why: `<direction> is disabled`, `<direction> needs one of
-the groups <groups>` (followed by `sign in with devtool login` when nobody is signed in), or
-`... is a native archive: push the whole database` for a push of some tables of a native archive.
+When a transfer is refused, the item reports why:
+
+- `<direction> is disabled`;
+- `<direction> needs one of the groups <groups>`, followed by `sign in with devtool login` when nobody
+  is signed in;
+- `... is a native archive: push the whole database`, for a push of some tables of a native archive;
+- `... is a native mariadb archive: pull the whole database`, for a pull of some of its tables.

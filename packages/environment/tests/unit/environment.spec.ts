@@ -1,7 +1,7 @@
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { canonicalBackendPath, type EnvironmentItem, type EnvironmentOptions, overwritesLocalData, parseTargets, readEnvironmentOptions, SHARED_CONFIG_PATH, transfersParts } from '../../src/environment.js'
+import { canonicalBackendPath, type EnvironmentItem, type EnvironmentOptions, itemStoredAt, overwritesLocalData, parseTargets, readEnvironmentOptions, SHARED_CONFIG_PATH, transfersParts } from '../../src/environment.js'
 
 const open = { groups: { pull: null, push: null } }
 const fileItem: EnvironmentItem = { kind: 'file', path: 'api/config.yml', backend: null, encryption: null, ...open, ignore: null }
@@ -581,6 +581,31 @@ describe('canonicalBackendPath', () => {
     for (const spelling of ['', '.', './', '..', '../shop/orders.gz', 'shop/../../orders.gz']) {
       expect(() => canonicalBackendPath(spelling)).toThrow('is not a path inside the backend')
     }
+  })
+})
+
+describe('itemStoredAt', () => {
+  const items = [{ ...databaseItem, backend: 'team' }, { ...fileItem, backend: 'archive' }]
+
+  it('finds the item a backend stores at a path, and none at another path or on another backend', () => {
+    expect(itemStoredAt(items, 'team', 'api/db.gz')).toBe(items[0])
+    expect(itemStoredAt(items, 'team', 'api/other.gz')).toBeNull()
+    expect(itemStoredAt(items, 'team', 'api/config.yml')).toBeNull()
+  })
+
+  it('refuses a path naming an item in another letter case or Unicode form, which a backend may store as the same file', () => {
+    expect(() => itemStoredAt(items, 'team', 'API/db.gz')).toThrow('API/db.gz names the item api/db.gz in another letter case or Unicode form: write its path exactly')
+    const aliases: [string, string][] = [
+      ['api/café.gz', 'api/café.gz'],
+      ['api/straße.gz', 'api/strasse.gz'],
+      ['api/ſecret.gz', 'api/secret.gz'],
+      ['api/οδος.gz', 'api/οδοσ.gz'],
+      ['api/ﬁle.gz', 'api/file.gz']
+    ]
+    for (const [declared, written] of aliases) {
+      expect(() => itemStoredAt([{ ...databaseItem, backend: 'team', path: declared }], 'team', written), written).toThrow('write its path exactly')
+    }
+    expect(itemStoredAt([...items, { ...databaseItem, backend: 'team', path: 'API/db.gz' }], 'team', 'API/db.gz')?.path).toBe('API/db.gz')
   })
 })
 
