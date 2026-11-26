@@ -4,12 +4,13 @@ import path from 'node:path'
 import { Readable } from 'node:stream'
 import { gzipSync } from 'node:zlib'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { BackendContext, EnvironmentBackend } from '../../src/backends/backend.js'
+import type { BackendContext, EnvironmentBackend, RemoteFile } from '../../src/backends/backend.js'
 import { Environment, type EnvironmentItem } from '../../src/environment.js'
-import { readSyncJournal } from '../../src/sync-journal.js'
+import { readSyncJournal, type SyncRecord, writeSyncRecord } from '../../src/sync-journal.js'
 
 const UPDATED_AT = new Date('2026-01-01T00:00:00Z')
 const ITEM_PATH = 'api/db.dump'
+const PREVIOUS_RECORD: SyncRecord = { localUpdatedAt: new Date('2025-06-01T00:00:00Z'), remoteUpdatedAt: new Date('2025-06-01T00:00:00Z'), backend: 'team', remoteVersion: 'v1' }
 const open = { backend: 'team', encryption: null, groups: { pull: null, push: null } }
 const postgresItem: EnvironmentItem = { kind: 'database', path: ITEM_PATH, ...open, engine: 'postgres', container: 'db', database: null, format: 'native' }
 const mariadbItem: EnvironmentItem = { ...postgresItem, engine: 'mariadb' }
@@ -24,7 +25,7 @@ let downloads: number
  * @param listing - Lists the files of the backend.
  * @returns The environment.
  */
-function environmentOf (item: EnvironmentItem, archive: Buffer, listing?: () => Promise<never>): Environment {
+function environmentOf (item: EnvironmentItem, archive: Buffer, listing?: () => Promise<RemoteFile[]>): Environment {
   const backend: EnvironmentBackend = {
     list: listing ?? (async () => [{ path: item.path, size: archive.length, updatedAt: UPDATED_AT, version: 'v2' }]),
     download: async () => {
@@ -67,6 +68,7 @@ beforeEach(async () => {
   await fakeDocker(`cat "${path.join(folder, 'env', 'api', 'db.dump')}" > "${path.join(folder, 'seen')}"`)
   vi.stubEnv('PATH', `${path.join(folder, 'bin')}${path.delimiter}${process.env.PATH ?? ''}`)
   vi.stubEnv('ADT_CONFIG_FOLDER', folder)
+  await writeSyncRecord(ITEM_PATH, PREVIOUS_RECORD)
 })
 
 afterEach(async () => {
@@ -88,7 +90,7 @@ describe('pull of an item holding local data', () => {
     await expect(environmentOf(postgresItem, Buffer.from('new archive')).pull({ item: postgresItem, tables: null })).rejects.toThrow('does not appear to be a valid archive')
 
     expect(await localState()).toEqual({ files: ['db.dump'], copy: 'previous copy' })
-    expect(await readSyncJournal()).toEqual(new Map())
+    expect((await readSyncJournal()).get(ITEM_PATH)).toEqual(PREVIOUS_RECORD)
   })
 
   it.each<[string, EnvironmentItem, Buffer, string]>([
@@ -99,7 +101,7 @@ describe('pull of an item holding local data', () => {
     await expect(environmentOf(item, archive).pull({ item, tables: null })).rejects.toThrow(message)
 
     expect(await localState()).toEqual({ files: ['db.dump'], copy: 'previous copy' })
-    expect(await readSyncJournal()).toEqual(new Map())
+    expect((await readSyncJournal()).get(ITEM_PATH)).toEqual(PREVIOUS_RECORD)
   })
 
   it('reports a restore whose synchronization cannot be recorded, the local copy replaced', async () => {
@@ -108,6 +110,24 @@ describe('pull of an item holding local data', () => {
 
     expect(result).toEqual({ done: true, detail: 'database restored in db, not recorded as synchronized: backend unreachable' })
     expect(await localState()).toEqual({ files: ['db.dump'], copy: 'new archive' })
+    expect((await readSyncJournal()).get(ITEM_PATH)).toEqual(PREVIOUS_RECORD)
+  })
+
+  it('does not record as synchronized a copy of the backend that changed during the pull', async () => {
+    const versions = ['v2', 'v3']
+    const listing = async (): Promise<RemoteFile[]> => [{ path: ITEM_PATH, size: 11, updatedAt: UPDATED_AT, version: versions.shift() ?? 'v3' }]
+    const result = await environmentOf(postgresItem, Buffer.from('new archive'), listing).pull({ item: postgresItem, tables: null })
+
+    expect(result).toEqual({ done: true, detail: 'database restored in db, not recorded as synchronized: the copy of team changed during the pull: pull again' })
+    expect((await readSyncJournal()).get(ITEM_PATH)).toEqual(PREVIOUS_RECORD)
+  })
+
+  it('reports what the restore could not clean up once the database was restored', async () => {
+    await fakeDocker('echo "its former copy adt_replaced_0123 could not be dropped: drop it by hand"')
+    const result = await environmentOf(postgresItem, Buffer.from('new archive')).pull({ item: postgresItem, tables: null })
+
+    expect(result).toEqual({ done: true, detail: 'database restored in db, but its former copy adt_replaced_0123 could not be dropped: drop it by hand' })
+    expect((await readSyncJournal()).get(ITEM_PATH)).toMatchObject({ remoteVersion: 'v2' })
   })
 
   it('refuses some tables of an archive restoring the whole database only, before downloading it', async () => {

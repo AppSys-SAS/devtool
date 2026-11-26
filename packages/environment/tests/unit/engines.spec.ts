@@ -85,6 +85,7 @@ async function stored (archive: Buffer): Promise<string> {
 /** What a script run outside its container did. */
 interface ScriptRun {
   code: number | null
+  stdout: string
   stderr: string
   /** Each call of a fake command, as its name followed by its arguments. */
   calls: string[]
@@ -122,7 +123,7 @@ echo "$TMPDIR/tmp.$n"
     env: { PATH: `${bin}${path.delimiter}${process.env.PATH ?? ''}`, TMPDIR: temporary, ...(database === undefined ? {} : { ADT_DATABASE: database }), ...env }
   })
   const calls = await fs.readFile(log, 'utf-8').then(text => text.split('\n').filter(line => line !== ''), () => [])
-  return { code: run.status, stderr: run.stderr, calls, leftovers: await fs.readdir(temporary) }
+  return { code: run.status, stdout: run.stdout, stderr: run.stderr, calls, leftovers: await fs.readdir(temporary) }
 }
 
 beforeEach(async () => {
@@ -214,6 +215,12 @@ describe('mongodb native archives', () => {
     const archive = await stored(mongodumpPrelude([['east', 'users'], ['west', 'users']]))
     await expect(mongodb.restoreNative({ container: 'mongo', database: 'catalog' }, archive, null)).rejects.toThrow('the archive holds several databases (east, west)')
     await expect(mongodb.restoreNative({ container: 'mongo', database: 'catalog' }, archive, ['users'])).rejects.toThrow('several databases')
+    expect(await dockerCalls()).toEqual([])
+  })
+
+  it.each(['mongodb', 'postgres'] as const)('refuses an empty list of tables in a %s archive, which would select every table', async name => {
+    const archive = await stored(mongodumpPrelude([['production', 'users']]))
+    await expect(databaseEngine(name).restoreNative({ container: 'db', database: 'catalog' }, archive, [])).rejects.toThrow('no table chosen')
     expect(await dockerCalls()).toEqual([])
   })
 
@@ -325,11 +332,27 @@ describe('postgres whole restore script', () => {
     expect(run.calls.filter(line => !line.startsWith('createdb'))).toEqual([])
   })
 
-  it('fails, naming it, when the replaced database cannot be dropped', async () => {
+  it('succeeds once the database is replaced, reporting a former copy it cannot drop', async () => {
     const run = await runScript(call, 'archive', pg)
-    expect(run.code).toBe(1)
-    expect(run.stderr).toMatch(/^the database was restored, but its former copy adt_replaced_[0-9a-f]{16} could not be dropped: drop it by hand$/m)
+    expect(run.code).toBe(0)
+    expect(run.stdout.trim()).toMatch(/^its former copy adt_replaced_[0-9a-f]{16} could not be dropped: drop it by hand$/)
     expect(run.leftovers).toEqual([])
+  })
+
+  it('applies the privileges the archive grants, once its objects are restored and before the swap', async () => {
+    const run = await runScript(call, 'archive', {
+      ...pg,
+      pg_restore: 'case "$*" in "-l "*) echo "9; 0 0 ACL public TABLE users postgres" ;; *"-L "*) echo "GRANT SELECT ON TABLE public.users TO reader;" ;; esac'
+    })
+    expect(run.code).toBe(0)
+    const steps = run.calls.map(line => line.split(' ').slice(0, 2).join(' '))
+    expect(steps).toEqual(['createdb -U', 'pg_restore -U', 'pg_restore -l', 'pg_restore -L', 'psql -U', 'psql -U', 'dropdb -U'])
+    expect(run.calls[3]).toMatch(/^pg_restore -L \S+\.grants -f - /)
+  })
+
+  it('reports nothing when the former copy is dropped', async () => {
+    const run = await runScript(call, 'archive', { ...pg, dropdb: 'exit 0' })
+    expect([run.code, run.stdout]).toEqual([0, ''])
   })
 
   it('changes nothing when the archive was not received whole', async () => {
@@ -340,9 +363,10 @@ describe('postgres whole restore script', () => {
 
 describe('mongodb restore script', () => {
   const received = (restore: string[]): string => 'x'.repeat(Number(scriptArguments(restore)[0]))
-  const mongo = (exists: boolean): Record<string, string> => ({
-    mongosh: `case "$*" in *getDBNames*) exit ${exists ? 1 : 0} ;; esac`,
-    mongorestore: 'exit 0'
+  const mongo = (behaviour: { exists?: boolean, save?: string, load?: string, putBack?: string } = {}): Record<string, string> => ({
+    mongosh: `case "$*" in *getDBNames*) exit ${behaviour.exists === true ? 1 : 0} ;; esac`,
+    mongodump: behaviour.save ?? 'for arg; do case "$arg" in --archive=*) : > "${arg#--archive=}" ;; esac; done',
+    mongorestore: `case "$*" in *"--nsTo catalog."*) ${behaviour.load ?? 'exit 0'} ;; *"--nsTo adt_staging_"*) exit 0 ;; *) ${behaviour.putBack ?? 'exit 0'} ;; esac`
   })
   let call: string[]
 
@@ -351,18 +375,45 @@ describe('mongodb restore script', () => {
     ;[call] = await dockerCalls()
   })
 
-  it('restores into a database of a new random name first, then empties and restores the database', async () => {
-    const run = await runScript(call, received(call), mongo(false))
+  it('restores into a database of a new random name first, then saves, empties and restores the database, stopping at the first error', async () => {
+    const run = await runScript(call, received(call), mongo())
     const staging = /--nsTo (adt_staging_[0-9a-f]{16})\.\$coll\$/.exec(run.calls.join('\n'))?.[1]
 
     expect([run.code, run.leftovers]).toEqual([0, []])
     expect(staging).toBeDefined()
-    expect(run.calls.map(line => line.split(' ')[0])).toEqual(['mongosh', 'mongorestore', 'mongosh', 'mongorestore', 'mongosh'])
-    expect(run.calls[3]).toContain('--nsTo catalog.$coll$')
+    expect(run.calls.map(line => line.split(' ')[0])).toEqual(['mongosh', 'mongorestore', 'mongodump', 'mongosh', 'mongorestore', 'mongosh'])
+    expect(run.calls[2]).toMatch(/^mongodump --quiet --archive=\S+\.saved --gzip --db catalog$/)
+    expect(run.calls[4]).toContain('--nsTo catalog.$coll$')
+    expect(run.calls.filter(line => line.startsWith('mongorestore')).every(line => line.includes('--stopOnError'))).toBe(true)
+  })
+
+  it('puts the saved database back when its restore fails', async () => {
+    const run = await runScript(call, received(call), mongo({ load: 'exit 1' }))
+    expect([run.code, run.stderr.trim(), run.leftovers]).toEqual([1, 'the restore was refused: the database was put back as it was', []])
+    expect(run.calls.at(-2)).toMatch(/^mongorestore --archive=\S+\.saved --gzip --stopOnError$/)
+  })
+
+  it('keeps the saved dump in the container when the database cannot be put back', async () => {
+    const run = await runScript(call, received(call), mongo({ load: 'exit 1', putBack: 'exit 1' }))
+    expect(run.code).toBe(1)
+    expect(run.stderr).toContain('the database could not be put back: its dump is kept in the container')
+    expect(run.leftovers).toHaveLength(1)
+  })
+
+  it('changes nothing when the database cannot be saved', async () => {
+    const run = await runScript(call, received(call), mongo({ save: 'exit 1' }))
+    expect([run.code, run.stderr.trim(), run.leftovers]).toEqual([1, 'the database could not be saved before its restore: nothing was changed', []])
+    expect(run.calls.some(line => line.includes('--nsTo catalog.'))).toBe(false)
+  })
+
+  it('reports a temporary database it cannot drop, the database restored', async () => {
+    const run = await runScript(call, received(call), { ...mongo(), mongosh: 'case "$*" in *getDBNames*) exit 0 ;; *STAGING*) exit 1 ;; esac' })
+    expect(run.code).toBe(0)
+    expect(run.stdout.trim()).toMatch(/^the temporary database adt_staging_[0-9a-f]{16} could not be dropped: drop it by hand$/)
   })
 
   it('drops nothing when a database of that name already exists', async () => {
-    const run = await runScript(call, received(call), mongo(true))
+    const run = await runScript(call, received(call), mongo({ exists: true }))
     expect(run.code).toBe(1)
     expect(run.stderr).toMatch(/^the database adt_staging_[0-9a-f]{16} already exists: nothing was changed, try again$/m)
     expect(run.calls).toHaveLength(1)
@@ -456,6 +507,11 @@ esac`
 
   it('refuses to restore some tables', async () => {
     await expect(mariadb.restoreNative(target, await stored(gzipSync('-- dump')), ['users'])).rejects.toThrow('restores the whole database only')
+    expect(await dockerCalls()).toEqual([])
+  })
+
+  it('refuses an archive holding an empty dump before reaching the container', async () => {
+    await expect(mariadb.restoreNative(target, await stored(gzipSync('')), null)).rejects.toThrow('the archive holds an empty dump')
     expect(await dockerCalls()).toEqual([])
   })
 

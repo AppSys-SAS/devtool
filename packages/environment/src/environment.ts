@@ -5,7 +5,7 @@ import path from 'node:path'
 import type { S3Client } from '@aws-sdk/client-s3'
 import { mergeTransferGroups, OPEN_ACCESS, type TransferAccess, type TransferDirection, TransferGate, readTransferGroups } from './access.js'
 import { ArchiveWriter, readArchive, type RecordHeader } from './archive.js'
-import { type BackendContext, type BackendOptions, encrypted, EncryptionSecret, type EncryptionSettings, type EnvironmentBackend, readBackends, readEncryption } from './backends/index.js'
+import { type BackendContext, type BackendOptions, encrypted, EncryptionSecret, type EncryptionSettings, type EnvironmentBackend, readBackends, readEncryption, type RemoteFile } from './backends/index.js'
 import { plainLengthOf } from './backends/encryption.js'
 import { checkTar, createS3Client, objectsOfArchive, objectsOfTar, restoreBucket, type S3Options, snapshotBucket, snapshotBucketTar } from './buckets.js'
 import { defaultEnvironmentFolder, localPathOf, writeLocalFile } from './directory.js'
@@ -264,8 +264,12 @@ export function readEnvironmentOptions (section: unknown): EnvironmentOptions | 
     if (canonical !== item.path) {
       throw new Error(`invalid path of ${item.path} in the environment: write it ${canonical}`)
     }
-    if (items.some(other => other.path === item.path)) {
+    const twin = items.find(other => foldedPath(other.path) === foldedPath(item.path))
+    if (twin?.path === item.path) {
       throw new Error(`${item.path} is declared twice in the environment`)
+    }
+    if (twin) {
+      throw new Error(`${item.path} and ${twin.path} differ only by letter case or Unicode form, which a backend or a disk may store as one file: declare one of them`)
     }
     items.push(item)
     const autoPull = readAutoPull(item.path, pull)
@@ -374,6 +378,16 @@ export function canonicalBackendPath (filePath: string): string {
 }
 
 /**
+ * Folds a path so that spellings a case-insensitive or normalizing store takes for one file are equal.
+ *
+ * @param filePath - The path.
+ * @returns Its folded form.
+ */
+function foldedPath (filePath: string): string {
+  return filePath.normalize('NFKD').toUpperCase().toLowerCase()
+}
+
+/**
  * Finds the item a backend stores at a path. A path differing from the one of an item by its letter
  * case or Unicode form only is refused, since a backend may store both as one file.
  *
@@ -383,10 +397,9 @@ export function canonicalBackendPath (filePath: string): string {
  * @returns The item, null when the backend stores no item there.
  */
 export function itemStoredAt (items: EnvironmentItem[], backend: string, filePath: string): EnvironmentItem | null {
-  const folded = (value: string): string => value.normalize('NFKD').toUpperCase().toLowerCase()
   const stored = items.filter(item => item.backend === backend)
   const exact = stored.find(item => item.path === filePath)
-  const alias = exact ? undefined : stored.find(item => folded(item.path) === folded(filePath))
+  const alias = exact ? undefined : stored.find(item => foldedPath(item.path) === foldedPath(filePath))
   if (alias) {
     throw new Error(`${filePath} names the item ${alias.path} in another letter case or Unicode form: write its path exactly`)
   }
@@ -593,8 +606,8 @@ export class Environment {
   /**
    * Replaces the local data an item holds by the copy of its backend, then its local copy once that
    * data is restored: a restore that fails leaves the local copy and its synchronization record as
-   * they were. A synchronization record that cannot be written after a restore is reported in the
-   * result.
+   * they were. The item is recorded as synchronized only when the copy of the backend did not change
+   * during the pull; a record that cannot be written is reported in the result.
    *
    * @param selection - The item, the tables or key groups to restore, or the keys to take for a configuration file.
    * @returns What was done.
@@ -603,18 +616,18 @@ export class Environment {
     const { item, tables } = selection
     await this.assertAllowed(item, 'pull')
     const localPath = localPathOf(this._options.folder, item.path)
+    if (item.kind === 'database' && tables !== null && !transfersParts(item, 'pull')) {
+      throw new Error(`${item.path} is a native ${item.engine} archive: pull the whole database, its tables cannot be restored one by one`)
+    }
+    const pulled = await this.remoteCopy(item).catch(() => undefined)
     if (item.kind === 'file') {
       if (selection.keys || await this.mergesWhole(item)) {
-        return this.pullKeys(item, selection.keys ?? null)
+        return this.pullKeys(item, selection.keys ?? null, pulled)
       }
       if (!(await this.download(item))) {
         return { done: false, detail: `absent from ${item.backend}` }
       }
-      await this.recordSync(item)
-      return { done: true, detail: localPath }
-    }
-    if (item.kind === 'database' && tables !== null && !transfersParts(item, 'pull')) {
-      throw new Error(`${item.path} is a native ${item.engine} archive: pull the whole database, its tables cannot be restored one by one`)
+      return this.recorded(item, { done: true, detail: localPath }, pulled)
     }
 
     const pulledPath = `${localPath}.${randomUUID()}.pull`
@@ -624,13 +637,37 @@ export class Environment {
       }
       const result = await this.restore(item, pulledPath, tables)
       await fs.rename(pulledPath, localPath)
-      return await this.recordSync(item).then(
-        () => result,
-        (error: unknown) => ({ ...result, detail: `${result.detail}, not recorded as synchronized: ${error instanceof Error ? error.message : String(error)}` })
-      )
+      return await this.recorded(item, result, pulled)
     } finally {
       await fs.rm(pulledPath, { force: true })
     }
+  }
+
+  /**
+   * Records a pulled item as synchronized, reporting in the result of the pull why it could not be.
+   *
+   * @param item - The item.
+   * @param result - What the pull did.
+   * @param pulled - The copy of the backend listed before the pull, when the backend lists it.
+   * @returns What the pull did.
+   */
+  private async recorded (item: EnvironmentItem, result: TransferResult, pulled: RemoteFile | undefined): Promise<TransferResult> {
+    try {
+      await this.recordSync(item, pulled)
+      return result
+    } catch (error) {
+      return { ...result, detail: `${result.detail}, not recorded as synchronized: ${error instanceof Error ? error.message : String(error)}` }
+    }
+  }
+
+  /**
+   * Gives the copy of an item its backend lists.
+   *
+   * @param item - The item.
+   * @returns The copy, undefined when the backend lists none.
+   */
+  private async remoteCopy (item: EnvironmentItem): Promise<RemoteFile | undefined> {
+    return (await this.backendFor(item).list())?.find(file => file.path === item.path)
   }
 
   /**
@@ -728,7 +765,8 @@ export class Environment {
 
   /**
    * Restores a local database from an archive of the engine's own tools; an archive the engine
-   * refuses, being of another engine, truncated or corrupted, leaves the database as it was.
+   * refuses, being of another engine, truncated or corrupted, leaves the database as it was. What
+   * could not be cleaned up once the database was restored is reported with what was done.
    *
    * @param item - The database item.
    * @param archivePath - The archive.
@@ -740,9 +778,10 @@ export class Environment {
     if (tables !== null) {
       assertKnownTables(tables, await engine.listTables(item), databaseNameOf(item))
     }
-    await engine.restoreNative(item, archivePath, tables)
+    const leftover = await engine.restoreNative(item, archivePath, tables)
 
-    return { done: true, detail: tables === null ? `database restored in ${databaseNameOf(item)}` : `tables restored: ${tables.join(', ')}` }
+    const detail = tables === null ? `database restored in ${databaseNameOf(item)}` : `tables restored: ${tables.join(', ')}`
+    return { done: true, detail: leftover === null ? detail : `${detail}, but ${leftover}` }
   }
 
   /**
@@ -814,21 +853,20 @@ export class Environment {
    *
    * @param item - The file item.
    * @param keys - The value to keep for each differing key, null to take every value of the backend.
+   * @param pulled - The copy of the backend listed before it was read, when the backend lists it.
    * @returns What was done.
    */
-  private async pullKeys (item: EnvironmentItem, keys: KeyChoice[] | null): Promise<TransferResult> {
+  private async pullKeys (item: EnvironmentItem, keys: KeyChoice[] | null, pulled: RemoteFile | undefined): Promise<TransferResult> {
     const { format, local, remote } = await this.readBothCopies(item)
     const ignored = ignoredKeysOf(item)
     const differences = diffConfig(format, local, remote, ignored)
     const choices = keys ?? differences.map(difference => ({ path: difference.path, side: 'remote' as const }))
     const merged = mergeConfig(format, local, 'local', differences, choices, ignored)
     await writeLocalFile(localPathOf(this._options.folder, item.path), merged)
-    if (diffConfig(format, merged, remote, ignored).length === 0) {
-      await this.recordSync(item)
-    }
 
     const counts = countChoices(differences, choices, 'local')
-    return { done: true, detail: `keys merged: ${counts.remote} from ${item.backend}, ${counts.local} kept local` }
+    const result = { done: true, detail: `keys merged: ${counts.remote} from ${item.backend}, ${counts.local} kept local` }
+    return diffConfig(format, merged, remote, ignored).length === 0 ? this.recorded(item, result, pulled) : result
   }
 
   /**
@@ -891,12 +929,17 @@ export class Environment {
 
   /**
    * Records in the synchronization journal both copies of an item, now equal, so a later change on
-   * either side shows; neither copy is touched.
+   * either side shows; neither copy is touched. Fails, recording nothing, when the copy of the
+   * backend is no longer the one that was pulled.
    *
    * @param item - The item.
+   * @param pulled - The copy of the backend that was pulled, undefined when unknown.
    */
-  private async recordSync (item: EnvironmentItem): Promise<void> {
-    const remote = (await this.backendFor(item).list())?.find(file => file.path === item.path)
+  private async recordSync (item: EnvironmentItem, pulled?: RemoteFile): Promise<void> {
+    const remote = await this.remoteCopy(item)
+    if (pulled !== undefined && remote?.version !== pulled.version) {
+      throw new Error(`the copy of ${item.backend} changed during the pull: pull again`)
+    }
     const local = await fs.stat(localPathOf(this._options.folder, item.path)).catch(() => null)
     if (remote && local) {
       await writeSyncRecord(item.path, { localUpdatedAt: local.mtime, remoteUpdatedAt: remote.updatedAt, backend: item.backend ?? undefined, remoteVersion: remote.version })

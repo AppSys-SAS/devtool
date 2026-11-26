@@ -38,12 +38,13 @@ export interface DatabaseEngine {
   /**
    * Replaces the database, or the rows of some of its tables, each having to be in the archive, by an
    * archive file of the engine's own tools. The archive is sent whole to the container before
-   * anything changes, and an archive the engine refuses leaves the database as it was.
+   * anything changes, and an archive the engine refuses leaves the database as it was. Resolves to
+   * what could not be cleaned up once the database was restored, null when nothing.
    */
-  restoreNative(target: DatabaseTarget, archivePath: string, tables: string[] | null): Promise<void>
+  restoreNative(target: DatabaseTarget, archivePath: string, tables: string[] | null): Promise<string | null>
 }
 
-const STDERR_TAIL_BYTES = 4096
+const OUTPUT_TAIL_BYTES = 4096
 const MONGODUMP_MAGIC = Buffer.from([0x6d, 0xe2, 0x99, 0x81])
 const MONGODUMP_TERMINATOR = -1
 const BSON_MIN_DOCUMENT_BYTES = 5
@@ -73,15 +74,15 @@ const UNIQUE_SUFFIX = `SUFFIX=$(od -An -N8 -tx1 /dev/urandom | tr -d ' \\n')
 `
 
 /**
- * Keeps the end of the error output of a process.
+ * Keeps the end of an output of a process.
  *
- * @param child - The process.
+ * @param output - The output.
  * @returns A function giving the collected text.
  */
-function collectErrors (child: ChildProcess): () => string {
+function collectTail (output: Readable | null): () => string {
   let tail = ''
-  child.stderr?.on('data', (chunk: Buffer) => {
-    tail = (tail + chunk.toString('utf-8')).slice(-STDERR_TAIL_BYTES)
+  output?.on('data', (chunk: Buffer) => {
+    tail = (tail + chunk.toString('utf-8')).slice(-OUTPUT_TAIL_BYTES)
   })
 
   return () => tail.trim()
@@ -135,7 +136,7 @@ function dockerExec (target: DatabaseTarget, interactive: boolean, script: strin
  */
 async function* scriptOutput (target: DatabaseTarget, script: string, args: string[] = []): AsyncGenerator<Buffer> {
   const child = spawn('docker', dockerExec(target, false, script, args), { stdio: ['ignore', 'pipe', 'pipe'] })
-  const errors = collectErrors(child)
+  const errors = collectTail(child.stderr)
   const exited = assertExit(child, errors, `docker exec ${target.container}`)
   exited.catch(() => undefined)
   try {
@@ -173,15 +174,30 @@ async function scriptText (target: DatabaseTarget, script: string): Promise<stri
  * @param script - The script, reading its arguments as `$1`, `$2`...
  * @param input - The standard input of the script.
  * @param args - The arguments of the script.
+ * @returns What the script wrote on its standard output, trimmed.
  */
-async function scriptInput (target: DatabaseTarget, script: string, input: AsyncIterable<Buffer>, args: string[] = []): Promise<void> {
-  const child = spawn('docker', dockerExec(target, true, script, args), { stdio: ['pipe', 'ignore', 'pipe'] })
-  const errors = collectErrors(child)
+async function scriptInput (target: DatabaseTarget, script: string, input: AsyncIterable<Buffer>, args: string[] = []): Promise<string> {
+  const child = spawn('docker', dockerExec(target, true, script, args), { stdio: ['pipe', 'pipe', 'pipe'] })
+  const errors = collectTail(child.stderr)
+  const report = collectTail(child.stdout)
   const piped = pipeline(Readable.from(input), child.stdin).then(() => null, (error: unknown) => (error instanceof Error ? error : new Error(String(error))))
   await assertExit(child, errors, `docker exec ${target.container}`)
   const pipeError = await piped
   if (pipeError) {
     throw pipeError
+  }
+  return report()
+}
+
+/**
+ * Fails on an empty list of tables, which would select every table of an archive: a whole restore
+ * is asked for with null.
+ *
+ * @param tables - The tables to restore, or null for the whole database.
+ */
+function assertTablesChosen (tables: string[] | null): void {
+  if (tables?.length === 0) {
+    throw new Error('no table chosen: restore the whole database, or name some tables')
   }
 }
 
@@ -327,7 +343,7 @@ const POSTGRES_CLIENT = 'psql -U "$POSTGRES_USER" -d "$CONN" -X -q -v ON_ERROR_S
 
 /**
  * Builds the statements setting the sequences owned by tables, or by the tables they inherit from or
- * are partitions of, just after their highest value.
+ * are partitions of, just after their highest value; rolled back with the transaction running them.
  *
  * @param tables - The tables, as `schema.table` identifiers, or null for every table of the database.
  * @returns The SQL.
@@ -338,7 +354,7 @@ function postgresSequencesSql (tables: string[] | null): string {
     ? ''
     : ` AND a.attrelid IN (WITH RECURSIVE lineage(rel) AS (SELECT unnest(ARRAY[${names}]::regclass[])::oid UNION SELECT i.inhparent FROM pg_inherits i JOIN lineage l ON i.inhrelid = l.rel) SELECT rel FROM lineage)`
   return `DO $adt$
-DECLARE c record;
+DECLARE c record; next bigint;
 BEGIN
   FOR c IN
     SELECT a.attrelid::regclass AS rel, a.attname, pg_get_serial_sequence(a.attrelid::regclass::text, a.attname) AS seq
@@ -348,7 +364,8 @@ BEGIN
     WHERE r.relkind IN ('r', 'p') AND a.attnum > 0 AND NOT a.attisdropped AND n.nspname NOT IN ('pg_catalog', 'information_schema')${selected}
   LOOP
     IF c.seq IS NOT NULL THEN
-      EXECUTE format('SELECT setval(%L, coalesce((SELECT max(%I) FROM %s), 0) + 1, false)', c.seq, c.attname, c.rel);
+      EXECUTE format('SELECT coalesce(max(%I), 0) + 1 FROM %s', c.attname, c.rel) INTO next;
+      EXECUTE format('ALTER SEQUENCE %s RESTART WITH %s', c.seq, next);
     END IF;
   END LOOP;
 END $adt$;
@@ -357,22 +374,28 @@ END $adt$;
 
 /**
  * Replaces the database by the received `pg_dump -Fc` archive: the archive is restored into a new
- * database of a name no database has, which takes the place of the database once wholly restored,
- * in one transaction; a refused archive leaves the database as it was. The script fails, naming it,
- * when the former database cannot be dropped once replaced.
+ * database of a name no database has, with the privileges it grants to roles of the server, and that
+ * database takes the place of the database once wholly restored, in one transaction; a refused
+ * archive leaves the database as it was. Once the database is replaced, a former copy that cannot be
+ * dropped is reported on the standard output.
  */
 const POSTGRES_WHOLE_RESTORE = `set -e
 export PGOPTIONS="-c client_min_messages=warning"
 ${UNIQUE_SUFFIX}STAGING="adt_staging_$SUFFIX"
 REPLACED="adt_replaced_$SUFFIX"
+GRANTS="$ARCHIVE.grants"
 created=
 cleanup() {
-  rm -f "$ARCHIVE"
-  [ -z "$created" ] || dropdb -U "$POSTGRES_USER" --force --if-exists "$STAGING" || true
+  rm -f "$ARCHIVE" "$GRANTS"
+  [ -z "$created" ] || dropdb -U "$POSTGRES_USER" --force --if-exists "$STAGING" || echo "the temporary database $STAGING could not be dropped: drop it by hand" >&2
 }
 createdb -U "$POSTGRES_USER" "$STAGING"
 created=1
 pg_restore -U "$POSTGRES_USER" -d "dbname='$STAGING'" --no-owner --no-privileges --exit-on-error "$ARCHIVE"
+pg_restore -l "$ARCHIVE" | grep -E '^[0-9]+; [0-9]+ [0-9]+ (DEFAULT )?ACL ' > "$GRANTS" || true
+if [ -s "$GRANTS" ]; then
+  pg_restore -L "$GRANTS" -f - "$ARCHIVE" | psql -U "$POSTGRES_USER" -d "dbname='$STAGING'" -X -q > /dev/null 2>&1 || true
+fi
 psql -U "$POSTGRES_USER" -d template1 -X -q -v ON_ERROR_STOP=1 -v staging="$STAGING" -v target="$DB" -v replaced="$REPLACED" -1 <<'SQL'
 SELECT EXISTS (SELECT 1 FROM pg_database WHERE datname = :'target') AS present \\gset
 \\if :present
@@ -382,10 +405,7 @@ ALTER DATABASE :"target" RENAME TO :"replaced";
 ALTER DATABASE :"staging" RENAME TO :"target";
 SQL
 created=
-dropdb -U "$POSTGRES_USER" --force --if-exists "$REPLACED" || {
-  echo "the database was restored, but its former copy $REPLACED could not be dropped: drop it by hand" >&2
-  exit 1
-}
+dropdb -U "$POSTGRES_USER" --force --if-exists "$REPLACED" 2> /dev/null || echo "its former copy $REPLACED could not be dropped: drop it by hand"
 `
 
 /**
@@ -441,10 +461,10 @@ const postgres: DatabaseEngine = {
     return scriptOutput(target, `${POSTGRES_SETUP}pg_dump -U "$POSTGRES_USER" -Fc -d "$CONN"`)
   },
   async restoreNative (target, archivePath, tables) {
+    assertTablesChosen(tables)
     const { size } = await stat(archivePath)
     if (tables === null) {
-      await scriptInput(target, `${POSTGRES_SETUP}${RECEIVE_ARCHIVE}${POSTGRES_WHOLE_RESTORE}`, createReadStream(archivePath), [String(size)])
-      return
+      return (await scriptInput(target, `${POSTGRES_SETUP}${RECEIVE_ARCHIVE}${POSTGRES_WHOLE_RESTORE}`, createReadStream(archivePath), [String(size)])) || null
     }
 
     const empty = tables.map(table => `DELETE FROM ONLY ${table};`).join(' ')
@@ -458,6 +478,7 @@ const postgres: DatabaseEngine = {
       createReadStream(archivePath),
       [String(size), empty, postgresSequencesSql(tables), ...selection]
     )
+    return null
   }
 }
 
@@ -557,7 +578,11 @@ const mariadb: DatabaseEngine = {
     }
     const dump = (): AsyncIterable<Buffer> => gunzipped(createReadStream(archivePath))
     const size = await assertDatabaseLessDump(dump())
+    if (size === 0) {
+      throw new Error('the archive holds an empty dump: a dump of an empty database still holds its header')
+    }
     await scriptInput(target, `${MARIADB_SETUP}${RECEIVE_ARCHIVE}${MARIADB_WHOLE_RESTORE}`, dump(), [String(size)])
+    return null
   }
 }
 
@@ -696,23 +721,30 @@ auth mongodump --quiet --archive --gzip --db "$DB"
 /**
  * Replaces the database, when `$1` is 1, or the collections the following arguments select, by the
  * received archive of `mongodump --archive --gzip`, whatever database it was dumped from: the archive
- * is first restored into a new database of a name no database has, dropped afterwards, and an
- * archive the engine refuses there leaves the database as it was.
+ * is first restored into a new database of a name no database has, dropped afterwards, so an archive
+ * the engine refuses leaves the database as it was; the database is then saved, and put back when
+ * its own restore fails. Its saved dump is kept in the container when it cannot be put back, and a
+ * temporary database that cannot be dropped is reported on both outputs.
  */
 const MONGODB_RESTORE = `set -e
 whole="$1"; shift
 ${UNIQUE_SUFFIX}export STAGING="adt_staging_$SUFFIX"
+SAVED="$ARCHIVE.saved"
 created=
 drop() {
   auth mongosh --quiet --eval "db.getSiblingDB(process.env.$1).dropDatabase()" > /dev/null
 }
+left() {
+  echo "the temporary database $STAGING could not be dropped: drop it by hand"
+  echo "the temporary database $STAGING could not be dropped: drop it by hand" >&2
+}
 cleanup() {
-  rm -f "$ARCHIVE"
-  [ -z "$created" ] || drop STAGING || true
+  rm -f "$ARCHIVE" "$SAVED"
+  [ -z "$created" ] || drop STAGING || left
 }
 restore_into() {
   into="$1"; shift
-  auth mongorestore --archive="$ARCHIVE" --gzip --drop --nsFrom '$db$.$coll$' --nsTo "$into"'.$coll$' "$@"
+  auth mongorestore --archive="$ARCHIVE" --gzip --drop --stopOnError --nsFrom '$db$.$coll$' --nsTo "$into"'.$coll$' "$@"
 }
 auth mongosh --quiet --eval 'quit(db.getMongo().getDBNames().includes(process.env.STAGING) ? 1 : 0)' || {
   echo "the database $STAGING already exists: nothing was changed, try again" >&2
@@ -720,8 +752,23 @@ auth mongosh --quiet --eval 'quit(db.getMongo().getDBNames().includes(process.en
 }
 created=1
 restore_into "$STAGING" "$@"
-[ "$whole" = 0 ] || drop DB
-restore_into "$DB" "$@"
+auth mongodump --quiet --archive="$SAVED" --gzip --db "$DB" || {
+  echo "the database could not be saved before its restore: nothing was changed" >&2
+  exit 1
+}
+if { [ "$whole" = 0 ] || drop DB; } && restore_into "$DB" "$@"; then
+  exit 0
+fi
+if drop DB && auth mongorestore --archive="$SAVED" --gzip --stopOnError; then
+  echo "the restore was refused: the database was put back as it was" >&2
+else
+  cleanup() {
+    rm -f "$ARCHIVE"
+    [ -z "$created" ] || drop STAGING || left
+  }
+  echo "the restore was refused and the database could not be put back: its dump is kept in the container, in $SAVED" >&2
+fi
+exit 1
 `
 
 /**
@@ -759,7 +806,7 @@ const mongodb: DatabaseEngine = {
   async importTable (target, table, sql, replace) {
     await scriptInput(
       target,
-      `${MONGODB_SETUP}auth mongorestore --quiet --archive --nsInclude "*.$1" --nsFrom "\\$db\\$.$1" --nsTo "$DB.$1"${replace ? ' --drop' : ''}`,
+      `${MONGODB_SETUP}auth mongorestore --quiet --archive --stopOnError --nsInclude "*.$1" --nsFrom "\\$db\\$.$1" --nsTo "$DB.$1"${replace ? ' --drop' : ''}`,
       sql,
       [table]
     )
@@ -771,6 +818,7 @@ const mongodb: DatabaseEngine = {
     return scriptOutput(target, `${MONGODB_SETUP}${MONGODB_DUMP}`)
   },
   async restoreNative (target, archivePath, tables) {
+    assertTablesChosen(tables)
     const namespaces = await mongodumpNamespaces(createReadStream(archivePath))
     const sources = [...new Set(namespaces.map(namespace => namespace.db))]
     if (sources.length !== 1) {
@@ -785,12 +833,13 @@ const mongodb: DatabaseEngine = {
       .flatMap(namespace => ['--nsInclude', `${escapeNamespace(namespace.db)}.${escapeNamespace(namespace.collection)}`])
 
     const { size } = await stat(archivePath)
-    await scriptInput(
+    const leftover = await scriptInput(
       target,
       `${MONGODB_SETUP}${RECEIVE_ARCHIVE}${MONGODB_RESTORE}`,
       createReadStream(archivePath),
       [String(size), tables === null ? '1' : '0', ...selection]
     )
+    return leftover || null
   }
 }
 

@@ -511,6 +511,13 @@ describe('readEnvironmentOptions', () => {
     it('refuses an item path declared twice', () => {
       expect(() => readEnvironmentOptions({ files: ['api/config.yml'], buckets: [{ path: 'api/config.yml', bucket: 'b' }] })).toThrow('api/config.yml is declared twice in the environment')
     })
+
+    it('refuses item paths differing only by letter case or Unicode form, which one store may hold as one file', () => {
+      expect(() => readEnvironmentOptions({ files: ['api/config.yml', 'API/config.yml'] })).toThrow(
+        'API/config.yml and api/config.yml differ only by letter case or Unicode form, which a backend or a disk may store as one file: declare one of them'
+      )
+      expect(() => readEnvironmentOptions({ files: ['api/café.yml', 'api/café.yml'] })).toThrow('differ only by letter case or Unicode form')
+    })
   })
 
   describe('groups', () => {
