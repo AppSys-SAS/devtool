@@ -66,6 +66,13 @@ shift
 `
 
 /**
+ * Script line setting `$SUFFIX` to 16 random hexadecimal digits, naming the databases a script
+ * creates for itself.
+ */
+const UNIQUE_SUFFIX = `SUFFIX=$(od -An -N8 -tx1 /dev/urandom | tr -d ' \\n')
+`
+
+/**
  * Keeps the end of the error output of a process.
  *
  * @param child - The process.
@@ -350,21 +357,21 @@ END $adt$;
 
 /**
  * Replaces the database by the received `pg_dump -Fc` archive: the archive is restored into a new
- * database, which takes the place of the database once wholly restored, in one transaction; a
- * refused archive leaves the database as it was. The script fails, naming it, when the former
- * database cannot be dropped once replaced.
+ * database of a name no database has, which takes the place of the database once wholly restored,
+ * in one transaction; a refused archive leaves the database as it was. The script fails, naming it,
+ * when the former database cannot be dropped once replaced.
  */
 const POSTGRES_WHOLE_RESTORE = `set -e
 export PGOPTIONS="-c client_min_messages=warning"
-STAGING="adt_staging_$$"
-REPLACED="adt_replaced_$$"
+${UNIQUE_SUFFIX}STAGING="adt_staging_$SUFFIX"
+REPLACED="adt_replaced_$SUFFIX"
+created=
 cleanup() {
   rm -f "$ARCHIVE"
-  dropdb -U "$POSTGRES_USER" --force --if-exists "$STAGING" || true
+  [ -z "$created" ] || dropdb -U "$POSTGRES_USER" --force --if-exists "$STAGING" || true
 }
-dropdb -U "$POSTGRES_USER" --force --if-exists "$STAGING"
-dropdb -U "$POSTGRES_USER" --force --if-exists "$REPLACED"
 createdb -U "$POSTGRES_USER" "$STAGING"
+created=1
 pg_restore -U "$POSTGRES_USER" -d "dbname='$STAGING'" --no-owner --no-privileges --exit-on-error "$ARCHIVE"
 psql -U "$POSTGRES_USER" -d template1 -X -q -v ON_ERROR_STOP=1 -v staging="$STAGING" -v target="$DB" -v replaced="$REPLACED" -1 <<'SQL'
 SELECT EXISTS (SELECT 1 FROM pg_database WHERE datname = :'target') AS present \\gset
@@ -374,6 +381,7 @@ ALTER DATABASE :"target" RENAME TO :"replaced";
 \\endif
 ALTER DATABASE :"staging" RENAME TO :"target";
 SQL
+created=
 dropdb -U "$POSTGRES_USER" --force --if-exists "$REPLACED" || {
   echo "the database was restored, but its former copy $REPLACED could not be dropped: drop it by hand" >&2
   exit 1
@@ -688,24 +696,29 @@ auth mongodump --quiet --archive --gzip --db "$DB"
 /**
  * Replaces the database, when `$1` is 1, or the collections the following arguments select, by the
  * received archive of `mongodump --archive --gzip`, whatever database it was dumped from: the archive
- * is first restored into a database of its own, dropped afterwards, and an archive the engine refuses
- * there leaves the database as it was.
+ * is first restored into a new database of a name no database has, dropped afterwards, and an
+ * archive the engine refuses there leaves the database as it was.
  */
 const MONGODB_RESTORE = `set -e
 whole="$1"; shift
-export STAGING="adt_staging_$$"
+${UNIQUE_SUFFIX}export STAGING="adt_staging_$SUFFIX"
+created=
 drop() {
   auth mongosh --quiet --eval "db.getSiblingDB(process.env.$1).dropDatabase()" > /dev/null
 }
 cleanup() {
   rm -f "$ARCHIVE"
-  drop STAGING || true
+  [ -z "$created" ] || drop STAGING || true
 }
 restore_into() {
   into="$1"; shift
   auth mongorestore --archive="$ARCHIVE" --gzip --drop --nsFrom '$db$.$coll$' --nsTo "$into"'.$coll$' "$@"
 }
-drop STAGING
+auth mongosh --quiet --eval 'quit(db.getMongo().getDBNames().includes(process.env.STAGING) ? 1 : 0)' || {
+  echo "the database $STAGING already exists: nothing was changed, try again" >&2
+  exit 1
+}
+created=1
 restore_into "$STAGING" "$@"
 [ "$whole" = 0 ] || drop DB
 restore_into "$DB" "$@"

@@ -303,22 +303,69 @@ describe('postgres whole restore script', () => {
     dropdb: 'case "$*" in *adt_replaced*) [ ! -e "$TMPDIR/../swapped" ] || exit 1 ;; esac'
   }
 
-  it('fails, naming it, when the replaced database cannot be dropped', async () => {
-    await databaseEngine('postgres').restoreNative({ container: 'pg', database: 'sales' }, await stored(Buffer.from('archive')), null)
-    const [call] = await dockerCalls()
+  let call: string[]
 
+  beforeEach(async () => {
+    await databaseEngine('postgres').restoreNative({ container: 'pg', database: 'sales' }, await stored(Buffer.from('archive')), null)
+    ;[call] = await dockerCalls()
+  })
+
+  it('restores into a database of a new random name, dropping no database it did not create', async () => {
+    const runs = [await runScript(call, 'archive', pg), await runScript(call, 'archive', pg)]
+    const stagings = runs.map(run => /^createdb -U postgres (\S+)$/m.exec(run.calls.join('\n'))?.[1])
+
+    expect(stagings[0]).toMatch(/^adt_staging_[0-9a-f]{16}$/)
+    expect(stagings[1]).not.toBe(stagings[0])
+    expect(runs[0].calls.filter(line => line.startsWith('dropdb')).map(line => line.split(' ').at(-1))).toEqual([stagings[0]?.replace('staging', 'replaced')])
+  })
+
+  it('drops nothing when a database of that name already exists', async () => {
+    const run = await runScript(call, 'archive', { ...pg, createdb: 'echo "createdb: error: database already exists" >&2; exit 1' })
+    expect(run.code).toBe(1)
+    expect(run.calls.filter(line => !line.startsWith('createdb'))).toEqual([])
+  })
+
+  it('fails, naming it, when the replaced database cannot be dropped', async () => {
     const run = await runScript(call, 'archive', pg)
     expect(run.code).toBe(1)
-    expect(run.stderr).toMatch(/^the database was restored, but its former copy adt_replaced_\d+ could not be dropped: drop it by hand$/m)
+    expect(run.stderr).toMatch(/^the database was restored, but its former copy adt_replaced_[0-9a-f]{16} could not be dropped: drop it by hand$/m)
     expect(run.leftovers).toEqual([])
   })
 
   it('changes nothing when the archive was not received whole', async () => {
-    await databaseEngine('postgres').restoreNative({ container: 'pg', database: 'sales' }, await stored(Buffer.from('archive')), null)
-    const [call] = await dockerCalls()
-
     const run = await runScript(call, 'arch', pg)
     expect([run.code, run.stderr.trim(), run.calls, run.leftovers]).toEqual([1, 'the archive was not received whole: nothing was changed', [], []])
+  })
+})
+
+describe('mongodb restore script', () => {
+  const received = (restore: string[]): string => 'x'.repeat(Number(scriptArguments(restore)[0]))
+  const mongo = (exists: boolean): Record<string, string> => ({
+    mongosh: `case "$*" in *getDBNames*) exit ${exists ? 1 : 0} ;; esac`,
+    mongorestore: 'exit 0'
+  })
+  let call: string[]
+
+  beforeEach(async () => {
+    await databaseEngine('mongodb').restoreNative({ container: 'mongo', database: 'catalog' }, await stored(mongodumpPrelude([['production', 'users']])), null)
+    ;[call] = await dockerCalls()
+  })
+
+  it('restores into a database of a new random name first, then empties and restores the database', async () => {
+    const run = await runScript(call, received(call), mongo(false))
+    const staging = /--nsTo (adt_staging_[0-9a-f]{16})\.\$coll\$/.exec(run.calls.join('\n'))?.[1]
+
+    expect([run.code, run.leftovers]).toEqual([0, []])
+    expect(staging).toBeDefined()
+    expect(run.calls.map(line => line.split(' ')[0])).toEqual(['mongosh', 'mongorestore', 'mongosh', 'mongorestore', 'mongosh'])
+    expect(run.calls[3]).toContain('--nsTo catalog.$coll$')
+  })
+
+  it('drops nothing when a database of that name already exists', async () => {
+    const run = await runScript(call, received(call), mongo(true))
+    expect(run.code).toBe(1)
+    expect(run.stderr).toMatch(/^the database adt_staging_[0-9a-f]{16} already exists: nothing was changed, try again$/m)
+    expect(run.calls).toHaveLength(1)
   })
 })
 
