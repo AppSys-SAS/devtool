@@ -438,12 +438,15 @@ describe('mariadb native archives', () => {
 
     /**
      * Runs the restore script with a fake server.
-     * @param behaviour - Shell commands of the fake server: `probe` answers the character set of the database, `save` dumps it, `grant`, `load` loads the archive, `putBack` loads the saved dump.
+     * @param behaviour - Shell commands of the fake server: `account` creates the account loading the dump, `limit` grants it the database, `drop` drops it, `probe` answers the character set of the database, `save` dumps it, `grant` grants it to the account of the container, `load` loads the archive, `putBack` loads the saved dump.
      * @param input - The archive received.
      * @returns What the script did.
      */
-    async function restore (behaviour: { probe?: string, save?: string, grant?: string, load?: string, putBack?: string }, input = dump): Promise<ScriptRun> {
+    async function restore (behaviour: { account?: string, limit?: string, drop?: string, probe?: string, save?: string, grant?: string, load?: string, putBack?: string }, input = dump): Promise<ScriptRun> {
       const mariadb = `case "$*" in
+  *"CREATE USER"*) ${behaviour.account ?? 'exit 0'} ;;
+  *"SET USER"*) ${behaviour.limit ?? 'exit 0'} ;;
+  *"DROP USER"*) ${behaviour.drop ?? 'exit 0'} ;;
   *@@character_set_database*) ${behaviour.probe ?? probeLatin1} ;;
   *GRANT*) ${behaviour.grant ?? 'exit 0'} ;;
   *"DROP DATABASE"*) exit 0 ;;
@@ -452,21 +455,48 @@ esac`
       return runScript(call, input, { mariadb, 'mariadb-dump': `echo '-- SAVED DUMP'; ${behaviour.save ?? 'exit 0'}` }, { MARIADB_ROOT_PASSWORD: 'secret', MARIADB_USER: 'app' })
     }
 
+    /**
+     * Gives the calls of a run, the random name and password of the account loading the dump
+     * replaced by fixed ones.
+     * @param run - The run.
+     * @returns The calls.
+     */
+    function stepsOf (run: ScriptRun): string[] {
+      return run.calls.map(line => line.replace(/adt_loader_[0-9a-f]{16}/g, 'adt_loader').replace(/IDENTIFIED BY '[0-9a-f]{32}'/, 'IDENTIFIED BY \'secret\''))
+    }
+
     beforeEach(async () => {
       await mariadb.restoreNative(target, await stored(gzipSync(dump)), null)
       ;[call] = await dockerCalls()
     })
 
-    it('saves the database, then recreates it with its character set and collation, grants it and loads the dump', async () => {
+    it('loads the dump with an account limited to the database, once the database is saved and recreated with its character set and collation', async () => {
       const run = await restore({})
-      expect([run.code, run.stderr, run.leftovers]).toEqual([0, '', []])
-      expect(run.calls).toEqual([
+      expect([run.code, run.stdout, run.stderr, run.leftovers]).toEqual([0, '', '', []])
+      expect(stepsOf(run)).toEqual([
+        'mariadb -uroot -e CREATE USER \'adt_loader\'@\'localhost\' IDENTIFIED BY \'secret\'',
+        'mariadb -uroot -e GRANT ALL PRIVILEGES ON `shop`.* TO \'adt_loader\'@\'localhost\'; GRANT SET USER ON *.* TO \'adt_loader\'@\'localhost\'',
         'mariadb -uroot -N -B -e USE `shop`; SELECT @@character_set_database, @@collation_database',
         'mariadb-dump -uroot --single-transaction --routines --triggers --events shop',
         'mariadb -uroot -e DROP DATABASE IF EXISTS `shop`; CREATE DATABASE `shop` CHARACTER SET latin1 COLLATE latin1_swedish_ci',
         'mariadb -uroot -e GRANT ALL PRIVILEGES ON `shop`.* TO \'app\'@\'%\'',
-        'mariadb -uroot shop'
+        'mariadb -uadt_loader shop',
+        'mariadb -uroot -e DROP USER IF EXISTS \'adt_loader\'@\'localhost\''
       ])
+    })
+
+    it('grants a database whose name holds wildcards of privilege targets as that name only', async () => {
+      await mariadb.restoreNative({ container: 'db', database: 'sales_2026%' }, await stored(gzipSync(dump)), null)
+      const fakes = {
+        'mariadb': 'case "$*" in *@@character_set_database*) printf \'latin1\\tlatin1_swedish_ci\\n\' ;; esac',
+        'mariadb-dump': 'exit 0'
+      }
+      const run = await runScript((await dockerCalls())[1], dump, fakes, { MARIADB_USER: 'app' })
+
+      expect(run.code).toBe(0)
+      const grants = run.calls.filter(line => line.includes('GRANT ALL'))
+      expect(grants).toHaveLength(2)
+      expect(grants.every(line => line.includes('ON `sales\\_2026\\%`.*'))).toBe(true)
     })
 
     it.each([
@@ -475,7 +505,27 @@ esac`
     ])('puts the saved database back when the server refuses %s', async (_step, behaviour) => {
       const run = await restore(behaviour)
       expect([run.code, run.stderr.trim(), run.leftovers]).toEqual([1, 'the restore was refused: the database was put back as it was', []])
-      expect(run.calls.at(-2)).toContain('CHARACTER SET latin1 COLLATE latin1_swedish_ci')
+      expect(stepsOf(run).slice(-3)).toEqual([
+        'mariadb -uroot -e DROP DATABASE IF EXISTS `shop`; CREATE DATABASE `shop` CHARACTER SET latin1 COLLATE latin1_swedish_ci',
+        'mariadb -uroot shop',
+        'mariadb -uroot -e DROP USER IF EXISTS \'adt_loader\'@\'localhost\''
+      ])
+    })
+
+    it.each([
+      ['created', { account: 'exit 1' }, 0],
+      ['granted the database', { limit: 'exit 1' }, 1]
+    ])('changes nothing when the account loading the dump cannot be %s', async (step, behaviour, drops) => {
+      const run = await restore(behaviour)
+      expect([run.code, run.stderr.trim()]).toEqual([1, `the account loading the dump could not be ${step}: nothing was changed`])
+      expect(run.calls.filter(line => line.includes('DATABASE') || line.startsWith('mariadb-dump'))).toEqual([])
+      expect(run.calls.filter(line => line.includes('DROP USER'))).toHaveLength(drops)
+    })
+
+    it('reports an account it cannot drop, the database restored', async () => {
+      const run = await restore({ drop: 'exit 1' })
+      expect(run.code).toBe(0)
+      expect(run.stdout.trim()).toMatch(/^the account adt_loader_[0-9a-f]{16} could not be dropped: drop it by hand$/)
     })
 
     it('keeps the saved dump in the container when the database cannot be put back', async () => {
@@ -495,14 +545,14 @@ esac`
       const run = await restore({ probe: 'echo "ERROR 2002 (HY000): Can\'t connect to local server" >&2; exit 1' })
       expect(run.code).toBe(1)
       expect(run.stderr).toContain('the server could not tell whether the database exists: nothing was changed')
-      expect(run.calls).toHaveLength(1)
+      expect(run.calls.filter(line => line.includes('DATABASE') || line.startsWith('mariadb-dump'))).toEqual([])
     })
 
     it('removes a database that did not exist when the dump is refused', async () => {
       const run = await restore({ probe: probeMissing, load: 'exit 1' })
       expect([run.code, run.stderr.trim(), run.leftovers]).toEqual([1, 'the restore was refused: the database, which did not exist, was removed', []])
       expect(run.calls.some(line => line.startsWith('mariadb-dump'))).toBe(false)
-      expect(run.calls.at(-1)).toBe('mariadb -uroot -e DROP DATABASE IF EXISTS `shop`')
+      expect(run.calls.at(-2)).toBe('mariadb -uroot -e DROP DATABASE IF EXISTS `shop`')
     })
 
     it('changes nothing when the dump was not received whole', async () => {
@@ -533,7 +583,11 @@ esac`
     'use shop;',
     '  USE `shop`;',
     'CREATE DATABASE /*!32312 IF NOT EXISTS*/ `shop`;',
-    '/*!40000 DROP DATABASE IF EXISTS `shop`*/;'
+    '/*!40000 DROP DATABASE IF EXISTS `shop`*/;',
+    'DROP SCHEMA other;',
+    'CREATE OR REPLACE DATABASE other;',
+    'create schema if not exists other;',
+    '/*M!100100 DROP DATABASE other*/;'
   ])('refuses a dump naming its own database with %s', async statement => {
     const dump = `-- MariaDB dump\n${'-- filler\n'.repeat(5000)}${statement}\nCREATE TABLE t (id int);\n`
     await expect(mariadb.restoreNative(target, await stored(gzipSync(dump)), null)).rejects.toThrow('the dump names its own database')

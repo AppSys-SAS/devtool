@@ -116,7 +116,8 @@ async function closeBackends (backends: Map<string, EnvironmentBackend>): Promis
  * Runs a task on a file of a backend of the environment, when the groups of the item stored there,
  * or else of the backend, let the developer transfer in the direction of the task, then closes the
  * backends. The task receives the path in its canonical form, the one the groups were checked for;
- * a path differing from the one of an item by its letter case or Unicode form only is refused.
+ * a path differing from the one of an item by its letter case, Unicode form or separators only is
+ * refused.
  * @param name The name of the backend, the default one when missing.
  * @param filePath The path of the file in the backend.
  * @param direction Whether the task reads the file, or writes or deletes it.
