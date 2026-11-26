@@ -192,6 +192,9 @@ refuses, because it is of another engine, truncated or corrupted, leaves the dat
   wholly restored. Sequences keep the values of the archive.
 - `mongodb` restores the archive into a temporary database first, then into the database: a restore
   takes twice the time, and the room of one more copy of the database meanwhile.
+
+The databases a restore creates for itself are named `adt_staging_` or `adt_replaced_` followed by 16
+random hexadecimal digits; a restore never drops a database it did not create.
 - `mariadb` saves the database first, and puts it back when the server refuses a step of the restore.
   Should it not be put back either, the error names the file of the container keeping its dump. The
   database keeps its character set and collation. A database `mariadb-dump` cannot save, such as one

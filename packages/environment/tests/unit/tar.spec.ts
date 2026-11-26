@@ -106,6 +106,16 @@ describe('tar archives', () => {
     await expect(filesOf(Readable.from([entries, Buffer.alloc(700), Buffer.alloc(324)]))).resolves.toEqual({ 'a.txt': 'alpha', 'b.txt': 'beta' })
   })
 
+  it.each([
+    ['a file of 1024 zero bytes', rawEntry('zeros.bin', '0', '\0'.repeat(1024))],
+    ['a file of zero bytes padded to 1024', rawEntry('zeros.bin', '0', '\0'.repeat(700))],
+    ['a file named by a PAX header', Buffer.concat([rawEntry('PaxHeader', 'x', paxRecord('path', `${'d'.repeat(120)}/zeros.bin`)), rawEntry('zeros.bin', '0', '\0'.repeat(1024))])]
+  ])('refuses an archive whose last entry is %s, without the two empty blocks after it', async (_case, last) => {
+    const entries = Buffer.concat([rawEntry('a.txt', '0', 'alpha'), last])
+    await expect(filesOf(Readable.from([entries]))).rejects.toThrow('it does not end with its two empty blocks')
+    await expect(filesOf(Readable.from([Buffer.concat([entries, TAR_END])]))).resolves.toHaveProperty('a.txt', 'alpha')
+  })
+
   it('skips folders and refuses links, which have no object to become', async () => {
     const withFolder = Buffer.concat([rawEntry('docs/', '5', ''), rawEntry('docs/a.txt', '0', 'alpha'), TAR_END])
     expect(await filesOf(Readable.from([withFolder]))).toEqual({ 'docs/a.txt': 'alpha' })

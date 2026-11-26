@@ -12,7 +12,8 @@ export interface TarEntry {
 }
 
 const REGULAR_TYPES = new Set<Header['type'] | null>(['file', 'contiguous-file'])
-const END_BYTES = 1024
+const BLOCK_BYTES = 512
+const END_BYTES = 2 * BLOCK_BYTES
 
 /**
  * Strips the `./` the tar command writes before each path of an archive of a folder.
@@ -48,17 +49,35 @@ function unsupported (header: Header): string | null {
 }
 
 /**
+ * Gives the offset in an archive just after the padded body of an entry.
+ *
+ * @param header - The header of the entry, with the offset of its body.
+ * @returns The offset.
+ */
+function entryEnd (header: Header): number {
+  const { byteOffset } = header as Header & { byteOffset?: unknown }
+  if (typeof byteOffset !== 'number' || !Number.isSafeInteger(byteOffset)) {
+    throw new Error('the tar reader gives no offset of the entries')
+  }
+  const size = header.type === 'directory' ? 0 : header.size
+  return byteOffset + Math.ceil(size / BLOCK_BYTES) * BLOCK_BYTES
+}
+
+/**
  * Reads the regular files of a tar archive, folders being skipped and any other entry refused. The
- * archive must end with its two empty blocks: one that stops before is refused once its last entry
- * is read.
+ * archive must end with its two empty blocks after the body of its last entry: one that stops
+ * before is refused once its last entry is read.
  *
  * @param source - The uncompressed archive.
  * @returns The files, in their order in the archive.
  */
 export async function* readTar (source: AsyncIterable<Buffer>): AsyncGenerator<TarEntry> {
   let tail: Buffer = Buffer.alloc(0)
+  let received = 0
+  let lastEnd = 0
   const watched = async function* (): AsyncGenerator<Buffer> {
     for await (const chunk of source) {
+      received += chunk.length
       tail = chunk.length >= END_BYTES ? chunk.subarray(-END_BYTES) : Buffer.concat([tail, chunk]).subarray(-END_BYTES)
       yield chunk
     }
@@ -74,12 +93,13 @@ export async function* readTar (source: AsyncIterable<Buffer>): AsyncGenerator<T
       if (refusal !== null) {
         throw new Error(`${name} is ${refusal}, which the devtool does not read`)
       }
+      lastEnd = entryEnd(entry.header)
       if (REGULAR_TYPES.has(entry.header.type) && name !== '') {
         yield { name, size: entry.header.size, body: entry as AsyncIterable<Buffer> }
       }
       entry.resume()
     }
-    if (tail.length < END_BYTES || tail.some(byte => byte !== 0)) {
+    if (received - lastEnd < END_BYTES || tail.some(byte => byte !== 0)) {
       throw new Error('not a complete tar archive: it does not end with its two empty blocks')
     }
   } finally {
