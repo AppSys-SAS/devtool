@@ -396,16 +396,20 @@ pg_restore -l "$ARCHIVE" | grep -E '^[0-9]+; [0-9]+ [0-9]+ (DEFAULT )?ACL ' > "$
 if [ -s "$GRANTS" ]; then
   pg_restore -L "$GRANTS" -f - "$ARCHIVE" | psql -U "$POSTGRES_USER" -d "dbname='$STAGING'" -X -q > /dev/null 2>&1 || true
 fi
-psql -U "$POSTGRES_USER" -d template1 -X -q -v ON_ERROR_STOP=1 -v staging="$STAGING" -v target="$DB" -v replaced="$REPLACED" -1 <<'SQL'
+swapped=$(psql -U "$POSTGRES_USER" -d template1 -X -q -v ON_ERROR_STOP=1 -v staging="$STAGING" -v target="$DB" -v replaced="$REPLACED" -1 <<'SQL'
 SELECT EXISTS (SELECT 1 FROM pg_database WHERE datname = :'target') AS present \\gset
 \\if :present
 SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = :'target' AND pid <> pg_backend_pid() \\g /dev/null
 ALTER DATABASE :"target" RENAME TO :"replaced";
+\\echo replaced
 \\endif
 ALTER DATABASE :"staging" RENAME TO :"target";
 SQL
+)
 created=
-dropdb -U "$POSTGRES_USER" --force --if-exists "$REPLACED" 2> /dev/null || echo "its former copy $REPLACED could not be dropped: drop it by hand"
+if [ "$swapped" = replaced ]; then
+  dropdb -U "$POSTGRES_USER" --force "$REPLACED" 2> /dev/null || echo "its former copy $REPLACED could not be dropped: drop it by hand"
+fi
 `
 
 /**

@@ -306,7 +306,7 @@ describe('postgres whole restore script', () => {
   const pg = {
     createdb: 'exit 0',
     pg_restore: 'exit 0',
-    psql: 'cat > /dev/null; touch "$TMPDIR/../swapped"',
+    psql: 'case "$(cat)" in *\'RENAME TO :"replaced"\'*) echo replaced ;; esac; touch "$TMPDIR/../swapped"',
     dropdb: 'case "$*" in *adt_replaced*) [ ! -e "$TMPDIR/../swapped" ] || exit 1 ;; esac'
   }
 
@@ -348,6 +348,12 @@ describe('postgres whole restore script', () => {
     const steps = run.calls.map(line => line.split(' ').slice(0, 2).join(' '))
     expect(steps).toEqual(['createdb -U', 'pg_restore -U', 'pg_restore -l', 'pg_restore -L', 'psql -U', 'psql -U', 'dropdb -U'])
     expect(run.calls[3]).toMatch(/^pg_restore -L \S+\.grants -f - /)
+  })
+
+  it('drops no former copy when the database did not exist, whatever database holds that name', async () => {
+    const run = await runScript(call, 'archive', { ...pg, psql: 'cat > /dev/null', dropdb: 'exit 0' })
+    expect([run.code, run.stdout, run.leftovers]).toEqual([0, '', []])
+    expect(run.calls.filter(line => line.startsWith('dropdb'))).toEqual([])
   })
 
   it('reports nothing when the former copy is dropped', async () => {

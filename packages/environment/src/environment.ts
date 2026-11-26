@@ -619,7 +619,7 @@ export class Environment {
     if (item.kind === 'database' && tables !== null && !transfersParts(item, 'pull')) {
       throw new Error(`${item.path} is a native ${item.engine} archive: pull the whole database, its tables cannot be restored one by one`)
     }
-    const pulled = await this.remoteCopy(item).catch(() => undefined)
+    const pulled = await this.backendFor(item).list().then(files => files && (files.find(file => file.path === item.path) ?? undefined), () => undefined)
     if (item.kind === 'file') {
       if (selection.keys || await this.mergesWhole(item)) {
         return this.pullKeys(item, selection.keys ?? null, pulled)
@@ -644,15 +644,23 @@ export class Environment {
   }
 
   /**
-   * Records a pulled item as synchronized, reporting in the result of the pull why it could not be.
+   * Records a pulled item as synchronized when the copy of its backend listed before the pull is
+   * known and still the same, reporting in the result of the pull why it is not recorded.
    *
    * @param item - The item.
    * @param result - What the pull did.
-   * @param pulled - The copy of the backend listed before the pull, when the backend lists it.
+   * @param pulled - The copy of the backend listed before the pull, null when the backend lists
+   * nothing, undefined when the listing failed or did not hold the item.
    * @returns What the pull did.
    */
-  private async recorded (item: EnvironmentItem, result: TransferResult, pulled: RemoteFile | undefined): Promise<TransferResult> {
+  private async recorded (item: EnvironmentItem, result: TransferResult, pulled: RemoteFile | null | undefined): Promise<TransferResult> {
+    if (pulled === null) {
+      return result
+    }
     try {
+      if (pulled === undefined) {
+        throw new Error(`the copy of ${item.backend} could not be listed before the pull: pull again`)
+      }
       await this.recordSync(item, pulled)
       return result
     } catch (error) {
@@ -853,10 +861,11 @@ export class Environment {
    *
    * @param item - The file item.
    * @param keys - The value to keep for each differing key, null to take every value of the backend.
-   * @param pulled - The copy of the backend listed before it was read, when the backend lists it.
+   * @param pulled - The copy of the backend listed before it was read, null when the backend lists
+   * nothing, undefined when the listing failed or did not hold the item.
    * @returns What was done.
    */
-  private async pullKeys (item: EnvironmentItem, keys: KeyChoice[] | null, pulled: RemoteFile | undefined): Promise<TransferResult> {
+  private async pullKeys (item: EnvironmentItem, keys: KeyChoice[] | null, pulled: RemoteFile | null | undefined): Promise<TransferResult> {
     const { format, local, remote } = await this.readBothCopies(item)
     const ignored = ignoredKeysOf(item)
     const differences = diffConfig(format, local, remote, ignored)
