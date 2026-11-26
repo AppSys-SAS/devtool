@@ -25,7 +25,7 @@ let downloads: number
  * @param listing - Lists the files of the backend.
  * @returns The environment.
  */
-function environmentOf (item: EnvironmentItem, archive: Buffer, listing?: () => Promise<RemoteFile[]>): Environment {
+function environmentOf (item: EnvironmentItem, archive: Buffer, listing?: () => Promise<RemoteFile[] | null>): Environment {
   const backend: EnvironmentBackend = {
     list: listing ?? (async () => [{ path: item.path, size: archive.length, updatedAt: UPDATED_AT, version: 'v2' }]),
     download: async () => {
@@ -105,10 +105,36 @@ describe('pull of an item holding local data', () => {
   })
 
   it('reports a restore whose synchronization cannot be recorded, the local copy replaced', async () => {
-    const failingList = async (): Promise<never> => Promise.reject(new Error('backend unreachable'))
-    const result = await environmentOf(postgresItem, Buffer.from('new archive'), failingList).pull({ item: postgresItem, tables: null })
+    const listings = [true, false]
+    const listing = async (): Promise<RemoteFile[]> => {
+      if (listings.shift() ?? false) {
+        return [{ path: ITEM_PATH, size: 11, updatedAt: UPDATED_AT, version: 'v2' }]
+      }
+      throw new Error('backend unreachable')
+    }
+    const result = await environmentOf(postgresItem, Buffer.from('new archive'), listing).pull({ item: postgresItem, tables: null })
 
     expect(result).toEqual({ done: true, detail: 'database restored in db, not recorded as synchronized: backend unreachable' })
+    expect(await localState()).toEqual({ files: ['db.dump'], copy: 'new archive' })
+    expect((await readSyncJournal()).get(ITEM_PATH)).toEqual(PREVIOUS_RECORD)
+  })
+
+  it.each<[string, () => Promise<RemoteFile[]>]>([
+    ['failed', async () => Promise.reject(new Error('backend unreachable'))],
+    ['did not hold the item', async () => []]
+  ])('does not record as synchronized a pull whose listing before the download %s, whatever the listing after', async (_case, before) => {
+    const listings = [before, async (): Promise<RemoteFile[]> => [{ path: ITEM_PATH, size: 11, updatedAt: UPDATED_AT, version: 'v3' }]]
+    const listing = async (): Promise<RemoteFile[]> => (listings.length > 1 ? listings.shift()! : listings[0])()
+    const result = await environmentOf(postgresItem, Buffer.from('new archive'), listing).pull({ item: postgresItem, tables: null })
+
+    expect(result).toEqual({ done: true, detail: 'database restored in db, not recorded as synchronized: the copy of team could not be listed before the pull: pull again' })
+    expect((await readSyncJournal()).get(ITEM_PATH)).toEqual(PREVIOUS_RECORD)
+  })
+
+  it('pulls without recording from a backend that lists nothing', async () => {
+    const result = await environmentOf(postgresItem, Buffer.from('new archive'), async () => null).pull({ item: postgresItem, tables: null })
+
+    expect(result).toEqual({ done: true, detail: 'database restored in db' })
     expect(await localState()).toEqual({ files: ['db.dump'], copy: 'new archive' })
     expect((await readSyncJournal()).get(ITEM_PATH)).toEqual(PREVIOUS_RECORD)
   })

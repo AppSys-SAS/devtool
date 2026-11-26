@@ -141,8 +141,9 @@ A pull drops and recreates the database. A push dumps it, then sends the archive
 
 A pull of a database, a bucket or a Redis database replaces the local copy of the archive, and records
 the item as synchronized, only once its data is restored: after a restore that fails, the item still
-shows behind its backend. A pull records an item as synchronized only when the copy of its backend did
-not change while it ran; otherwise its result says so, and the item stays behind its backend.
+shows behind its backend. A pull records an item as synchronized only when the copy of its backend was
+listed before it ran and did not change meanwhile; otherwise its result says so, and the item stays
+behind its backend.
 
 ### Several databases in one container
 
