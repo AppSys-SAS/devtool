@@ -251,9 +251,8 @@ function textStream (text: string): AsyncIterable<Buffer> {
  * Reads a whole SQL dump of one database, failing when a line of the dump starts by selecting,
  * creating or dropping a database, as a dump made with `--databases` does, so such a dump is refused
  * before the database changes. The bodies of routines, triggers and events, written between
- * `DELIMITER` lines, are not read, their lines being no statements of the dump. Statements reaching
- * another database elsewhere in a line are refused by the server, the dump being loaded by an
- * account limited to its database.
+ * `DELIMITER` lines, are not read, their lines being no statements of the dump. It catches that
+ * mistake of the one dumping; a dump is trusted SQL, run with the rights of the server's root.
  *
  * @param sql - The dump, each statement starting a line.
  * @returns The size of the dump, in bytes.
@@ -381,27 +380,40 @@ END $adt$;
 
 /**
  * Replaces the database by the received `pg_dump -Fc` archive: the archive is restored into a new
- * database of a name no database has, with the privileges it grants to roles of the server, and that
- * database takes the place of the database once wholly restored, in one transaction; a refused
- * archive leaves the database as it was. Once the database is replaced, a former copy that cannot be
- * dropped is reported on the standard output.
+ * database of a name no database has, with the encoding, locale and owner of the database it
+ * replaces and the privileges the archive grants, those granted to roles the server lacks being
+ * skipped, and that database takes the place of the database once wholly
+ * restored, in one transaction; a refused archive leaves the database as it was. Once the database
+ * is replaced, a former copy that cannot be dropped is reported on the standard output.
  */
 const POSTGRES_WHOLE_RESTORE = `set -e
 export PGOPTIONS="-c client_min_messages=warning"
 ${UNIQUE_SUFFIX}STAGING="adt_staging_$SUFFIX"
 REPLACED="adt_replaced_$SUFFIX"
-GRANTS="$ARCHIVE.grants"
+work=$(mktemp -d)
 created=
 cleanup() {
-  rm -f "$ARCHIVE" "$GRANTS"
+  rm -rf "$ARCHIVE" "$work"
   [ -z "$created" ] || dropdb -U "$POSTGRES_USER" --force --if-exists "$STAGING" || leftover "the temporary database $STAGING could not be dropped: drop it by hand"
 }
-createdb -U "$POSTGRES_USER" "$STAGING"
+psql -U "$POSTGRES_USER" -d template1 -X -q -v ON_ERROR_STOP=1 -v staging="$STAGING" -v target="$DB" <<'SQL'
+SELECT coalesce(
+  (SELECT format('CREATE DATABASE %I TEMPLATE template0 ENCODING %L LC_COLLATE %L LC_CTYPE %L OWNER %I', :'staging', pg_encoding_to_char(encoding), datcollate, datctype, pg_get_userbyid(datdba)) FROM pg_database WHERE datname = :'target'),
+  format('CREATE DATABASE %I', :'staging')
+) \\gexec
+SQL
 created=1
 pg_restore -U "$POSTGRES_USER" -d "dbname='$STAGING'" --no-owner --no-privileges --exit-on-error "$ARCHIVE"
-pg_restore -l "$ARCHIVE" | grep -E '^[0-9]+; [0-9]+ [0-9]+ (DEFAULT )?ACL ' > "$GRANTS" || true
-if [ -s "$GRANTS" ]; then
-  pg_restore -L "$GRANTS" -f - "$ARCHIVE" | psql -U "$POSTGRES_USER" -d "dbname='$STAGING'" -X -q > /dev/null 2>&1 || true
+pg_restore -l "$ARCHIVE" > "$work/toc"
+grep -E '^[0-9]+; [0-9]+ [0-9]+ (DEFAULT )?ACL ' "$work/toc" > "$work/grants" || true
+if [ -s "$work/grants" ]; then
+  pg_restore -L "$work/grants" -f "$work/grants.sql" "$ARCHIVE"
+  psql -U "$POSTGRES_USER" -d "dbname='$STAGING'" -X -q -f "$work/grants.sql" > /dev/null 2> "$work/grants.err" || true
+  if grep 'ERROR:' "$work/grants.err" | grep -qv 'ERROR:  role ".*" does not exist'; then
+    cat "$work/grants.err" >&2
+    echo "the privileges of the archive could not be applied: nothing was changed" >&2
+    exit 1
+  fi
 fi
 swapped=$(psql -U "$POSTGRES_USER" -d template1 -X -q -v ON_ERROR_STOP=1 -v staging="$STAGING" -v target="$DB" -v replaced="$REPLACED" -1 <<'SQL'
 SELECT EXISTS (SELECT 1 FROM pg_database WHERE datname = :'target') AS present \\gset
@@ -431,7 +443,8 @@ pg_restore -l "$ARCHIVE" > /dev/null
 before="$1"; after="$2"; shift 2
 : > "$work/list"
 while [ $# -gt 0 ]; do
-  pg_restore -l -n "$1" -t "$2" "$ARCHIVE" | grep -E '^[0-9]+; [0-9]+ [0-9]+ TABLE DATA ' > "$work/entry" || true
+  pg_restore -l -n "$1" -t "$2" "$ARCHIVE" > "$work/entries"
+  grep -E '^[0-9]+; [0-9]+ [0-9]+ TABLE DATA ' "$work/entries" > "$work/entry" || true
   [ -s "$work/entry" ] || { echo "$1.$2 is not in the archive" >&2; exit 1; }
   cat "$work/entry" >> "$work/list"
   shift 2
@@ -512,24 +525,16 @@ grant() {
 
 /**
  * Replaces the database by the received SQL dump, keeping its character set and collation: the
- * dump is loaded by a temporary account holding privileges on the database only, besides naming the
- * definers of its objects, so the server refuses its statements addressing another database. The
- * database is saved first, and put back when the server refuses a step of the restore. Its saved
- * dump is kept in the container when it cannot be put back.
+ * database is saved first, and put back when the server refuses a step of the restore. The dump is
+ * loaded in the sandbox mode of the client, without local files, so it can neither run commands nor
+ * read files of the container. Its saved dump is kept in the container when it cannot be put back.
  */
 const MARIADB_WHOLE_RESTORE = `saved=$(mktemp)
-${UNIQUE_SUFFIX}LOADER="adt_loader_$SUFFIX"
-LOADER_PASSWORD=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \\n')
-loader=
 kept=
 cleanup() {
   rm -f "$ARCHIVE"
   [ -n "$kept" ] || rm -f "$saved"
-  [ -z "$loader" ] || mariadb -uroot -e "DROP USER IF EXISTS '$LOADER'@'localhost'" || leftover "the account $LOADER could not be dropped: drop it by hand"
 }
-mariadb -uroot -e "CREATE USER '$LOADER'@'localhost' IDENTIFIED BY '$LOADER_PASSWORD'" || { echo "the account loading the dump could not be created: nothing was changed" >&2; exit 1; }
-loader=1
-mariadb -uroot -e "GRANT ALL PRIVILEGES ON \\\`$GRANTED\\\`.* TO '$LOADER'@'localhost'; GRANT SET USER ON *.* TO '$LOADER'@'localhost'" || { echo "the account loading the dump could not be granted the database: nothing was changed" >&2; exit 1; }
 existed=
 options=
 if found=$(mariadb -uroot -N -B -e "USE \\\`$QUOTED\\\`; SELECT @@character_set_database, @@collation_database" 2> "$saved"); then
@@ -544,7 +549,7 @@ elif ! grep -q '^ERROR 1049 ' "$saved"; then
   echo "the server could not tell whether the database exists: nothing was changed" >&2
   exit 1
 fi
-empty "$options" && grant && MYSQL_PWD="$LOADER_PASSWORD" mariadb -u"$LOADER" "$DB" < "$ARCHIVE" > /dev/null && exit 0
+empty "$options" && grant && mariadb -uroot --sandbox --local-infile=0 "$DB" < "$ARCHIVE" > /dev/null && exit 0
 if [ -z "$existed" ]; then
   mariadb -uroot -e "DROP DATABASE IF EXISTS \\\`$QUOTED\\\`" && echo "the restore was refused: the database, which did not exist, was removed" >&2
 elif empty "$options" && mariadb -uroot "$DB" < "$saved" > /dev/null; then
