@@ -12,6 +12,7 @@ export interface TarEntry {
 }
 
 const REGULAR_TYPES = new Set<Header['type'] | null>(['file', 'contiguous-file'])
+const END_BYTES = 1024
 
 /**
  * Strips the `./` the tar command writes before each path of an archive of a folder.
@@ -33,6 +34,9 @@ function unsupported (header: Header): string | null {
   if (!(header.type as Header['type'] | null)) {
     return 'an entry of an unknown type'
   }
+  if (!REGULAR_TYPES.has(header.type) && header.type !== 'directory') {
+    return `a ${header.type}`
+  }
   const pax = (typeof header.pax === 'object' && header.pax !== null ? header.pax : {}) as Record<string, unknown>
   if (pax.size !== undefined && !(typeof pax.size === 'string' && /^\d+$/.test(pax.size))) {
     return `an entry of an invalid size ${typeof pax.size === 'string' ? pax.size : JSON.stringify(pax.size)}`
@@ -44,20 +48,22 @@ function unsupported (header: Header): string | null {
 }
 
 /**
- * Reads the regular files of a tar archive, other entries such as folders being skipped.
+ * Reads the regular files of a tar archive, folders being skipped and any other entry refused. The
+ * archive must end with its two empty blocks: one that stops before is refused once its last entry
+ * is read.
  *
  * @param source - The uncompressed archive.
  * @returns The files, in their order in the archive.
  */
 export async function* readTar (source: AsyncIterable<Buffer>): AsyncGenerator<TarEntry> {
-  let bytes = 0
-  const counted = async function* (): AsyncGenerator<Buffer> {
+  let tail: Buffer = Buffer.alloc(0)
+  const watched = async function* (): AsyncGenerator<Buffer> {
     for await (const chunk of source) {
-      bytes += chunk.length
+      tail = chunk.length >= END_BYTES ? chunk.subarray(-END_BYTES) : Buffer.concat([tail, chunk]).subarray(-END_BYTES)
       yield chunk
     }
   }
-  const input = Readable.from(counted())
+  const input = Readable.from(watched())
   const extractor = extract()
   input.on('error', error => extractor.destroy(error))
   input.pipe(extractor)
@@ -73,8 +79,8 @@ export async function* readTar (source: AsyncIterable<Buffer>): AsyncGenerator<T
       }
       entry.resume()
     }
-    if (bytes === 0) {
-      throw new Error('not a tar archive')
+    if (tail.length < END_BYTES || tail.some(byte => byte !== 0)) {
+      throw new Error('not a complete tar archive: it does not end with its two empty blocks')
     }
   } finally {
     input.destroy()

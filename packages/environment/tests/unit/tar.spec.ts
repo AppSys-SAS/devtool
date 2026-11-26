@@ -95,7 +95,22 @@ describe('tar archives', () => {
 
   it('reads an archive holding no file, and refuses one without any block', async () => {
     expect(await filesOf(writeTar(entriesOf({})))).toEqual({})
-    await expect(filesOf(Readable.from([]))).rejects.toThrow('not a tar archive')
+    await expect(filesOf(Readable.from([]))).rejects.toThrow('not a complete tar archive')
+  })
+
+  it('refuses an archive ending after a whole entry, without its two empty blocks', async () => {
+    const entries = Buffer.concat([rawEntry('a.txt', '0', 'alpha'), rawEntry('b.txt', '0', 'beta')])
+    expect(await filesOf(Readable.from([Buffer.concat([entries, TAR_END])]))).toEqual({ 'a.txt': 'alpha', 'b.txt': 'beta' })
+    await expect(filesOf(Readable.from([entries]))).rejects.toThrow('it does not end with its two empty blocks')
+    await expect(filesOf(Readable.from([Buffer.concat([entries, Buffer.alloc(512)])]))).rejects.toThrow('it does not end with its two empty blocks')
+    await expect(filesOf(Readable.from([entries, Buffer.alloc(700), Buffer.alloc(324)]))).resolves.toEqual({ 'a.txt': 'alpha', 'b.txt': 'beta' })
+  })
+
+  it('skips folders and refuses links, which have no object to become', async () => {
+    const withFolder = Buffer.concat([rawEntry('docs/', '5', ''), rawEntry('docs/a.txt', '0', 'alpha'), TAR_END])
+    expect(await filesOf(Readable.from([withFolder]))).toEqual({ 'docs/a.txt': 'alpha' })
+    await expect(filesOf(Readable.from([Buffer.concat([rawEntry('latest', '2', ''), TAR_END])]))).rejects.toThrow('latest is a symlink, which the devtool does not read')
+    await expect(filesOf(Readable.from([Buffer.concat([rawEntry('copy.txt', '1', ''), TAR_END])]))).rejects.toThrow('copy.txt is a link')
   })
 
   it('refuses sparse files and entries of an unknown type rather than storing their raw bytes', async () => {

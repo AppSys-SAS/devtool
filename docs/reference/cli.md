@@ -110,6 +110,11 @@ devtool env file rm api/old.yml -b archive
 Every one takes `-b, --backend <name>`, a backend of `environment.backends`, the default one when
 omitted. The files come decrypted by the encryption of the backend, but not by that of an item.
 
+The [groups](/configuration/environment/#who-may-pull-and-push) of the item stored at that path apply,
+else those of the backend: `pull` to download, `push` to upload or delete. Write the path of an item
+exactly as the environment declares it: a path differing from it by its letter case or Unicode form only
+is refused.
+
 ## devtool cert renew
 
 ```bash

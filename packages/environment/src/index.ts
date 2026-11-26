@@ -20,6 +20,7 @@ export {
   type EnvironmentConfigFile,
   type EnvironmentOptions,
   type EnvironmentSelection,
+  itemStoredAt,
   listTables,
   mediaTypeOf,
   overwritesLocalData,

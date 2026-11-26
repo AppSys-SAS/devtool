@@ -16,6 +16,7 @@ import {
   type EnvironmentItem,
   type EnvironmentOptions,
   type EnvironmentSelection,
+  itemStoredAt,
   listTables,
   mediaTypeOf,
   overwritesLocalData,
@@ -114,7 +115,8 @@ async function closeBackends (backends: Map<string, EnvironmentBackend>): Promis
 /**
  * Runs a task on a file of a backend of the environment, when the groups of the item stored there,
  * or else of the backend, let the developer transfer in the direction of the task, then closes the
- * backends. The task receives the path in its canonical form, the one the groups were checked for.
+ * backends. The task receives the path in its canonical form, the one the groups were checked for;
+ * a path differing from the one of an item by its letter case or Unicode form only is refused.
  * @param name The name of the backend, the default one when missing.
  * @param filePath The path of the file in the backend.
  * @param direction Whether the task reads the file, or writes or deletes it.
@@ -130,8 +132,7 @@ async function withBackend (name: string | undefined, filePath: string, directio
       throw new Error(`no backend named ${slug} in environment.backends (${[...backends.keys()].join(', ')})`)
     }
     const canonical = canonicalBackendPath(filePath)
-    const item = options.items.find(candidate => candidate.path === canonical && candidate.backend === slug)
-    const refusal = await environment.refusal(item ?? settings, direction)
+    const refusal = await environment.refusal(itemStoredAt(options.items, slug, canonical) ?? settings, direction)
     if (refusal !== null) {
       throw new Error(`${canonical} on ${slug}: ${refusal}`)
     }

@@ -68,7 +68,8 @@ async function* listObjects (client: S3Client, bucket: string): AsyncGenerator<{
 }
 
 /**
- * Reads every object of a bucket, one at a time.
+ * Reads every object of a bucket, one at a time, failing on a key a snapshot could not be restored
+ * under.
  *
  * @param client - The S3 client.
  * @param bucket - The bucket.
@@ -76,6 +77,7 @@ async function* listObjects (client: S3Client, bucket: string): AsyncGenerator<{
  */
 async function* readObjects (client: S3Client, bucket: string): AsyncGenerator<BucketObject> {
   for await (const { key } of listObjects(client, bucket)) {
+    storableKey(key)
     const object = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }))
     yield { key, size: object.ContentLength ?? 0, contentType: object.ContentType, lastModified: object.LastModified, body: object.Body as Readable }
   }
@@ -121,6 +123,23 @@ export async function snapshotBucketTar (client: S3Client, bucket: string, fileP
 }
 
 /**
+ * Checks that an S3 server stores an object under the key it is given: an empty key, or a key with
+ * an empty segment other than a final slash, or a `.` or `..` segment, spaces around it or not, may
+ * be stored under another key or refused.
+ *
+ * @param key - The key.
+ * @returns The key.
+ */
+function storableKey (key: string): string {
+  const segments = key.split('/')
+  const rewritten = segments.some((segment, index) => ['.', '..'].includes(segment.trim()) || (segment === '' && index < segments.length - 1))
+  if (key === '' || rewritten) {
+    throw new Error(`the object key "${key}" could be stored under another key: write keys without empty, . or .. segments`)
+  }
+  return key
+}
+
+/**
  * Reads the objects of the records of a bucket snapshot.
  *
  * @param records - The records.
@@ -131,7 +150,7 @@ export async function* objectsOfArchive (records: AsyncIterable<ArchiveRecord>):
     if (header.type !== 'object' || typeof header.key !== 'string' || typeof header.size !== 'number') {
       throw new Error('not a bucket snapshot')
     }
-    yield { key: header.key, size: header.size, contentType: typeof header.contentType === 'string' ? header.contentType : undefined, body }
+    yield { key: storableKey(header.key), size: header.size, contentType: typeof header.contentType === 'string' ? header.contentType : undefined, body }
   }
 }
 
@@ -143,7 +162,7 @@ export async function* objectsOfArchive (records: AsyncIterable<ArchiveRecord>):
  */
 export async function* objectsOfTar (archive: AsyncIterable<Buffer>): AsyncGenerator<BucketObject> {
   for await (const { name, size, body } of readTar(transformed(archive, createGunzip()))) {
-    yield { key: name, size, contentType: mime.lookup(name) || 'application/octet-stream', body }
+    yield { key: storableKey(name), size, contentType: mime.lookup(name) || 'application/octet-stream', body }
   }
 }
 
@@ -161,61 +180,47 @@ export async function checkTar (archive: AsyncIterable<Buffer>): Promise<void> {
 }
 
 /**
- * Replaces the content of a bucket, created when missing, by some objects; the bucket is left as it
- * is when the first object cannot be read.
+ * Replaces the content of a bucket, created when missing, by some objects: every object is stored
+ * first, then the objects the bucket held before and that are not among them are deleted, so a
+ * failure deletes nothing, though objects already stored hold their new content.
  *
  * @param client - The S3 client.
  * @param bucket - The bucket.
  * @param objects - The objects.
- * @returns The number of objects restored.
+ * @returns The number of objects the bucket holds once restored.
  */
 export async function restoreBucket (client: S3Client, bucket: string, objects: AsyncIterable<BucketObject>): Promise<number> {
-  const iterator = objects[Symbol.asyncIterator]()
-  let next = await iterator.next()
-  try {
-    await emptyBucket(client, bucket)
-    let count = 0
-    while (!next.done) {
-      const { key, size, contentType, body } = next.value
-      await client.send(
-        new PutObjectCommand({
-          Bucket: bucket,
-          Key: key,
-          Body: Readable.from(body, { objectMode: false }),
-          ContentLength: size,
-          ContentType: contentType
-        })
-      )
-      count += 1
-      next = await iterator.next()
-    }
-    return count
-  } finally {
-    if (!next.done) {
-      await iterator.return?.()
-    }
-  }
-}
-
-/**
- * Deletes every object of a bucket, creating the bucket when missing.
- *
- * @param client - The S3 client.
- * @param bucket - The bucket.
- */
-async function emptyBucket (client: S3Client, bucket: string): Promise<void> {
   try {
     await client.send(new HeadBucketCommand({ Bucket: bucket }))
   } catch {
     await client.send(new CreateBucketCommand({ Bucket: bucket }))
   }
 
-  const keys: string[] = []
+  const held: string[] = []
   for await (const { key } of listObjects(client, bucket)) {
-    keys.push(key)
+    held.push(key)
   }
-  for (let start = 0; start < keys.length; start += 1000) {
-    const batch = keys.slice(start, start + 1000).map(Key => ({ Key }))
-    await client.send(new DeleteObjectsCommand({ Bucket: bucket, Delete: { Objects: batch, Quiet: true } }))
+  const restored = new Set<string>()
+  for await (const { key, size, contentType, body } of objects) {
+    await client.send(
+      new PutObjectCommand({
+        Bucket: bucket,
+        Key: key,
+        Body: Readable.from(body, { objectMode: false }),
+        ContentLength: size,
+        ContentType: contentType
+      })
+    )
+    restored.add(key)
   }
+
+  const stale = held.filter(key => !restored.has(key))
+  for (let start = 0; start < stale.length; start += 1000) {
+    const batch = stale.slice(start, start + 1000).map(Key => ({ Key }))
+    const { Errors: errors = [] } = await client.send(new DeleteObjectsCommand({ Bucket: bucket, Delete: { Objects: batch, Quiet: true } }))
+    if (errors.length > 0) {
+      throw new Error(`objects the snapshot does not hold could not be deleted: ${errors.map(error => `${error.Key} (${error.Message ?? error.Code})`).join(', ')}`)
+    }
+  }
+  return restored.size
 }

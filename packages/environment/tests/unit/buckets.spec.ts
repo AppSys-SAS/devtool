@@ -6,9 +6,9 @@ import { Readable } from 'node:stream'
 import { createGzip, gzipSync } from 'node:zlib'
 import { DeleteObjectsCommand, GetObjectCommand, ListObjectsV2Command, PutObjectCommand, type S3Client } from '@aws-sdk/client-s3'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { transformed } from '../../src/archive.js'
+import { type ArchiveRecord, transformed } from '../../src/archive.js'
 import type { BackendContext, EnvironmentBackend } from '../../src/backends/backend.js'
-import { type BucketObject, checkTar, objectsOfTar, restoreBucket, snapshotBucketTar } from '../../src/buckets.js'
+import { type BucketObject, checkTar, objectsOfArchive, objectsOfTar, restoreBucket, snapshotBucketTar } from '../../src/buckets.js'
 import { Environment, type EnvironmentItem } from '../../src/environment.js'
 import { writeTar } from '../../src/tar.js'
 import { paxRecord, rawEntry, TAR_END } from './tar-fixtures.js'
@@ -24,9 +24,10 @@ interface StoredObject {
 /**
  * Builds an S3 client keeping one bucket in memory.
  * @param objects - The objects of the bucket, by key.
+ * @param storedKey - Gives the key the server stores an object under.
  * @returns The client.
  */
-function memoryClient (objects: Map<string, StoredObject>): S3Client {
+function memoryClient (objects: Map<string, StoredObject>, storedKey = (key: string): string => key): S3Client {
   const send = async (command: unknown): Promise<unknown> => {
     if (command instanceof ListObjectsV2Command) {
       return { Contents: [...objects].map(([Key, object]) => ({ Key, Size: object.body.length })), IsTruncated: false }
@@ -46,12 +47,28 @@ function memoryClient (objects: Map<string, StoredObject>): S3Client {
       for await (const chunk of command.input.Body as Readable) {
         chunks.push(chunk as Buffer)
       }
-      objects.set(command.input.Key!, { body: Buffer.concat(chunks), contentType: command.input.ContentType })
+      objects.set(storedKey(command.input.Key!), { body: Buffer.concat(chunks), contentType: command.input.ContentType })
       return {}
     }
     return {}
   }
   return { send } as unknown as S3Client
+}
+
+/**
+ * Reads the keys of objects, reading each body.
+ * @param objects - The objects.
+ * @returns Their keys.
+ */
+async function keysOf (objects: AsyncIterable<BucketObject>): Promise<string[]> {
+  const keys: string[] = []
+  for await (const { key, body } of objects) {
+    for await (const chunk of body) {
+      void chunk
+    }
+    keys.push(key)
+  }
+  return keys
 }
 
 beforeEach(async () => {
@@ -105,6 +122,82 @@ describe('native bucket archives', () => {
 
     await expect(restoreBucket(client, 'uploads', objects)).rejects.toThrow('disk full')
     expect(closed).toBe(true)
+  })
+
+  it('deletes the objects the snapshot does not hold only once every object is stored', async () => {
+    const target = new Map<string, StoredObject>([
+      ['stale.txt', { body: Buffer.from('old'), contentType: 'text/plain' }],
+      ['a.txt', { body: Buffer.from('old a'), contentType: 'text/plain' }]
+    ])
+    const failing = (async function* (): AsyncGenerator<BucketObject> {
+      yield { key: 'a.txt', size: 5, contentType: 'text/plain', body: Readable.from([Buffer.from('new a')]) }
+      throw new Error('archive cut')
+    })()
+    await expect(restoreBucket(memoryClient(target), 'uploads', failing)).rejects.toThrow('archive cut')
+    expect([...target.keys()].sort()).toEqual(['a.txt', 'stale.txt'])
+
+    const whole = (async function* (): AsyncGenerator<BucketObject> {
+      yield { key: 'a.txt', size: 5, contentType: 'text/plain', body: Readable.from([Buffer.from('new a')]) }
+      yield { key: 'b.txt', size: 1, contentType: 'text/plain', body: Readable.from([Buffer.from('b')]) }
+    })()
+    expect(await restoreBucket(memoryClient(target), 'uploads', whole)).toBe(2)
+    expect(Object.fromEntries([...target].map(([key, object]) => [key, object.body.toString()]))).toEqual({ 'a.txt': 'new a', 'b.txt': 'b' })
+  })
+
+  it('deletes only objects the bucket held before, keeping an object the server stored under another key', async () => {
+    const target = new Map<string, StoredObject>([['old.txt', { body: Buffer.from('old'), contentType: 'text/plain' }]])
+    const objects = (async function* (): AsyncGenerator<BucketObject> {
+      yield { key: 'plain.txt', size: 1, contentType: 'text/plain', body: Readable.from([Buffer.from('p')]) }
+      yield { key: '/lead.txt', size: 1, contentType: 'text/plain', body: Readable.from([Buffer.from('l')]) }
+    })()
+    await restoreBucket(memoryClient(target, key => key.replace(/^\/+/, '')), 'uploads', objects)
+
+    expect([...target.keys()].sort()).toEqual(['lead.txt', 'plain.txt'])
+  })
+
+  it.each(['/lead.txt', 'a//b.txt', 'a/./b.txt', 'a/../b.txt', '..', 'a/ ./b.txt', 'a/ .. /b.txt'])('refuses an archive holding the key %s, which a server may store under another key', async key => {
+    const tar = gzipSync(Buffer.concat([rawEntry('a.txt', '0', 'a'), rawEntry(key, '0', 'x'), TAR_END]))
+    await expect(checkTar(Readable.from([tar]))).rejects.toThrow('could be stored under another key')
+    const records = (async function* (): AsyncGenerator<ArchiveRecord> {
+      yield { header: { type: 'object', key, size: 0 }, body: Readable.from([]) }
+    })()
+    await expect(objectsOfArchive(records).next()).rejects.toThrow('could be stored under another key')
+  })
+
+  it('keeps a folder marker, a key ending with a slash, in a snapshot and in a tar archive, and skips the folders of a tar archive', async () => {
+    const records = (async function* (): AsyncGenerator<ArchiveRecord> {
+      yield { header: { type: 'object', key: 'photos/', size: 0 }, body: Readable.from([]) }
+    })()
+    expect(await keysOf(objectsOfArchive(records))).toEqual(['photos/'])
+
+    const source = new Map<string, StoredObject>([
+      ['photos/', { body: Buffer.alloc(0), contentType: 'application/x-directory' }],
+      ['photos/a.jpg', { body: Buffer.from('a'), contentType: 'image/jpeg' }]
+    ])
+    const archivePath = path.join(folder, 'uploads.tar.gz')
+    expect(await snapshotBucketTar(memoryClient(source), 'uploads', archivePath)).toBe(2)
+    expect(await keysOf(objectsOfTar(createReadStream(archivePath)))).toEqual(['photos/', 'photos/a.jpg'])
+
+    const folders = gzipSync(Buffer.concat([rawEntry('docs/', '5', ''), rawEntry('docs/a.txt', '0', 'a'), TAR_END]))
+    expect(await keysOf(objectsOfTar(Readable.from([folders])))).toEqual(['docs/a.txt'])
+  })
+
+  it('refuses to snapshot a bucket holding a key it could not be restored under', async () => {
+    const source = new Map<string, StoredObject>([['a//b.txt', { body: Buffer.from('b'), contentType: 'text/plain' }]])
+    await expect(snapshotBucketTar(memoryClient(source), 'uploads', path.join(folder, 'uploads.tar.gz'))).rejects.toThrow('the object key "a//b.txt" could be stored under another key')
+  })
+
+  it('fails when the server refuses to delete an object the snapshot does not hold', async () => {
+    const target = new Map<string, StoredObject>([['locked.txt', { body: Buffer.from('l'), contentType: 'text/plain' }]])
+    const memory = memoryClient(target)
+    const client = {
+      send: async (command: unknown) => (command instanceof DeleteObjectsCommand ? { Errors: [{ Key: 'locked.txt', Code: 'AccessDenied', Message: 'Access Denied' }] } : memory.send(command as never))
+    } as unknown as S3Client
+    const objects = (async function* (): AsyncGenerator<BucketObject> {
+      yield { key: 'a.txt', size: 1, contentType: 'text/plain', body: Readable.from([Buffer.from('a')]) }
+    })()
+
+    await expect(restoreBucket(client, 'uploads', objects)).rejects.toThrow('objects the snapshot does not hold could not be deleted: locked.txt (Access Denied)')
   })
 
   it('leaves the bucket as it is when the archive cannot be read', async () => {

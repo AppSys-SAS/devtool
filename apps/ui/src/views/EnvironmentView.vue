@@ -114,7 +114,7 @@ const overwritten = computed(() =>
     .filter(({ item }) => item && item.kind !== 'file')
     .map(({ target, item }) => {
       if (item?.kind === 'bucket') {
-        return `${item.path}: bucket ${item.bucket} emptied and reloaded`
+        return `${item.path}: bucket ${item.bucket} replaced by its snapshot`
       }
 
       if (item?.kind === 'redis') {
