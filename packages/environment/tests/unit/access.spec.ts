@@ -112,7 +112,7 @@ describe('Environment groups', () => {
     expect(backend.list).not.toHaveBeenCalled()
     expect(backend.download).not.toHaveBeenCalled()
     expect(backend.upload).not.toHaveBeenCalled()
-    await expect(fs.access(path.join(folder, 'cache'))).rejects.toThrow()
+    await expect(fs.access(path.join(folder, 'env'))).rejects.toThrow()
   })
 
   it('refuses to read the copy of the backend for a key comparison without the pull groups', async () => {

@@ -511,6 +511,12 @@ describe('readEnvironmentOptions', () => {
       }
     })
 
+    it('refuses an item path inside the folder holding the locks of the transfers, whatever its spelling', () => {
+      for (const reserved of ['.devtool-locks', '.DEVTOOL-LOCKS', '.devtool-locks/x.lock', '.DEVTOOL-LOCKS/x.lock', '.devtool-locks\\x.lock']) {
+        expect(() => readEnvironmentOptions({ files: [reserved] }), reserved).toThrow(`invalid path of ${reserved} in the environment: .devtool-locks holds the locks of the transfers`)
+      }
+    })
+
     it('refuses an item path declared twice', () => {
       expect(() => readEnvironmentOptions({ files: ['api/config.yml'], buckets: [{ path: 'api/config.yml', bucket: 'b' }] })).toThrow('api/config.yml is declared twice in the environment')
     })

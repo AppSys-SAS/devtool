@@ -19,26 +19,30 @@ const mariadbItem: EnvironmentItem = { ...postgresItem, engine: 'mariadb' }
 
 let folder: string
 let downloads: number
+let downloadGate: Promise<void>
 
 /**
- * Builds an environment of one item whose backend stores one archive.
+ * Builds an environment of one item whose backend stores one archive, downloaded once
+ * `downloadGate` resolves.
  * @param item - The item.
  * @param archive - The archive the backend stores.
  * @param listing - Lists the files of the backend.
+ * @param cacheDir - The cache folder of the environment.
  * @returns The environment.
  */
-function environmentOf (item: EnvironmentItem, archive: Buffer, listing?: () => Promise<RemoteFile[] | null>): Environment {
+function environmentOf (item: EnvironmentItem, archive: Buffer, listing?: () => Promise<RemoteFile[] | null>, cacheDir = folder): Environment {
   const backend: EnvironmentBackend = {
     list: listing ?? (async () => [{ path: item.path, size: archive.length, updatedAt: UPDATED_AT, version: 'v2' }]),
     download: async () => {
       downloads += 1
+      await downloadGate
       return Readable.from([archive])
     },
     upload: async () => undefined,
     remove: async () => undefined,
     close: async () => undefined
   }
-  const context: BackendContext = { resolve: async text => text, askSecret: async () => '', cacheDir: folder, configFolder: folder, auth: null }
+  const context: BackendContext = { resolve: async text => text, askSecret: async () => '', cacheDir, configFolder: folder, auth: null }
   const options = { folder: path.join(folder, 'env'), backends: [], defaultBackend: 'team', items: [item], configFiles: [], autoPulls: [], s3: null }
   return new Environment(new Map([['team', backend]]), options, context)
 }
@@ -64,6 +68,7 @@ async function localState (): Promise<{ files: string[], copy: string }> {
 beforeEach(async () => {
   folder = await fs.mkdtemp(path.join(os.tmpdir(), 'devtool-pull-'))
   downloads = 0
+  downloadGate = Promise.resolve()
   await fs.mkdir(path.join(folder, 'env', 'api'), { recursive: true })
   await fs.mkdir(path.join(folder, 'bin'))
   await fs.writeFile(path.join(folder, 'env', 'api', 'db.dump'), 'previous copy')
@@ -175,14 +180,32 @@ describe('pull of an item holding local data', () => {
 
   it('refuses a pull and a push while another process transfers the item, changing nothing', async () => {
     const environment = environmentOf(postgresItem, Buffer.from('new archive'))
-    const key = createHash('sha256').update(path.join(folder, 'env', ITEM_PATH)).digest('hex')
-    await fs.mkdir(path.join(folder, 'locks'))
-    await fs.writeFile(path.join(folder, 'locks', `${key}.lock`), String(process.ppid))
+    const key = createHash('sha256').update(ITEM_PATH).digest('hex')
+    await fs.mkdir(path.join(folder, 'env', '.devtool-locks'))
+    await fs.writeFile(path.join(folder, 'env', '.devtool-locks', `${key}.lock`), String(process.ppid))
 
     await expect(environment.pull({ item: postgresItem, tables: null })).rejects.toThrow(`api/db.dump is in use by another process (${process.ppid})`)
     await expect(environment.push({ item: postgresItem, tables: null })).rejects.toThrow('api/db.dump is in use by another process')
     expect(downloads).toBe(0)
     expect(await localState()).toEqual({ files: ['db.dump'], copy: 'previous copy' })
+  })
+
+  it('refuses a transfer of an item another environment of the same folder runs, whatever their cache folders and spellings of its path', async () => {
+    let open = (): void => undefined
+    downloadGate = new Promise(resolve => {
+      open = resolve
+    })
+    const first = environmentOf(postgresItem, Buffer.from('new archive'), undefined, path.join(folder, 'cache-a')).pull({ item: postgresItem, tables: null })
+    await vi.waitFor(() => {
+      expect(downloads).toBe(1)
+    })
+
+    const second = environmentOf(postgresItem, Buffer.from('new archive'), undefined, path.join(folder, 'cache-b'))
+    await expect(second.pull({ item: postgresItem, tables: null })).rejects.toThrow('api/db.dump is being transferred')
+    const spelled: EnvironmentItem = { ...postgresItem, path: 'API/db.dump' }
+    await expect(environmentOf(spelled, Buffer.from('new archive')).pull({ item: spelled, tables: null })).rejects.toThrow('API/db.dump is being transferred')
+    open()
+    expect(await first).toEqual({ done: true, detail: 'database restored in db' })
   })
 
   it('refuses some tables of an archive restoring the whole database only, before downloading it', async () => {

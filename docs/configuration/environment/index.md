@@ -147,7 +147,8 @@ listed before it ran and did not change meanwhile; otherwise its result says so,
 behind its backend. One transfer of an item runs at a time, whether from the CLI, the server or an
 agent: another one is refused until it ends, with `<path> is being transferred` from the same
 process, or `<path> is in use by another process`. That second message names the lock, a file of
-the cache folder: remove it should a transfer stopped abruptly leave it behind.
+the `.devtool-locks` folder of the environment folder, which no item may use: remove it should a
+transfer stopped abruptly leave it behind.
 
 ### Several databases in one container
 

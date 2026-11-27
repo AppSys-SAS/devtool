@@ -17,6 +17,9 @@ import { type ConfigFormat, configFormatOf, countChoices, diffConfig, IgnoredKey
 /** Path of the shared devtool configuration, the file declaring the environment. */
 export const SHARED_CONFIG_PATH = 'devtool/config.yml'
 
+/** Folder of the environment holding the locks of the transfers, which no item may use. */
+const LOCKS_FOLDER = '.devtool-locks'
+
 const MEDIA_TYPES: Record<string, string> = {
   '.yml': 'application/yaml',
   '.yaml': 'application/yaml',
@@ -265,6 +268,9 @@ export function readEnvironmentOptions (section: unknown): EnvironmentOptions | 
       throw new Error(`invalid path of ${item.path} in the environment: write it ${canonical}`)
     }
     const folded = foldedPath(item.path)
+    if (folded === LOCKS_FOLDER || folded.startsWith(`${LOCKS_FOLDER}/`)) {
+      throw new Error(`invalid path of ${item.path} in the environment: ${LOCKS_FOLDER} holds the locks of the transfers`)
+    }
     const twin = items.find(other => foldedPath(other.path) === folded)
     if (twin?.path === item.path) {
       throw new Error(`${item.path} is declared twice in the environment`)
@@ -636,16 +642,17 @@ export class Environment {
   }
 
   /**
-   * Runs a transfer of an item while no other transfer of it runs, in any process; the lock lives
-   * in the cache folder, named after the local copy of the item.
+   * Runs a transfer of an item while no other transfer of it runs, in any process using the same
+   * environment folder; the lock lives in that folder, named after the folded path of the item, so
+   * spellings a store takes for one file share it.
    *
    * @param item - The item.
    * @param transfer - The transfer.
    * @returns What the transfer did.
    */
   private async locked (item: EnvironmentItem, transfer: () => Promise<TransferResult>): Promise<TransferResult> {
-    const key = createHash('sha256').update(localPathOf(this._options.folder, item.path)).digest('hex')
-    return withFileLock(path.join(this._context.cacheDir, 'locks', `${key}.lock`), item.path, transfer)
+    const key = createHash('sha256').update(foldedPath(item.path)).digest('hex')
+    return withFileLock(path.join(this._options.folder, LOCKS_FOLDER, `${key}.lock`), item.path, transfer)
   }
 
   /**
