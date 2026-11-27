@@ -1,5 +1,5 @@
 import { ref } from 'vue'
-import type { EnvironmentKeyChoicePayload, FileEntryPayload, PortConflictAction, SidebarOrderChange } from '@appsys-sas/devtool-shared'
+import type { EnvironmentAction, EnvironmentKeyChoicePayload, FileEntryPayload, PortConflictAction, SidebarOrderChange } from '@appsys-sas/devtool-shared'
 import configStore from './config'
 import filesStore from './files'
 import certificatesStore from './certificates'
@@ -278,12 +278,20 @@ class WsStore {
   }
 
   /**
-   * Asks the server to pull or push environment items.
-   * @param direction Whether the backend copies replace the local ones, or the reverse.
+   * Asks the server to run an action over environment items.
+   * @param action Pull or push the items, restore their local data from their local copies, or remove those copies.
    * @param targets The items, with the tables of the databases and the keys of the YAML files (null for the whole item).
    */
-  envRun (direction: 'pull' | 'push', targets: { path: string, tables: string[] | null, keys: EnvironmentKeyChoicePayload[] | null }[]): void {
-    this.send('envRun', { direction, targets })
+  envRun (action: EnvironmentAction, targets: { path: string, tables: string[] | null, keys: EnvironmentKeyChoicePayload[] | null }[]): void {
+    this.send('envRun', { action, targets })
+  }
+
+  /**
+   * Asks the server to cancel downloads of the pull in progress.
+   * @param index The step of the item, null for every step not finished.
+   */
+  envCancel (index: number | null): void {
+    this.send('envCancel', { index })
   }
 
   /**

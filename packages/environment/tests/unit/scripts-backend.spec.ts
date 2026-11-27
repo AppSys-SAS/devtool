@@ -3,10 +3,12 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import type { Readable } from 'node:stream'
+import { setTimeout as delay } from 'node:timers/promises'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { TransferAccess } from '../../src/access.js'
 import type { BackendContext, BackendSettings, EnvironmentBackend } from '../../src/backends/backend.js'
 import { scripts } from '../../src/backends/scripts.js'
+import { progressRecorder } from './progress-fixtures.js'
 
 const FOLDER_SCRIPT = path.resolve(import.meta.dirname, '../../../../docs/examples/scripts-backend/folder.sh')
 const hasBash = ((): boolean => {
@@ -165,6 +167,54 @@ describe.skipIf(!hasBash)('scripts backend commands', () => {
     const files = await scripts.create(options!, context).list()
     expect(files).toEqual([{ path: 's3cr3t-s3cr3t', size: 1, updatedAt: new Date('2026-01-02T03:04:05Z'), version: '2026-01-02T03:04:05.000Z' }])
   })
+
+  it('reports the size of the file the download command writes while it runs, then the whole file', async () => {
+    const backend = backendOf({
+      list: ['true'],
+      download: ['bash', '-c', 'printf %s "$0" > "$1"; sleep 0.8; printf %s "$0$0" > "$1"', 'abcdef', '%{ADT:FILE}'],
+      upload: ['true'],
+      remove: ['true']
+    })
+    const received = progressRecorder()
+    expect(await textOf(await backend.download('a.gz', { onProgress: received.onProgress }))).toBe('abcdefabcdef')
+    expect(received.reports).toContainEqual([6, null])
+    expect(received.reports.at(-1)).toEqual([12, 12])
+  })
+
+  it('reports the progress lines of the upload command, split or not, at most the size of the file', async () => {
+    const backend = backendOf({
+      list: ['true'],
+      download: ['true'],
+      upload: ['bash', '-c', 'echo "progress: 4" >&2; echo "progress: 5 of 10" >&2; printf "progr" >&2; sleep 0.2; echo "ess: 9" >&2; echo "progress: 99" >&2'],
+      remove: ['true']
+    })
+    const sent = progressRecorder()
+    await backend.upload('a.gz', await localFile('a.gz', '0123456789'), 'application/gzip', { onProgress: sent.onProgress })
+    expect(sent.reports).toEqual([[4, 10], [9, 10], [10, 10], [10, 10]])
+  })
+
+  it('leaves the progress lines out of the message of a failing command', async () => {
+    const failing = ['bash', '-c', 'echo "progress: 4" >&2; echo "storage full" >&2; exit 1']
+    const backend = backendOf({ list: ['true'], download: ['true'], upload: failing, remove: ['true'] })
+    await expect(backend.upload('a.gz', await localFile('a.gz', 'x'), 'application/gzip')).rejects.toThrow(/failed \(exit 1\): storage full$/)
+  })
+
+  it('stops the download command its signal cancels, with the processes it started', async () => {
+    const marker = path.join(folder, 'written-after-cancel')
+    const backend = backendOf({
+      list: ['true'],
+      download: ['bash', '-c', '(sleep 1; touch "$1") & printf partial > "$0"; wait', '%{ADT:FILE}', marker],
+      upload: ['true'],
+      remove: ['true']
+    })
+    const cancel = new AbortController()
+    setTimeout(() => cancel.abort(new Error('cancelled')), 300)
+    const started = Date.now()
+    await expect(backend.download('a.gz', { signal: cancel.signal })).rejects.toThrow('download of shared stopped')
+    expect(Date.now() - started).toBeLessThan(1000)
+    await delay(1500)
+    await expect(fs.access(marker)).rejects.toThrow()
+  }, 10_000)
 
   it('needs upload and remove commands unless the backend refuses every push', async () => {
     const commands = { list: ['true'], download: ['true'] }

@@ -5,11 +5,14 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import type { Readable } from 'node:stream'
-import { type BackendContext, type BackendProblem, type BackendSettings, type BackendType, type EnvironmentBackend, readText, type RemoteFile } from './backend.js'
+import { type BackendContext, type BackendProblem, type BackendSettings, type BackendType, type EnvironmentBackend, readText, type RemoteFile, type TransferOptions } from './backend.js'
 
 const OPERATIONS = ['list', 'download', 'upload', 'remove'] as const
 const ABSENT_EXIT_CODE = 2
 const STDERR_TAIL_LENGTH = 2000
+const PROGRESS_POLL_MS = 250
+const STOP_GRACE_MS = 5000
+const PROGRESS_LINE = /^progress: (\d+)$/
 
 type Operation = typeof OPERATIONS[number]
 
@@ -17,6 +20,16 @@ type Operation = typeof OPERATIONS[number]
 interface CommandResult {
   code: number
   stdout: string
+}
+
+/** How a command of an operation runs. */
+interface RunOptions {
+  /** Whether exit code 2, the file being absent, is an answer rather than a failure. */
+  allowAbsent?: boolean
+  /** Told the bytes of each `progress: <bytes>` line of the error output. */
+  onReported?: (bytes: number) => void
+  /** Stops the command and every process it started, the command then running in a process group of its own. */
+  signal?: AbortSignal
 }
 
 /** Settings of a backend made of your own commands. */
@@ -33,6 +46,21 @@ export interface ScriptsSettings extends BackendSettings {
   remove: string[] | null
   /** Environment variables of the commands, value blocks not read yet. */
   env: Record<string, string>
+}
+
+/**
+ * Sends a signal to a process group.
+ * @param pid The process leading the group.
+ * @param name The signal.
+ * @returns False when the group is already gone.
+ */
+function signalGroup (pid: number, name: NodeJS.Signals): boolean {
+  try {
+    process.kill(-pid, name)
+    return true
+  } catch {
+    return false
+  }
 }
 
 /**
@@ -92,16 +120,29 @@ class ScriptsBackend implements EnvironmentBackend {
   /**
    * Opens a stored file, written by the `download` command to a temporary file removed once read.
    * @param filePath The path of the file.
+   * @param options Follows the size of the temporary file while the command writes it, and stops the command.
    * @returns Its content, or null when the command exits with code 2.
    */
-  async download (filePath: string): Promise<Readable | null> {
+  async download (filePath: string, { onProgress, signal }: TransferOptions = {}): Promise<Readable | null> {
     const temporary = path.join(os.tmpdir(), `devtool-download-${randomUUID()}`)
+    let running = true
+    const poll = setInterval(() => {
+      fs.stat(temporary).then(({ size }) => {
+        if (running) {
+          onProgress?.(size, null)
+        }
+      }, () => undefined)
+    }, PROGRESS_POLL_MS)
     try {
-      const { code } = await this.run('download', filePath, temporary, true)
+      const { code } = await this.run('download', filePath, temporary, { allowAbsent: true, signal }).finally(() => {
+        running = false
+      })
       if (code === ABSENT_EXIT_CODE) {
         await fs.rm(temporary, { force: true })
         return null
       }
+      const { size } = await fs.stat(temporary)
+      onProgress?.(size, size)
       const content = createReadStream(temporary)
       content.on('close', () => {
         void fs.rm(temporary, { force: true })
@@ -110,16 +151,23 @@ class ScriptsBackend implements EnvironmentBackend {
     } catch (error) {
       await fs.rm(temporary, { force: true })
       throw error
+    } finally {
+      clearInterval(poll)
     }
   }
 
   /**
-   * Stores a local file with the `upload` command.
+   * Stores a local file with the `upload` command, which may report the bytes it sent with
+   * `progress: <bytes>` lines on its error output.
    * @param filePath The path of the file in the backend.
    * @param localFile The local file.
+   * @param _mediaType Unused, the command choosing how the file is stored.
+   * @param options Follows the bytes the command reports, the size of the file standing for the total.
    */
-  async upload (filePath: string, localFile: string): Promise<void> {
-    await this.run('upload', filePath, localFile)
+  async upload (filePath: string, localFile: string, _mediaType: string, { onProgress }: TransferOptions = {}): Promise<void> {
+    const { size } = await fs.stat(localFile)
+    await this.run('upload', filePath, localFile, { onReported: bytes => onProgress?.(Math.min(bytes, size), size) })
+    onProgress?.(size, size)
   }
 
   /**
@@ -142,10 +190,10 @@ class ScriptsBackend implements EnvironmentBackend {
    * @param operation The operation.
    * @param filePath The path of the file in the backend.
    * @param localFile The local file the command reads or writes.
-   * @param allowAbsent Whether exit code 2, the file being absent, is an answer rather than a failure.
+   * @param options Whether exit code 2 is an answer, who is told the progress lines, and what stops the command.
    * @returns What the command printed and its exit code.
    */
-  private async run (operation: Operation, filePath: string, localFile: string, allowAbsent = false): Promise<CommandResult> {
+  private async run (operation: Operation, filePath: string, localFile: string, { allowAbsent = false, onReported, signal }: RunOptions = {}): Promise<CommandResult> {
     const command = this._settings[operation]
     if (command === null) {
       throw new Error(`${this._settings.slug} declares no ${operation} command`)
@@ -158,20 +206,51 @@ class ScriptsBackend implements EnvironmentBackend {
     }
     const cwd = path.resolve(this._context.configFolder, this._settings.cwd)
     const result = await new Promise<CommandResult & { stderr: string }>((resolve, reject) => {
-      const child = spawn(args[0], args.slice(1), { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] })
+      signal?.throwIfAborted()
+      const child = spawn(args[0], args.slice(1), { cwd, env, detached: signal !== undefined, stdio: ['ignore', 'pipe', 'pipe'] })
+      let forced: NodeJS.Timeout | undefined
+      /**
+       * Stops the process group of the command, killing it when it outlives a grace delay.
+       */
+      const stop = (): void => {
+        const { pid } = child
+        if (pid !== undefined && signalGroup(pid, 'SIGTERM')) {
+          forced = setTimeout(() => signalGroup(pid, 'SIGKILL'), STOP_GRACE_MS)
+        }
+      }
+      signal?.addEventListener('abort', stop, { once: true })
       const stdout: Buffer[] = []
       const stderr: Buffer[] = []
+      let partialLine = ''
       child.stdout.on('data', (chunk: Buffer) => stdout.push(chunk))
-      child.stderr.on('data', (chunk: Buffer) => stderr.push(chunk))
+      child.stderr.on('data', (chunk: Buffer) => {
+        stderr.push(chunk)
+        const lines = (partialLine + chunk.toString('utf8')).split('\n')
+        partialLine = lines.pop() ?? ''
+        for (const line of lines) {
+          const reported = PROGRESS_LINE.exec(line.trim())
+          if (reported) {
+            onReported?.(Number(reported[1]))
+          }
+        }
+      })
       child.on('error', error => {
+        signal?.removeEventListener('abort', stop)
         reject(new Error(`${operation} of ${this._settings.slug}: cannot run ${args[0]}: ${error.message}`))
       })
       child.on('close', code => {
+        signal?.removeEventListener('abort', stop)
+        clearTimeout(forced)
+        if (signal?.aborted) {
+          reject(new Error(`${operation} of ${this._settings.slug} stopped`))
+          return
+        }
         resolve({ code: code ?? 1, stdout: Buffer.concat(stdout).toString('utf8'), stderr: Buffer.concat(stderr).toString('utf8') })
       })
     })
     if (result.code !== 0 && !(allowAbsent && result.code === ABSENT_EXIT_CODE)) {
-      throw new Error(`${operation} of ${this._settings.slug} failed (exit ${result.code}): ${result.stderr.trim().slice(-STDERR_TAIL_LENGTH)}`)
+      const messages = result.stderr.split('\n').filter(line => !PROGRESS_LINE.test(line.trim())).join('\n')
+      throw new Error(`${operation} of ${this._settings.slug} failed (exit ${result.code}): ${messages.trim().slice(-STDERR_TAIL_LENGTH)}`)
     }
     return result
   }

@@ -2,12 +2,12 @@ import { createHash } from 'node:crypto'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { Readable } from 'node:stream'
+import { PassThrough, Readable } from 'node:stream'
 import { gzipSync } from 'node:zlib'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ArchiveWriter } from '../../src/archive.js'
 import type { BackendContext, EnvironmentBackend, RemoteFile } from '../../src/backends/backend.js'
-import { Environment, type EnvironmentItem } from '../../src/environment.js'
+import { Environment, type EnvironmentItem, TransferCancelledError } from '../../src/environment.js'
 import { readSyncJournal, type SyncRecord, writeSyncRecord } from '../../src/sync-journal.js'
 
 const UPDATED_AT = new Date('2026-01-01T00:00:00Z')
@@ -23,27 +23,32 @@ let downloadGate: Promise<void>
 
 /**
  * Builds an environment of one item whose backend stores one archive, downloaded once
- * `downloadGate` resolves.
+ * `downloadGate` resolves, each transfer of bytes reported whole at once.
  * @param item - The item.
- * @param archive - The archive the backend stores.
+ * @param archive - The archive the backend stores, or the stream it gives.
  * @param listing - Lists the files of the backend.
  * @param cacheDir - The cache folder of the environment.
  * @returns The environment.
  */
-function environmentOf (item: EnvironmentItem, archive: Buffer, listing?: () => Promise<RemoteFile[] | null>, cacheDir = folder): Environment {
+function environmentOf (item: EnvironmentItem, archive: Buffer | Readable, listing?: () => Promise<RemoteFile[] | null>, cacheDir = folder): Environment {
+  const size = Buffer.isBuffer(archive) ? archive.length : 0
   const backend: EnvironmentBackend = {
-    list: listing ?? (async () => [{ path: item.path, size: archive.length, updatedAt: UPDATED_AT, version: 'v2' }]),
-    download: async () => {
+    list: listing ?? (async () => [{ path: item.path, size, updatedAt: UPDATED_AT, version: 'v2' }]),
+    download: async (_path, { onProgress } = {}) => {
       downloads += 1
       await downloadGate
-      return Readable.from([archive])
+      onProgress?.(size, size)
+      return Buffer.isBuffer(archive) ? Readable.from([archive]) : archive
     },
-    upload: async () => undefined,
+    upload: async (_path, localFile, _mediaType, { onProgress } = {}) => {
+      const { size } = await fs.stat(localFile)
+      onProgress?.(size, size)
+    },
     remove: async () => undefined,
     close: async () => undefined
   }
   const context: BackendContext = { resolve: async text => text, askSecret: async () => '', cacheDir, configFolder: folder, auth: null }
-  const options = { folder: path.join(folder, 'env'), backends: [], defaultBackend: 'team', items: [item], configFiles: [], autoPulls: [], s3: null }
+  const options = { folder: path.join(folder, 'env'), backends: [], defaultBackend: 'team', items: [item], configFiles: [], autoPulls: [], sections: { by: 'folder' as const, names: new Map<string, string>() }, s3: null }
   return new Environment(new Map([['team', backend]]), options, context)
 }
 
@@ -213,5 +218,108 @@ describe('pull of an item holding local data', () => {
 
     expect(downloads).toBe(0)
     expect(await localState()).toEqual({ files: ['db.dump'], copy: 'previous copy' })
+  })
+})
+
+describe('restore and removal of a local copy', () => {
+  it('restores the local data from the local copy without reaching the backend', async () => {
+    expect(await environmentOf(postgresItem, Buffer.from('new archive')).restoreLocal({ item: postgresItem, tables: null })).toEqual({ done: true, detail: 'database restored in db' })
+
+    expect(downloads).toBe(0)
+    expect(await fs.readFile(path.join(folder, 'seen'), 'utf-8')).toBe('previous copy')
+    expect(await localState()).toEqual({ files: ['db.dump'], copy: 'previous copy' })
+    expect((await readSyncJournal()).get(ITEM_PATH)).toEqual(PREVIOUS_RECORD)
+  })
+
+  it('reports an item without local copy, and refuses a file or tables of a native mariadb archive', async () => {
+    const environment = environmentOf(postgresItem, Buffer.from('new archive'))
+    await fs.rm(path.join(folder, 'env', 'api', 'db.dump'))
+    expect(await environment.restoreLocal({ item: postgresItem, tables: null })).toEqual({ done: false, detail: 'no local copy, pull it first' })
+
+    const file: EnvironmentItem = { kind: 'file', path: 'api/notes.txt', ...open, ignore: null }
+    await expect(environment.restoreLocal({ item: file, tables: null })).rejects.toThrow('api/notes.txt is a file: its local copy is its data, pull it instead')
+    await expect(environment.removeLocalCopy({ item: file, tables: null })).rejects.toThrow('api/notes.txt is a file')
+    await expect(environmentOf(mariadbItem, Buffer.alloc(0)).restoreLocal({ item: mariadbItem, tables: ['users'] })).rejects.toThrow('api/db.dump is a native mariadb archive: restore the whole database')
+  })
+
+  it('removes the local copy and keeps the synchronization record', async () => {
+    const environment = environmentOf(postgresItem, Buffer.from('new archive'))
+    expect(await environment.removeLocalCopy({ item: postgresItem, tables: null })).toMatchObject({ done: true })
+
+    expect(await fs.readdir(path.join(folder, 'env', 'api'))).toEqual([])
+    expect((await readSyncJournal()).get(ITEM_PATH)).toEqual(PREVIOUS_RECORD)
+    expect(await environment.removeLocalCopy({ item: postgresItem, tables: null })).toMatchObject({ done: true })
+    expect(downloads).toBe(0)
+  })
+})
+
+describe('cancel of a pull', () => {
+  it('leaves everything as it was when cancelled while the archive downloads, raising a cancel', async () => {
+    let release = (): void => undefined
+    downloadGate = new Promise(resolve => {
+      release = resolve
+    })
+    const cancel = new AbortController()
+    const pull = environmentOf(postgresItem, Buffer.from('new archive')).pull({ item: postgresItem, tables: null, signal: cancel.signal })
+    await vi.waitFor(() => expect(downloads).toBe(1))
+    cancel.abort(new Error('cancelled'))
+    release()
+
+    await expect(pull).rejects.toBeInstanceOf(TransferCancelledError)
+    await expect(fs.access(path.join(folder, 'seen'))).rejects.toThrow()
+    expect(await localState()).toEqual({ files: ['db.dump'], copy: 'previous copy' })
+    expect((await readSyncJournal()).get(ITEM_PATH)).toEqual(PREVIOUS_RECORD)
+  })
+
+  it('stops a download whose backend stalls, closing its stream', async () => {
+    const stalled = new PassThrough()
+    stalled.write('half an archive')
+    const cancel = new AbortController()
+    const pull = environmentOf(postgresItem, stalled).pull({ item: postgresItem, tables: null, signal: cancel.signal })
+    setTimeout(() => cancel.abort(new Error('cancelled')), 100)
+
+    await expect(pull).rejects.toBeInstanceOf(TransferCancelledError)
+    expect(stalled.destroyed).toBe(true)
+    expect(await localState()).toEqual({ files: ['db.dump'], copy: 'previous copy' })
+  }, 5_000)
+
+  it('restores to its end once the archive is complete, the download reported whole first', async () => {
+    await fakeDocker(`sleep 1; cat "${path.join(folder, 'env', 'api', 'db.dump')}" > "${path.join(folder, 'seen')}"`)
+    const cancel = new AbortController()
+    const reports: [number, number | null][] = []
+    const pull = environmentOf(postgresItem, Buffer.from('new archive')).pull({
+      item: postgresItem,
+      tables: null,
+      signal: cancel.signal,
+      onProgress: (done, total) => {
+        reports.push([done, total])
+      }
+    })
+    setTimeout(() => cancel.abort(new Error('cancelled')), 400)
+
+    expect(await pull).toEqual({ done: true, detail: 'database restored in db' })
+    expect(await localState()).toEqual({ files: ['db.dump'], copy: 'new archive' })
+    expect(reports.at(-1)).toEqual([11, 11])
+  }, 10_000)
+})
+
+describe('progress of a transfer', () => {
+  it('relays what the backend reports of a pull and of a push', async () => {
+    const item: EnvironmentItem = { kind: 'file', path: 'api/notes.txt', ...open, ignore: null }
+    const environment = environmentOf(item, Buffer.from('pulled notes'))
+    const reports: [number, number | null][] = []
+    /**
+     * Records a report of a transfer.
+     * @param done - The bytes moved.
+     * @param total - The size of the file.
+     */
+    const onProgress = (done: number, total: number | null): void => {
+      reports.push([done, total])
+    }
+
+    await environment.pull({ item, tables: null, onProgress })
+    await fs.writeFile(path.join(folder, 'env', 'api', 'notes.txt'), 'local')
+    await environment.push({ item, tables: null, onProgress })
+    expect(reports).toEqual([[12, 12], [12, 12], [5, 5]])
   })
 })

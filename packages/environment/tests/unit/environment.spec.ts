@@ -1,7 +1,7 @@
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { canonicalBackendPath, type EnvironmentItem, type EnvironmentOptions, itemStoredAt, overwritesLocalData, parseTargets, readEnvironmentOptions, SHARED_CONFIG_PATH, transfersParts } from '../../src/environment.js'
+import { canonicalBackendPath, type EnvironmentItem, type EnvironmentOptions, itemStoredAt, overwritesLocalData, parseTargets, readEnvironmentOptions, sectionOf, SHARED_CONFIG_PATH, transfersParts } from '../../src/environment.js'
 
 const open = { groups: { pull: null, push: null } }
 const fileItem: EnvironmentItem = { kind: 'file', path: 'api/config.yml', backend: null, encryption: null, ...open, ignore: null }
@@ -16,7 +16,7 @@ const redisItem: EnvironmentItem = { kind: 'redis', path: 'api/redis.gz', backen
  * @returns The environment, with no backend, configuration file, auto pull nor S3 server.
  */
 function environmentOf (items: EnvironmentItem[]): EnvironmentOptions {
-  return { folder: '/example/env', backends: [], defaultBackend: null, items, configFiles: [], autoPulls: [], s3: null }
+  return { folder: '/example/env', backends: [], defaultBackend: null, items, configFiles: [], autoPulls: [], sections: { by: 'folder', names: new Map() }, s3: null }
 }
 
 /**
@@ -68,6 +68,7 @@ describe('readEnvironmentOptions', () => {
         items: [],
         configFiles: [],
         autoPulls: [],
+        sections: { by: 'folder', names: new Map() },
         s3: null
       })
     })
@@ -95,6 +96,7 @@ describe('readEnvironmentOptions', () => {
           { path: 'devtool/docker-compose.yml', display: true, local: false }
         ],
         autoPulls: [],
+        sections: { by: 'folder', names: new Map() },
         s3: { endpoint: 'http://localhost:9000', accessKeyId: 'minioadmin', secretAccessKey: 'minioadmin', region: 'us-east-1' }
       })
     })
@@ -108,6 +110,42 @@ describe('readEnvironmentOptions', () => {
       })
 
       expect(options.items.map(item => item.kind)).toEqual(['file', 'database', 'bucket', 'redis'])
+    })
+  })
+
+  describe('sections', () => {
+    /**
+     * Names the group of each item of a section declaring some items of every kind.
+     *
+     * @param sections - The raw `sections` setting.
+     * @returns The group of each item, in their order.
+     */
+    function groupsOf (sections: unknown): string[] {
+      const options = read({
+        sections,
+        files: ['.team/api/config.yml', 'readme.md', 'constructor/config.yml'],
+        databases: [{ path: '.team/api/db.gz', engine: 'postgres', container: 'postgres' }],
+        redis: [{ path: 'cache/redis.gz', url: 'redis://localhost:6379/0' }]
+      })
+      return options.items.map(item => sectionOf(options.sections, item))
+    }
+
+    it('groups by the first folder of the item paths unless renamed, names of the prototype of an object left out', () => {
+      expect(groupsOf({ names: { '.team': 'Team' } })).toEqual(['Team', 'readme.md', 'constructor', 'Team', 'cache'])
+      expect(groupsOf(undefined)).toEqual(['.team', 'readme.md', 'constructor', '.team', 'cache'])
+    })
+
+    it('groups by kind of item, with default names unless renamed', () => {
+      expect(groupsOf({ by: 'type', names: { database: 'Bases' } })).toEqual(['Files', 'Files', 'Files', 'Bases', 'Redis databases'])
+    })
+
+    it('refuses an unknown grouping and names that are not texts', () => {
+      expect(() => read({ sections: { by: 'kind' } })).toThrow('invalid sections in the environment: {"by":"kind"}, by must be folder or type')
+      expect(() => read({ sections: { names: { api: '' } } })).toThrow('invalid sections in the environment')
+      expect(() => read({ sections: { names: { api: 42 } } })).toThrow('invalid sections in the environment')
+      expect(() => read({ sections: { names: ['api'] } })).toThrow('invalid sections in the environment')
+      expect(() => read({ sections: { names: null } })).toThrow('invalid sections in the environment')
+      expect(() => read({ sections: 'type' })).toThrow('invalid sections in the environment')
     })
   })
 

@@ -743,6 +743,8 @@ export interface EnvironmentCopyPayload {
 export interface EnvironmentItemPayload {
   path: string
   kind: 'file' | 'database' | 'bucket' | 'redis'
+  /** The name of the group the item is listed in. */
+  section: string
   /** The name of the backend storing the item, null when the environment declares none. */
   backend: string | null
   /** Whether the file is encrypted before it reaches its backend. */
@@ -803,11 +805,19 @@ export interface EnvironmentStepPayload {
   target: string
   status: 'pending' | 'running' | 'done' | 'skipped' | 'failed'
   detail: string | null
+  /** The bytes the backend moved and the size of the file, null when it does not know it, while the item is transferred. */
+  progress: { done: number, total: number | null } | null
 }
 
-/** A pull or a push of environment items, running or finished. */
+/**
+ * What a run does to each of its items: pull or push it, restore its local data from its local copy,
+ * or remove that copy.
+ */
+export type EnvironmentAction = 'pull' | 'push' | 'restore' | 'remove'
+
+/** A run over environment items, running or finished. */
 export interface EnvironmentRunPayload {
-  direction: 'pull' | 'push'
+  action: EnvironmentAction
   steps: EnvironmentStepPayload[]
   finished: boolean
 }

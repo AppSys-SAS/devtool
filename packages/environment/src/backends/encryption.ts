@@ -1,9 +1,9 @@
 import { createCipheriv, createDecipheriv, hkdfSync, randomBytes, scryptSync } from 'node:crypto'
 import { createReadStream, createWriteStream } from 'node:fs'
 import fs from 'node:fs/promises'
-import { Readable } from 'node:stream'
+import { pipeline as streamPipeline, Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
-import type { BackendContext, BackendProblem, EnvironmentBackend, RemoteFile } from './backend.js'
+import type { BackendContext, BackendProblem, EnvironmentBackend, RemoteFile, TransferOptions } from './backend.js'
 
 const MAGIC = Buffer.from('ADTE')
 const VERSION = 1
@@ -137,6 +137,17 @@ export async function* encrypt (source: AsyncIterable<Buffer>, fileKey: FileKey,
   yield seal(pending, true)
 }
 
+/** Raised when a chunk of an encrypted file does not open with its key: another secret, or a damaged file. */
+export class WrongSecretError extends Error {
+  /**
+   * @param message - What could not be decrypted.
+   */
+  constructor (message: string) {
+    super(message)
+    this.name = 'WrongSecretError'
+  }
+}
+
 /**
  * Decrypts a file written by `encrypt`, failing when it was changed, cut, or encrypted with another
  * secret or for another path.
@@ -156,7 +167,7 @@ export async function* decrypt (source: AsyncIterable<Buffer>, fileKey: FileKey,
     try {
       return Buffer.concat([decipher.update(sealed.subarray(0, sealed.length - TAG_LENGTH)), decipher.final()])
     } catch {
-      throw new Error(`cannot decrypt ${filePath}: wrong encryption secret, or damaged file`)
+      throw new WrongSecretError(`cannot decrypt ${filePath}: wrong encryption secret, or damaged file`)
     }
   }
   for await (const data of source) {
@@ -233,7 +244,9 @@ export class EncryptionSecret {
 }
 
 /**
- * Wraps a backend so the files are encrypted before they reach it and decrypted when they come back.
+ * Wraps a backend so the files are encrypted before they reach it and decrypted when they come back,
+ * the progress of a transfer counting the encrypted bytes the backend moves. A decrypted content
+ * closed early closes the stored file, and the secret is forgotten only when it does not open a file.
  * @param backend The backend storing the encrypted files.
  * @param secret The secret of the files.
  * @returns The backend handling the encryption.
@@ -245,23 +258,29 @@ export function encrypted (backend: EnvironmentBackend, secret: EncryptionSecret
       return files?.map(file => ({ ...file, size: plainLengthOf(file.size) ?? file.size })) ?? null
     },
 
-    async download (path: string): Promise<Readable | null> {
+    async download (path: string, options?: TransferOptions): Promise<Readable | null> {
       const fileKey = await secret.fileKey()
-      const content = await backend.download(path)
+      const content = await backend.download(path, options)
       if (!content) {
         return null
       }
-      const plain = Readable.from(decrypt(content, fileKey, path))
-      plain.once('error', () => secret.forget())
+      const plain = streamPipeline(content, async function* (source: AsyncIterable<Buffer>) {
+        yield* decrypt(source, fileKey, path)
+      }, error => {
+        if (error instanceof WrongSecretError) {
+          secret.forget()
+        }
+      })
+      plain.once('close', () => content.destroy())
       return plain
     },
 
-    async upload (path: string, localFile: string): Promise<void> {
+    async upload (path: string, localFile: string, _mediaType: string, options?: TransferOptions): Promise<void> {
       const fileKey = await secret.fileKey()
       const sealedFile = `${localFile}.sealed`
       try {
         await pipeline(Readable.from(encrypt(createReadStream(localFile), fileKey, path)), createWriteStream(sealedFile, { mode: 0o600 }))
-        await backend.upload(path, sealedFile, 'application/octet-stream')
+        await backend.upload(path, sealedFile, 'application/octet-stream', options)
       } finally {
         await fs.rm(sealedFile, { force: true })
       }

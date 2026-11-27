@@ -1,9 +1,9 @@
 import { createReadStream } from 'node:fs'
 import fs from 'node:fs/promises'
-import { pipeline, Readable, Transform, type TransformCallback } from 'node:stream'
+import { pipeline, Readable } from 'node:stream'
 import type { ReadableStream as WebReadableStream } from 'node:stream/web'
 import { accessToken, type AuthOptions } from '@appsys-sas/devtool-auth'
-import { type BackendSettings, type BackendType, type EnvironmentBackend, readText, type RemoteFile } from './backend.js'
+import { type BackendSettings, type BackendType, byteCounter, type EnvironmentBackend, readText, type RemoteFile, type TransferOptions } from './backend.js'
 
 /** Settings of a CDN serving the devtool files API under `<url>/devtool`. */
 export interface CdnSettings extends BackendSettings {
@@ -22,24 +22,6 @@ export class CdnRequestError extends Error {
     super(message)
     this.name = 'CdnRequestError'
   }
-}
-
-/**
- * Builds a stream failing at its end when it did not carry an exact length.
- * @param expected The expected length in bytes, or null to accept any.
- * @returns The transform checking the length.
- */
-function lengthCheck (expected: number | null): Transform {
-  let received = 0
-  return new Transform({
-    transform (chunk: Buffer, _encoding: BufferEncoding, callback: TransformCallback): void {
-      received += chunk.length
-      callback(null, chunk)
-    },
-    flush (callback: TransformCallback): void {
-      callback(expected !== null && received !== expected ? new Error(`incomplete download: ${received} of ${expected} bytes`) : null)
-    }
-  })
 }
 
 /**
@@ -70,17 +52,18 @@ class CdnBackend implements EnvironmentBackend {
   /**
    * Opens a file; the stream fails when the file arrives incomplete.
    * @param path The path of the file.
+   * @param options Follows the bytes received, and abandons the request.
    * @returns The content, or null when the file does not exist.
    */
-  async download (path: string): Promise<Readable | null> {
-    const response = await this.request('GET', path)
+  async download (path: string, { onProgress, signal }: TransferOptions = {}): Promise<Readable | null> {
+    const response = await this.request('GET', path, { signal })
     if (response.status === 404) {
       await response.body?.cancel()
       return null
     }
     await this.assertOk(response)
     const length = response.headers.get('content-length')
-    return pipeline(Readable.fromWeb(response.body as WebReadableStream<Uint8Array>), lengthCheck(length === null ? null : Number(length)), () => undefined)
+    return pipeline(Readable.fromWeb(response.body as WebReadableStream<Uint8Array>), byteCounter(length === null ? null : Number(length), onProgress), () => undefined)
   }
 
   /**
@@ -88,12 +71,13 @@ class CdnBackend implements EnvironmentBackend {
    * @param path The path of the file on the CDN.
    * @param localFile The local file.
    * @param mediaType The media type served with the file.
+   * @param options Follows the bytes sent.
    */
-  async upload (path: string, localFile: string, mediaType: string): Promise<void> {
+  async upload (path: string, localFile: string, mediaType: string, { onProgress }: TransferOptions = {}): Promise<void> {
     const { size } = await fs.stat(localFile)
     await this.assertOk(await this.request('PUT', path, {
       headers: { 'Content-Type': mediaType, 'Content-Length': String(size) },
-      body: Readable.toWeb(createReadStream(localFile)) as ReadableStream<Uint8Array>,
+      body: Readable.toWeb(pipeline(createReadStream(localFile), byteCounter(size, onProgress), () => undefined)) as ReadableStream<Uint8Array>,
       duplex: 'half'
     }))
   }

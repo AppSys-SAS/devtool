@@ -64,6 +64,7 @@ export const BUCKET_FIELDS: FieldDefinition[] = [
 
 export const S3_FIELDS: FieldDefinition[] = [
   { path: ['environment', 'folder'], label: 'Local folder', placeholder: '~/.config/appsys' },
+  { path: ['environment', 'sections', 'by'], label: 'Group items by', type: 'select', options: ['folder', 'type'], defaultValue: 'folder' },
   { path: ['environment', 's3', 'endpoint'], label: 'S3 endpoint', placeholder: 'http://localhost:9000' },
   { path: ['environment', 's3', 'accessKeyId'], label: 'S3 access key' },
   { path: ['environment', 's3', 'secretAccessKey'], label: 'S3 secret key' }

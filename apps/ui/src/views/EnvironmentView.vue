@@ -16,12 +16,14 @@ import {
   Package,
   Pencil,
   RefreshCw,
+  RotateCcw,
   SkipForward,
+  Trash2,
   TriangleAlert,
   UserRound,
   X
 } from '@lucide/vue'
-import type { EnvironmentCopyPayload, EnvironmentItemPayload, EnvironmentKeyChoicePayload, EnvironmentStepPayload } from '@appsys-sas/devtool-shared'
+import type { EnvironmentAction, EnvironmentCopyPayload, EnvironmentItemPayload, EnvironmentKeyChoicePayload, EnvironmentStepPayload } from '@appsys-sas/devtool-shared'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import ConfigKeyChooser from '@/components/ConfigKeyChooser.vue'
 import { Badge } from '@/components/ui/badge'
@@ -30,7 +32,7 @@ import { Card } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { expiryClass, expiryLabel } from '@/lib/expiry'
-import { formatBytes, formatRelativeDate } from '@/lib/format'
+import { formatBytes, formatProgress, formatRelativeDate, progressPercent } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import environmentStore from '@/stores/environment'
 import sessionStore from '@/stores/session'
@@ -49,6 +51,7 @@ interface ItemSelection {
 }
 
 const SAME_DATE_TOLERANCE_MS = 1000
+const ACTION_LABELS: Record<EnvironmentAction, string> = { pull: 'Pull', push: 'Push', restore: 'Restore', remove: 'Removal of local copies' }
 const TONE_CLASSES: Record<SyncStatus['tone'], string> = {
   remote: 'border-sky-500/40 text-sky-600 dark:text-sky-400',
   local: 'border-amber-500/40 text-amber-600 dark:text-amber-400',
@@ -61,6 +64,7 @@ const state = environmentStore.state
 const session = sessionStore.state
 const selected = ref<Record<string, ItemSelection>>({})
 const tableFilters = ref<Record<string, string>>({})
+const pendingAction = ref<EnvironmentAction | null>(null)
 const confirmOpen = ref(false)
 const pullingConfig = ref(false)
 
@@ -81,13 +85,12 @@ watch(running, isRunning => {
 })
 
 const groups = computed(() => {
-  const byProject = new Map<string, EnvironmentItemPayload[]>()
+  const bySection = new Map<string, EnvironmentItemPayload[]>()
   for (const item of state.value?.items ?? []) {
-    const project = item.path.split('/')[0]
-    byProject.set(project, [...(byProject.get(project) ?? []), item])
+    bySection.set(item.section, [...(bySection.get(item.section) ?? []), item])
   }
 
-  return [...byProject.entries()].map(([project, items]) => ({ project, items }))
+  return [...bySection.entries()].map(([section, items]) => ({ section, items }))
 })
 
 const targets = computed(() =>
@@ -129,18 +132,75 @@ const overwritten = computed(() =>
     })
 )
 const selectedItems = computed(() => (state.value?.items ?? []).filter(item => selected.value[item.path]))
+const confirmation = computed(() => {
+  switch (pendingAction.value) {
+    case 'pull':
+      return { title: 'Replace local data?', confirm: 'Pull and replace', intro: 'The backend copies will replace your local data:', lines: overwritten.value }
+    case 'restore':
+      return { title: 'Restore local data?', confirm: 'Restore', intro: 'The local copies will replace your local data:', lines: overwritten.value }
+    case 'remove':
+      return {
+        title: 'Remove local copies?',
+        confirm: 'Remove',
+        intro: 'These local copies are deleted; the data they restored stays as it is:',
+        lines: selectedItems.value.map(item => `${item.path} (${item.local ? formatBytes(item.local.size) : 'none'})`)
+      }
+    default:
+      return null
+  }
+})
 
 /**
- * Tells whether a direction can be run: the groups of the developer let them transfer every selected
- * item, those restricted to some tables or key groups allowing it, or at least one item while none is
- * selected.
- * @param direction The direction.
+ * Tells whether an action can be run. A pull or a push needs the groups of the developer to let them
+ * transfer every selected item, those restricted to some tables or key groups allowing it, or at
+ * least one item while none is selected. A restore or a removal needs selected items whose local
+ * data lives apart from their local copy, a restore of some tables needing them to allow it.
+ * @param action The action.
  * @returns True when the action is shown.
  */
-function shows (direction: 'pull' | 'push'): boolean {
+function shows (action: EnvironmentAction): boolean {
+  if (action === 'restore' || action === 'remove') {
+    return selectedItems.value.length > 0 && selectedItems.value.every(item =>
+      item.kind !== 'file' && item.local !== null && (action === 'remove' || selected.value[item.path].tables === null || item.parts.pull))
+  }
   return selectedItems.value.length > 0
-    ? selectedItems.value.every(item => item.allowed[direction] && (selected.value[item.path].tables === null || item.parts[direction]))
-    : (state.value?.items ?? []).some(item => item.allowed[direction])
+    ? selectedItems.value.every(item => item.allowed[action] && (selected.value[item.path].tables === null || item.parts[action]))
+    : (state.value?.items ?? []).some(item => item.allowed[action])
+}
+
+/**
+ * Runs an action over the selected items, after confirmation when it replaces or removes local data.
+ * @param action The action.
+ */
+function start (action: EnvironmentAction): void {
+  if (action === 'push' || (action === 'pull' && overwritten.value.length === 0)) {
+    wsStore.envRun(action, targets.value)
+    return
+  }
+  pendingAction.value = action
+  confirmOpen.value = true
+}
+
+/**
+ * Runs the action waiting for confirmation over the selected items.
+ */
+function confirm (): void {
+  if (pendingAction.value) {
+    wsStore.envRun(pendingAction.value, targets.value)
+  }
+}
+
+/**
+ * Tells whether a step of the pull in progress can still be cancelled: it waits, or its archive is
+ * not fully downloaded yet.
+ * @param step The step.
+ * @returns True when its cancel button is shown.
+ */
+function cancellable (step: EnvironmentStepPayload): boolean {
+  if (state.value?.run?.action !== 'pull' || state.value.run.finished) {
+    return false
+  }
+  return step.status === 'pending' || (step.status === 'running' && !(step.progress?.total != null && step.progress.done >= step.progress.total))
 }
 
 /**
@@ -153,7 +213,19 @@ function backendOf (item: EnvironmentItemPayload): string {
 }
 
 /**
- * Compares the local copy of an item with its copy on its backend.
+ * Tells whether two dates differ by more than the precision of the stores.
+ * @param date The first date, in ISO format.
+ * @param other The second date, in ISO format.
+ * @returns True when they differ.
+ */
+function differs (date: string, other: string): boolean {
+  return Math.abs(new Date(date).getTime() - new Date(other).getTime()) > SAME_DATE_TOLERANCE_MS
+}
+
+/**
+ * Compares the local copy of an item with its copy on its backend. An item whose local data lives
+ * apart from its local copy stays synchronized once that copy is removed, as long as the copy of its
+ * backend does not change.
  * @param item The item.
  * @returns The status to show, or null when the copies of its backend are unknown.
  */
@@ -167,12 +239,15 @@ function syncStatus (item: EnvironmentItemPayload): SyncStatus | null {
   }
 
   if (!item.local) {
-    return { label: `Only on ${backendOf(item)}`, tone: 'remote' }
+    if (item.kind === 'file' || !item.synced) {
+      return { label: `Only on ${backendOf(item)}`, tone: 'remote' }
+    }
+    return differs(item.remote.updatedAt, item.synced.remoteUpdatedAt) ? { label: `Newer on ${backendOf(item)}`, tone: 'remote' } : { label: 'Up to date', tone: 'synced' }
   }
 
   if (item.synced) {
-    const localChanged = Math.abs(new Date(item.local.updatedAt).getTime() - new Date(item.synced.localUpdatedAt).getTime()) > SAME_DATE_TOLERANCE_MS
-    const remoteChanged = Math.abs(new Date(item.remote.updatedAt).getTime() - new Date(item.synced.remoteUpdatedAt).getTime()) > SAME_DATE_TOLERANCE_MS
+    const localChanged = differs(item.local.updatedAt, item.synced.localUpdatedAt)
+    const remoteChanged = differs(item.remote.updatedAt, item.synced.remoteUpdatedAt)
     if (localChanged && remoteChanged) {
       return { label: 'Changed on both', tone: 'conflict' }
     }
@@ -214,16 +289,28 @@ function describeItem (item: EnvironmentItemPayload): string {
 }
 
 /**
- * Selects or unselects an item.
- * @param item The item.
- * @param checked Whether it is selected.
+ * Tells how many of some items are selected, for a checkbox standing for all of them.
+ * @param items The items.
+ * @returns True when all are, "indeterminate" when some are, false when none is.
  */
-function toggleItem (item: EnvironmentItemPayload, checked: boolean): void {
+function selectionState (items: EnvironmentItemPayload[]): boolean | 'indeterminate' {
+  const count = items.filter(item => selected.value[item.path]).length
+  return count === 0 ? false : count === items.length || 'indeterminate'
+}
+
+/**
+ * Selects or unselects some items, keeping the choices of those already selected.
+ * @param items The items.
+ * @param checked Whether they are selected.
+ */
+function selectAll (items: EnvironmentItemPayload[], checked: boolean): void {
   const next = { ...selected.value }
-  if (checked) {
-    next[item.path] = { tables: null, keys: null }
-  } else {
-    delete next[item.path]
+  for (const item of items) {
+    if (!checked) {
+      delete next[item.path]
+    } else {
+      next[item.path] ??= { tables: null, keys: null }
+    }
   }
   selected.value = next
 }
@@ -317,18 +404,6 @@ function selectNewerRemotely (): void {
   selected.value = Object.fromEntries(
     (state.value?.items ?? []).filter(item => syncStatus(item)?.tone === 'remote').map(item => [item.path, { tables: null, keys: null }])
   )
-}
-
-/**
- * Pulls the selected items, after confirmation when local data is replaced.
- */
-function pull (): void {
-  if (overwritten.value.length > 0) {
-    confirmOpen.value = true
-    return
-  }
-
-  wsStore.envRun('pull', targets.value)
 }
 
 /**
@@ -504,11 +579,18 @@ onMounted(() => wsStore.envRefresh())
 
         <Card
           v-for="group in groups"
-          :key="group.project"
+          :key="group.section"
           class="gap-0 overflow-hidden py-0"
         >
           <div class="flex items-center justify-between border-b bg-muted/40 px-4 py-2">
-            <span class="text-xs font-semibold tracking-wide text-muted-foreground uppercase">{{ group.project }}</span>
+            <label class="flex items-center gap-3">
+              <Checkbox
+                :model-value="selectionState(group.items)"
+                :disabled="running"
+                @update:model-value="(checked) => selectAll(group.items, checked === true)"
+              />
+              <span class="text-xs font-semibold tracking-wide text-muted-foreground">{{ group.section }}</span>
+            </label>
             <span class="text-xs text-muted-foreground">{{ group.items.length }} {{ group.items.length > 1 ? "items" : "item" }}</span>
           </div>
 
@@ -523,12 +605,12 @@ onMounted(() => wsStore.envRefresh())
                 selected[item.path] && 'bg-accent/30',
                 running && 'pointer-events-none opacity-70',
               )"
-              @click="toggleItem(item, !selected[item.path])"
+              @click="selectAll([item], !selected[item.path])"
             >
               <Checkbox
                 :model-value="Boolean(selected[item.path])"
                 @click.stop
-                @update:model-value="(checked) => toggleItem(item, checked === true)"
+                @update:model-value="(checked) => selectAll([item], checked === true)"
               />
               <div class="flex size-8 items-center justify-center rounded-md bg-muted text-muted-foreground">
                 <Database
@@ -732,31 +814,31 @@ onMounted(() => wsStore.envRefresh())
 
     <div
       v-if="state?.run"
-      class="max-h-64 shrink-0 overflow-auto border-t bg-card px-6 py-3"
+      class="flex max-h-64 shrink-0 flex-col gap-2 border-t bg-card px-6 py-3"
     >
-      <div class="mx-auto max-w-5xl space-y-2">
-        <div class="flex items-center justify-between gap-2">
-          <span class="text-sm font-medium">
-            {{ state.run.direction === "pull" ? "Pull" : "Push" }} {{ state.run.finished ? "finished" : "in progress" }}
+      <div class="mx-auto flex w-full max-w-5xl shrink-0 items-center justify-between gap-2">
+        <span class="text-sm font-medium">
+          {{ ACTION_LABELS[state.run.action] }} {{ state.run.finished ? "finished" : "in progress" }}
+        </span>
+        <div class="flex items-center gap-2">
+          <span class="text-xs text-muted-foreground">
+            {{ state.run.steps.filter((step) => step.status === "done").length }} / {{ state.run.steps.length }} done
           </span>
-          <div class="flex items-center gap-2">
-            <span class="text-xs text-muted-foreground">
-              {{ state.run.steps.filter((step) => step.status === "done").length }} / {{ state.run.steps.length }} done
-            </span>
-            <Button
-              v-if="state.run.finished"
-              size="icon"
-              variant="ghost"
-              class="size-6"
-              title="Close"
-              @click="wsStore.envDismissRun()"
-            >
-              <X class="size-4" />
-            </Button>
-          </div>
+          <Button
+            v-if="state.run.finished"
+            size="icon"
+            variant="ghost"
+            class="size-6"
+            title="Close"
+            @click="wsStore.envDismissRun()"
+          >
+            <X class="size-4" />
+          </Button>
         </div>
+      </div>
+      <div class="mx-auto min-h-0 w-full max-w-5xl space-y-2 overflow-auto">
         <div
-          v-for="step in state.run.steps"
+          v-for="(step, index) in state.run.steps"
           :key="step.target"
           class="flex items-start gap-2 text-sm"
         >
@@ -764,30 +846,100 @@ onMounted(() => wsStore.envRefresh())
             :is="stepIcon(step).icon"
             :class="cn('mt-0.5 size-4 shrink-0', stepIcon(step).class)"
           />
-          <span class="shrink-0 font-mono text-xs leading-5">{{ step.target }}</span>
+          <span
+            class="min-w-0 truncate font-mono text-xs leading-5"
+            :title="step.target"
+          >{{ step.target }}</span>
+          <span
+            v-if="step.progress"
+            class="ml-auto flex shrink-0 items-center gap-2 text-xs leading-5 text-muted-foreground tabular-nums"
+          >
+            <span
+              v-if="progressPercent(step.progress.done, step.progress.total) !== null"
+              class="h-1.5 w-24 overflow-hidden rounded-full bg-muted"
+            >
+              <span
+                class="block h-full rounded-full bg-sky-500 transition-[width]"
+                :style="{ width: `${progressPercent(step.progress.done, step.progress.total)}%` }"
+              />
+            </span>
+            {{ formatProgress(step.progress.done, step.progress.total) }}
+          </span>
           <span
             v-if="step.detail"
             :class="cn('min-w-0 truncate text-xs leading-5', step.status === 'failed' ? 'text-destructive' : 'text-muted-foreground')"
             :title="step.detail"
           >{{ step.detail }}</span>
+          <Button
+            v-if="cancellable(step)"
+            size="icon"
+            variant="ghost"
+            :class="cn('size-5 shrink-0', !step.progress && 'ml-auto')"
+            title="Cancel the download of this item"
+            @click="wsStore.envCancel(index)"
+          >
+            <X class="size-3.5" />
+          </Button>
         </div>
       </div>
     </div>
 
     <div class="shrink-0 border-t bg-background px-6 py-3">
       <div class="mx-auto flex max-w-5xl items-center justify-between gap-3">
-        <span class="text-sm text-muted-foreground">
-          <template v-if="targets.length === 0">Select items to transfer.</template>
-          <template v-else-if="incomplete">Choose at least one table or key group for each database restricted to some.</template>
-          <template v-else>{{ targets.length }} {{ targets.length > 1 ? "items" : "item" }} selected</template>
-        </span>
-        <div class="flex items-center gap-2">
+        <div class="flex items-center gap-3 text-sm text-muted-foreground">
+          <Checkbox
+            aria-label="Select all items"
+            :model-value="selectionState(state?.items ?? [])"
+            :disabled="running || !state?.items.length"
+            @update:model-value="(checked) => selectAll(state?.items ?? [], checked === true)"
+          />
+          <span v-if="targets.length === 0">Select items to transfer.</span>
+          <span v-else-if="incomplete">Choose at least one table or key group for each database restricted to some.</span>
+          <span v-else>{{ targets.length }} {{ targets.length > 1 ? "items" : "item" }} selected</span>
+        </div>
+        <div
+          v-if="state?.run?.action === 'pull' && running"
+          class="flex items-center gap-2"
+        >
+          <Button
+            variant="outline"
+            class="gap-1.5"
+            @click="wsStore.envCancel(null)"
+          >
+            <X class="size-4" />
+            Cancel pull
+          </Button>
+        </div>
+        <div
+          v-else
+          class="flex items-center gap-2"
+        >
+          <Button
+            v-if="shows('remove')"
+            variant="ghost"
+            class="gap-1.5"
+            :disabled="!canRun"
+            @click="start('remove')"
+          >
+            <Trash2 class="size-4" />
+            Remove local copy
+          </Button>
+          <Button
+            v-if="shows('restore')"
+            variant="outline"
+            class="gap-1.5"
+            :disabled="!canRun"
+            @click="start('restore')"
+          >
+            <RotateCcw class="size-4" />
+            Restore
+          </Button>
           <Button
             v-if="shows('push')"
             variant="outline"
             class="gap-1.5"
             :disabled="!canRun"
-            @click="wsStore.envRun('push', targets)"
+            @click="start('push')"
           >
             <ArrowUpFromLine class="size-4" />
             Push
@@ -796,7 +948,7 @@ onMounted(() => wsStore.envRefresh())
             v-if="shows('pull')"
             class="gap-1.5"
             :disabled="!canRun"
-            @click="pull"
+            @click="start('pull')"
           >
             <ArrowDownToLine class="size-4" />
             Pull
@@ -807,14 +959,14 @@ onMounted(() => wsStore.envRefresh())
 
     <ConfirmDialog
       v-model:open="confirmOpen"
-      title="Replace local data?"
-      confirm-label="Pull and replace"
-      @confirm="wsStore.envRun('pull', targets)"
+      :title="confirmation?.title ?? ''"
+      :confirm-label="confirmation?.confirm ?? ''"
+      @confirm="confirm"
     >
-      <p>The backend copies will replace your local data:</p>
+      <p>{{ confirmation?.intro }}</p>
       <ul class="mt-2 list-disc space-y-1 pl-5">
         <li
-          v-for="line in overwritten"
+          v-for="line in confirmation?.lines ?? []"
           :key="line"
         >
           {{ line }}

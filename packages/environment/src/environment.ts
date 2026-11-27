@@ -5,7 +5,7 @@ import path from 'node:path'
 import type { S3Client } from '@aws-sdk/client-s3'
 import { mergeTransferGroups, OPEN_ACCESS, type TransferAccess, type TransferDirection, TransferGate, readTransferGroups } from './access.js'
 import { ArchiveWriter, readArchive, type RecordHeader } from './archive.js'
-import { type BackendContext, type BackendOptions, encrypted, EncryptionSecret, type EncryptionSettings, type EnvironmentBackend, readBackends, readEncryption, type RemoteFile } from './backends/index.js'
+import { type BackendContext, type BackendOptions, encrypted, EncryptionSecret, type EncryptionSettings, type EnvironmentBackend, readBackends, readEncryption, type RemoteFile, type TransferOptions, type TransferProgress } from './backends/index.js'
 import { plainLengthOf } from './backends/encryption.js'
 import { checkTar, createS3Client, objectsOfArchive, objectsOfTar, restoreBucket, type S3Options, snapshotBucket, snapshotBucketTar } from './buckets.js'
 import { defaultEnvironmentFolder, localPathOf, withFileLock, writeLocalFile } from './directory.js'
@@ -26,6 +26,18 @@ const MEDIA_TYPES: Record<string, string> = {
   '.json': 'application/json',
   '.env': 'text/plain',
   '.gz': 'application/gzip'
+}
+
+/** Raised when a pull is cancelled while its archive downloads, nothing of the item being changed. */
+export class TransferCancelledError extends Error {
+  /**
+   * @param itemPath - The path of the item.
+   * @param options - The error that ended the download, if any.
+   */
+  constructor (itemPath: string, options?: ErrorOptions) {
+    super(`${itemPath}: pull cancelled`, options)
+    this.name = 'TransferCancelledError'
+  }
 }
 
 /** What every item of the environment has. */
@@ -65,8 +77,22 @@ export interface EnvironmentOptions {
   configFiles: EnvironmentConfigFile[]
   /** The items pulled on their own, on a schedule or when the server starts. */
   autoPulls: EnvironmentAutoPull[]
+  /** How the items are grouped where they are listed. */
+  sections: EnvironmentSections
   s3: S3Options | null
 }
+
+/** How the items of the environment are grouped where they are listed, and the names of the groups. */
+export interface EnvironmentSections {
+  /** Groups by the first folder of the item paths, or by kind of item. */
+  by: 'folder' | 'type'
+  /** The name of a folder or a kind of item, in place of its default one. */
+  names: ReadonlyMap<string, string>
+}
+
+const SECTION_MODES: EnvironmentSections['by'][] = ['folder', 'type']
+
+const KIND_NAMES: Record<EnvironmentItem['kind'], string> = { file: 'Files', database: 'Databases', bucket: 'Buckets', redis: 'Redis databases' }
 
 /** When an item of the environment is pulled on its own. */
 export interface EnvironmentAutoPull {
@@ -92,6 +118,10 @@ export interface EnvironmentSelection {
   tables: string[] | null
   /** For a configuration file, the value to keep for each differing key; the whole file when missing. */
   keys?: KeyChoice[] | null
+  /** Told the bytes of the item the backend moved, as it moves them. */
+  onProgress?: TransferProgress
+  /** Abandons a pull while its archive downloads; once the archive is complete, the restore always runs to its end. */
+  signal?: AbortSignal
 }
 
 /** Outcome of the transfer of one item. */
@@ -197,6 +227,33 @@ function readFormat (itemPath: string, value: unknown): ArchiveFormat {
 }
 
 /**
+ * Reads how the items are grouped, `sections: { by: folder | type, names: { <folder or kind>: <name> } }`.
+ *
+ * @param value - The raw `sections` setting.
+ * @returns The grouping, by folder with no name replaced when the setting is missing.
+ */
+function readSections (value: unknown): EnvironmentSections {
+  const { by = 'folder', names = {} } = recordOf(value)
+  const entries = Object.entries(recordOf(names))
+  if ((value !== undefined && recordOf(value) !== value) || !SECTION_MODES.includes(by as EnvironmentSections['by']) || recordOf(names) !== names || !entries.every(([, name]) => typeof name === 'string' && name.trim() !== '')) {
+    throw new Error(`invalid sections in the environment: ${JSON.stringify(value)}, by must be ${SECTION_MODES.join(' or ')} and names map a folder or a kind of item to a name`)
+  }
+  return { by: by as EnvironmentSections['by'], names: new Map(entries as [string, string][]) }
+}
+
+/**
+ * Names the group an item is listed in: its first folder, or its kind, unless the sections rename it.
+ *
+ * @param sections - How the items are grouped.
+ * @param item - The item.
+ * @returns The name of its group.
+ */
+export function sectionOf (sections: EnvironmentSections, item: EnvironmentItem): string {
+  const key = sections.by === 'type' ? item.kind : item.path.split('/')[0]
+  return sections.names.get(key) ?? (sections.by === 'type' ? KIND_NAMES[item.kind] : key)
+}
+
+/**
  * Gives the keys an item leaves out of its synchronization.
  *
  * @param item - The item.
@@ -208,7 +265,7 @@ function ignoredKeysOf (item: EnvironmentItem): IgnoredKeys | undefined {
 
 /**
  * Reads the `environment` section of the devtool configuration: its `backends`, its `folder` being the
- * parent of the configuration folder when it names none, each of its `files` a path or
+ * parent of the configuration folder when it names none, its `sections`, each of its `files` a path or
  * `{ path, display, local, sync, pull, backend, ignore, groups }`, its databases, buckets and Redis databases taking a
  * `pull`, a `backend` and `groups` too, an item naming no backend using the default one.
  *
@@ -330,6 +387,7 @@ export function readEnvironmentOptions (section: unknown): EnvironmentOptions | 
     items,
     configFiles,
     autoPulls,
+    sections: readSections(record.sections),
     s3:
       typeof s3.endpoint === 'string' && typeof s3.accessKeyId === 'string' && typeof s3.secretAccessKey === 'string'
         ? { endpoint: s3.endpoint, accessKeyId: s3.accessKeyId, secretAccessKey: s3.secretAccessKey, region: typeof s3.region === 'string' ? s3.region : 'us-east-1' }
@@ -484,6 +542,32 @@ export function overwritesLocalData (selection: EnvironmentSelection): boolean {
 export function mediaTypeOf (filePath: string): string {
   const extension = path.extname(filePath)
   return MEDIA_TYPES[extension] ?? 'application/octet-stream'
+}
+
+/**
+ * Refuses tables chosen in a native archive whose engine restores it whole only.
+ *
+ * @param item - The item.
+ * @param tables - The tables chosen, null for the whole item.
+ * @param action - What is done with the archive, for the error message.
+ */
+function assertWholeNative (item: EnvironmentItem, tables: string[] | null, action: string): void {
+  if (item.kind === 'database' && tables !== null && !transfersParts(item, 'pull')) {
+    throw new Error(`${item.path} is a native ${item.engine} archive: ${action} the whole database, its tables cannot be restored one by one`)
+  }
+}
+
+/**
+ * Gives an item whose local data lives apart from its local copy: a database, a bucket or a Redis database.
+ *
+ * @param item - The item.
+ * @returns The item.
+ */
+function holdingLocalData (item: EnvironmentItem): Exclude<EnvironmentItem, { kind: 'file' }> {
+  if (item.kind === 'file') {
+    throw new Error(`${item.path} is a file: its local copy is its data, pull it instead`)
+  }
+  return item
 }
 
 /**
@@ -642,6 +726,43 @@ export class Environment {
   }
 
   /**
+   * Restores the local data of a database, a bucket or a Redis item from its local copy, without
+   * reaching its backend; the local copy and its synchronization record stay as they are.
+   *
+   * @param selection - The item, and the tables or key groups to restore.
+   * @returns What was done, not done when the item has no local copy.
+   */
+  async restoreLocal (selection: EnvironmentSelection): Promise<TransferResult> {
+    const { tables } = selection
+    const item = holdingLocalData(selection.item)
+    assertWholeNative(item, tables, 'restore')
+    return this.locked(item, async () => {
+      const localPath = localPathOf(this._options.folder, item.path)
+      if (!(await fs.stat(localPath).then(stat => stat.isFile(), () => false))) {
+        return { done: false, detail: 'no local copy, pull it first' }
+      }
+      return this.restoreArchive(item, localPath, tables)
+    })
+  }
+
+  /**
+   * Removes the local copy of a database, a bucket or a Redis item, whose data stays restored; its
+   * synchronization record is kept, so the item reads as synchronized as long as its backend copy
+   * does not change. A missing copy counts as removed.
+   *
+   * @param selection - The item.
+   * @returns What was done.
+   */
+  async removeLocalCopy (selection: EnvironmentSelection): Promise<TransferResult> {
+    const item = holdingLocalData(selection.item)
+    return this.locked(item, async () => {
+      const localPath = localPathOf(this._options.folder, item.path)
+      await fs.rm(localPath, { force: true })
+      return { done: true, detail: `${localPath} removed` }
+    })
+  }
+
+  /**
    * Runs a transfer of an item while no other transfer of it runs, in any process using the same
    * environment folder; the lock lives in that folder, named after the folded path of the item, so
    * spellings a store takes for one file share it.
@@ -662,17 +783,15 @@ export class Environment {
    * @returns What was done.
    */
   private async pullItem (selection: EnvironmentSelection): Promise<TransferResult> {
-    const { item, tables } = selection
+    const { item, tables, onProgress, signal } = selection
     const localPath = localPathOf(this._options.folder, item.path)
-    if (item.kind === 'database' && tables !== null && !transfersParts(item, 'pull')) {
-      throw new Error(`${item.path} is a native ${item.engine} archive: pull the whole database, its tables cannot be restored one by one`)
-    }
+    assertWholeNative(item, tables, 'pull')
     const pulled = await this.backendFor(item).list().then(files => files && (files.find(file => file.path === item.path) ?? undefined), () => undefined)
     if (item.kind === 'file') {
       if (selection.keys || await this.mergesWhole(item)) {
-        return this.pullKeys(item, selection.keys ?? null, pulled)
+        return this.pullKeys(item, selection.keys ?? null, pulled, { onProgress, signal })
       }
-      if (!(await this.download(item))) {
+      if (!(await this.download(item, localPath, { onProgress, signal }))) {
         return { done: false, detail: `absent from ${item.backend}` }
       }
       return this.recorded(item, { done: true, detail: localPath }, pulled)
@@ -680,10 +799,13 @@ export class Environment {
 
     const pulledPath = `${localPath}.${randomUUID()}.pull`
     try {
-      if (!(await this.download(item, pulledPath))) {
+      if (!(await this.download(item, pulledPath, { onProgress, signal }))) {
         return { done: false, detail: `absent from ${item.backend}` }
       }
-      const result = await this.restore(item, pulledPath, tables)
+      if (signal?.aborted) {
+        throw new TransferCancelledError(item.path)
+      }
+      const result = await this.restoreArchive(item, pulledPath, tables)
       await fs.rename(pulledPath, localPath)
       return await this.recorded(item, result, pulled)
     } finally {
@@ -735,7 +857,7 @@ export class Environment {
    * @param tables - The tables or key groups to restore, or null for the whole item.
    * @returns What was done.
    */
-  private async restore (item: Exclude<EnvironmentItem, { kind: 'file' }>, archivePath: string, tables: string[] | null): Promise<TransferResult> {
+  private async restoreArchive (item: Exclude<EnvironmentItem, { kind: 'file' }>, archivePath: string, tables: string[] | null): Promise<TransferResult> {
     if (item.kind === 'redis' || item.format === 'devtool') {
       for await (const { body } of item.kind === 'bucket' ? objectsOfArchive(readArchive(archivePath)) : readArchive(archivePath)) {
         for await (const chunk of body) {
@@ -880,7 +1002,7 @@ export class Environment {
       return { done: false, detail: `no local file ${localPath}` }
     }
 
-    await this.backendFor(item).upload(item.path, localPath, mediaTypeOf(item.path))
+    await this.backendFor(item).upload(item.path, localPath, mediaTypeOf(item.path), { onProgress: selection.onProgress })
     await this.recordSync(item)
     return { done: true, detail }
   }
@@ -918,10 +1040,11 @@ export class Environment {
    * @param keys - The value to keep for each differing key, null to take every value of the backend.
    * @param pulled - The copy of the backend listed before it was read, null when the backend lists
    * nothing, undefined when the listing failed or did not hold the item.
+   * @param options - Follows the download of the copy of the backend, and abandons it.
    * @returns What was done.
    */
-  private async pullKeys (item: EnvironmentItem, keys: KeyChoice[] | null, pulled: RemoteFile | null | undefined): Promise<TransferResult> {
-    const { format, local, remote } = await this.readBothCopies(item)
+  private async pullKeys (item: EnvironmentItem, keys: KeyChoice[] | null, pulled: RemoteFile | null | undefined, options: TransferOptions): Promise<TransferResult> {
+    const { format, local, remote } = await this.readBothCopies(item, options)
     const ignored = ignoredKeysOf(item)
     const differences = diffConfig(format, local, remote, ignored)
     const choices = keys ?? differences.map(difference => ({ path: difference.path, side: 'remote' as const }))
@@ -967,9 +1090,10 @@ export class Environment {
    * Reads the local copy of a configuration file and the copy of its backend, without replacing the local one.
    *
    * @param item - The file item.
+   * @param options - Follows the download of the copy of the backend, and abandons it.
    * @returns Its format and both texts.
    */
-  private async readBothCopies (item: EnvironmentItem): Promise<{ format: ConfigFormat, local: string, remote: string }> {
+  private async readBothCopies (item: EnvironmentItem, options: TransferOptions = {}): Promise<{ format: ConfigFormat, local: string, remote: string }> {
     const format = configFormatOf(item.path)
     if (!format) {
       throw new Error(`${item.path} cannot be merged key by key: YAML, JSON, TOML, XML and .env files only`)
@@ -978,7 +1102,7 @@ export class Environment {
     const localPath = localPathOf(this._options.folder, item.path)
     const remotePath = `${localPath}.remote`
     try {
-      if (!(await this.download(item, remotePath))) {
+      if (!(await this.download(item, remotePath, options))) {
         throw new Error(`${item.path} is not on ${item.backend}`)
       }
 
@@ -1119,16 +1243,37 @@ export class Environment {
    *
    * @param item - The item.
    * @param localPath - The local file, its mirror in the environment directory by default.
+   * @param options - Follows the bytes received, told the whole file once written, and abandons the
+   * download, the local file left as it was and a {@link TransferCancelledError} raised.
    * @returns False when the backend has no such file.
    */
-  private async download (item: EnvironmentItem, localPath = localPathOf(this._options.folder, item.path)): Promise<boolean> {
+  private async download (item: EnvironmentItem, localPath = localPathOf(this._options.folder, item.path), { onProgress, signal }: TransferOptions = {}): Promise<boolean> {
     await this.assertAllowed(item, 'pull')
-    const content = await this.backendFor(item).download(item.path)
-    if (!content) {
-      return false
+    try {
+      const content = await this.backendFor(item).download(item.path, { onProgress, signal })
+      if (!content) {
+        return false
+      }
+      /**
+       * Closes the content, ending its download wherever it stands.
+       */
+      const stop = (): void => {
+        content.destroy()
+      }
+      signal?.addEventListener('abort', stop, { once: true })
+      try {
+        if (signal?.aborted) {
+          stop()
+        }
+        await writeLocalFile(localPath, content)
+      } finally {
+        signal?.removeEventListener('abort', stop)
+      }
+    } catch (error) {
+      throw signal?.aborted ? new TransferCancelledError(item.path, { cause: error }) : error
     }
-
-    await writeLocalFile(localPath, content)
+    const { size } = await fs.stat(localPath)
+    onProgress?.(size, size)
     return true
   }
 

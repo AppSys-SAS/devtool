@@ -1,4 +1,4 @@
-import type { Readable } from 'node:stream'
+import { type Readable, Transform, type TransformCallback } from 'node:stream'
 import type { AuthOptions } from '@appsys-sas/devtool-auth'
 import type { TransferAccess } from '../access.js'
 import type { EncryptionSettings } from './encryption.js'
@@ -15,6 +15,21 @@ export interface RemoteFile {
   version: string
 }
 
+/**
+ * Reports how much of a file a transfer moved.
+ * @param done The bytes moved so far.
+ * @param total The size of the file, null when the transfer does not know it.
+ */
+export type TransferProgress = (done: number, total: number | null) => void
+
+/** How a caller follows a transfer of a file. */
+export interface TransferOptions {
+  /** Told the bytes moved as they move. */
+  onProgress?: TransferProgress
+  /** Abandons a download before its content is opened; the stream it gives is aborted by the caller. */
+  signal?: AbortSignal
+}
+
 /** Where the files of the environment are stored, read and written. */
 export interface EnvironmentBackend {
   /**
@@ -25,16 +40,18 @@ export interface EnvironmentBackend {
   /**
    * Opens a stored file.
    * @param path The path of the file.
+   * @param options Follows the bytes received, and abandons the request.
    * @returns Its content, or null when the file does not exist.
    */
-  download: (path: string) => Promise<Readable | null>
+  download: (path: string, options?: TransferOptions) => Promise<Readable | null>
   /**
    * Stores a local file, replacing the stored one.
    * @param path The path of the file in the backend.
    * @param localFile The local file.
    * @param mediaType The media type of the file.
+   * @param options Follows the bytes sent.
    */
-  upload: (path: string, localFile: string, mediaType: string) => Promise<void>
+  upload: (path: string, localFile: string, mediaType: string, options?: TransferOptions) => Promise<void>
   /**
    * Deletes a stored file; a missing file counts as deleted.
    * @param path The path of the file.
@@ -107,6 +124,26 @@ export interface BackendType<T extends BackendSettings> {
    * @returns The backend.
    */
   create: (options: T, context: BackendContext) => EnvironmentBackend
+}
+
+/**
+ * Builds a stream counting the bytes passing through it, failing at its end when it did not carry an exact length.
+ * @param expected The expected length in bytes, or null to accept any.
+ * @param onProgress Told the bytes counted after each chunk.
+ * @returns The transform counting the bytes.
+ */
+export function byteCounter (expected: number | null, onProgress?: TransferProgress): Transform {
+  let received = 0
+  return new Transform({
+    transform (chunk: Buffer, _encoding: BufferEncoding, callback: TransformCallback): void {
+      received += chunk.length
+      onProgress?.(received, expected)
+      callback(null, chunk)
+    },
+    flush (callback: TransformCallback): void {
+      callback(expected !== null && received !== expected ? new Error(`incomplete transfer: ${received} of ${expected} bytes`) : null)
+    }
+  })
 }
 
 /**

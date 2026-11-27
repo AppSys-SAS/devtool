@@ -2,10 +2,12 @@ import { randomBytes } from 'node:crypto'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { Readable } from 'node:stream'
+import { PassThrough, Readable } from 'node:stream'
+import { setImmediate } from 'node:timers/promises'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { BackendContext, EnvironmentBackend, RemoteFile } from '../../src/backends/backend.js'
+import type { BackendContext, EnvironmentBackend, RemoteFile, TransferOptions } from '../../src/backends/backend.js'
 import { decrypt, encrypt, encrypted, EncryptionSecret, keyFileKey, passwordFileKey, plainLengthOf, readEncryption } from '../../src/backends/encryption.js'
+import { progressRecorder } from './progress-fixtures.js'
 
 const KEY = randomBytes(32)
 
@@ -25,16 +27,21 @@ async function bytesOf (stream: AsyncIterable<Buffer>): Promise<Buffer> {
 }
 
 /**
- * Builds a backend keeping its files in memory.
+ * Builds a backend keeping its files in memory, reporting each transfer whole at once.
  * @returns The backend and its files.
  */
 function memoryBackend (): { backend: EnvironmentBackend, files: Map<string, Buffer> } {
   const files = new Map<string, Buffer>()
   const backend: EnvironmentBackend = {
     list: async (): Promise<RemoteFile[]> => [...files].map(([filePath, content]) => ({ path: filePath, size: content.length, updatedAt: new Date(0), version: String(content.length) })),
-    download: async (filePath: string) => (files.has(filePath) ? Readable.from([files.get(filePath)!]) : null),
-    upload: async (filePath: string, localFile: string) => {
+    download: async (filePath: string, { onProgress }: TransferOptions = {}) => {
+      const content = files.get(filePath)
+      onProgress?.(content?.length ?? 0, content?.length ?? null)
+      return content ? Readable.from([content]) : null
+    },
+    upload: async (filePath: string, localFile: string, _mediaType: string, { onProgress }: TransferOptions = {}) => {
       files.set(filePath, await fs.readFile(localFile))
+      onProgress?.(files.get(filePath)!.length, files.get(filePath)!.length)
     },
     remove: async (filePath: string) => {
       files.delete(filePath)
@@ -128,6 +135,65 @@ describe('encrypted', () => {
     expect((await bytesOf((await store.download('api/config.yml'))!)).toString()).toBe('name: acme\n')
     expect(await store.download('absent.yml')).toBeNull()
     await expect(fs.stat(`${local}.sealed`)).rejects.toThrow()
+  })
+
+  it('reports the progress of the encrypted file its backend moves', async () => {
+    const { backend, files } = memoryBackend()
+    const store = encrypted(backend, new EncryptionSecret({ key: KEY.toString('base64') }, contextOf().context, 'team'))
+    const local = path.join(folder, 'db.gz')
+    await fs.writeFile(local, randomBytes(100_000))
+
+    const sent = progressRecorder()
+    await store.upload('api/db.gz', local, 'application/gzip', { onProgress: sent.onProgress })
+    const sealed = files.get('api/db.gz')!.length
+    expect(sent.reports).toEqual([[sealed, sealed]])
+
+    const received = progressRecorder()
+    await bytesOf((await store.download('api/db.gz', { onProgress: received.onProgress }))!)
+    expect(received.reports).toEqual([[sealed, sealed]])
+  })
+
+  it('closes the stored file when its decrypted content is closed before being read', async () => {
+    const { backend, files } = memoryBackend()
+    const store = encrypted(backend, new EncryptionSecret({ key: KEY.toString('base64') }, contextOf().context, 'team'))
+    const local = path.join(folder, 'db.gz')
+    await fs.writeFile(local, randomBytes(1000))
+    await store.upload('api/db.gz', local, 'application/gzip')
+    const stored = Readable.from([files.get('api/db.gz')!])
+    const plain = await encrypted({ ...backend, download: async () => stored }, new EncryptionSecret({ key: KEY.toString('base64') }, contextOf().context, 'team')).download('api/db.gz')
+
+    plain!.destroy()
+    await setImmediate()
+    expect(stored.destroyed).toBe(true)
+  })
+
+  it('closes the stored file when its decrypted content is closed while waiting for it', async () => {
+    const { backend } = memoryBackend()
+    const stalled = new PassThrough()
+    stalled.write(Buffer.alloc(10))
+    const plain = await encrypted({ ...backend, download: async () => stalled }, new EncryptionSecret({ key: KEY.toString('base64') }, contextOf().context, 'team')).download('api/db.gz')
+    plain!.resume()
+    await setImmediate()
+
+    plain!.destroy()
+    await setImmediate()
+    expect(stalled.destroyed).toBe(true)
+  })
+
+  it('keeps the secret when a download fails for another reason than the secret', async () => {
+    const { backend, files } = memoryBackend()
+    const { context, asked } = contextOf(['correct horse', 'correct horse'])
+    const secret = new EncryptionSecret({ prompt: true }, context, 'team')
+    const local = path.join(folder, 'db.gz')
+    await fs.writeFile(local, randomBytes(1000))
+    await encrypted(backend, secret).upload('api/db.gz', local, 'application/gzip')
+    const failing = new PassThrough()
+    failing.write(files.get('api/db.gz')!.subarray(0, 100))
+    setTimeout(() => failing.destroy(new Error('connection reset')), 50)
+
+    await expect(bytesOf((await encrypted({ ...backend, download: async () => failing }, secret).download('api/db.gz'))!)).rejects.toThrow('connection reset')
+    await bytesOf((await encrypted(backend, secret).download('api/db.gz'))!)
+    expect(asked).toEqual(['team'])
   })
 
   it('encrypts twice when a file and its backend both declare a secret', async () => {

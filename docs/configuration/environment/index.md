@@ -353,7 +353,40 @@ devtool env push -i                       # choose items and tables
 - `-i` chooses items, tables and key groups interactively.
 
 The Environment page shows the same actions, with the state of each item, its backend and whether it is
-encrypted. `devtool server` never
+encrypted. A checkbox on each group, and one next to Pull and Push, selects all its items at once. While
+a pull or a push runs, each item shows the bytes its backend moved, with the size of the file and the
+percentage when the backend knows it:
+
+| Backend | Progress |
+|---|---|
+| `cdn`, `s3`, `sftp` | bytes sent and received, against the size of the file |
+| `git` | bytes `git push` reports as written; on pull, the file is fetched while the backend lists its files, so only the copy out of the working copy is counted |
+| `scripts` | on pull, the size of `%{ADT:FILE}` while the command writes it; on push, the `progress: <bytes>` lines of the command, see [Scripts](/configuration/environment/scripts#progress) |
+
+With [encryption](/configuration/environment/encryption), the bytes counted are the encrypted ones.
+
+A pull can be cancelled while it downloads, item by item or whole: the archive goes to a temporary
+file next to the local copy, so a cancelled item keeps its local data, its local copy and its
+synchronization record. Once an archive is complete, its restore always runs to its end.
+
+For databases, buckets and Redis databases, the page also offers:
+
+- **Restore**: restores the local data from the local copy, without reaching the backend, the whole
+  item or some of its tables or key groups.
+- **Remove local copy**: deletes the local copy, whose data stays restored, to free the disk. The
+  item stays up to date until the copy of its backend changes; a pull downloads a copy again.
+
+The page groups the items by the first folder of their path. `sections` groups them by type instead,
+and renames groups:
+
+```yaml
+environment:
+  sections:
+    by: type                                  # folder (default) or type
+    names: { database: Databases of the team } # a folder, or file, database, bucket, redis
+```
+
+`devtool server` never
 downloads anything on its own: pulls are manual, or scheduled with `pull`. When the devtool configuration
 itself is missing, the Environment page offers to pull it.
 
@@ -383,6 +416,7 @@ To read or change a single file of a backend, outside the items, use
 | `backends` | map | none | Where the files are stored, by name. See [Backends](/configuration/environment/backends). |
 | `encryption` | list | none | Encryption rules by path pattern. See [Encryption](/configuration/environment/encryption). |
 | `folder` | string | parent of the configuration folder | Local mirror of the files of the backends, relative to the configuration folder. |
+| `sections` | map | `{ by: folder }` | How the Environment page groups the items: `by` is `folder` (first folder of the path) or `type`; `names` maps a folder, or `file`, `database`, `bucket`, `redis`, to the name shown. |
 | `files` | list | none | Files synchronized and shown in Configs. |
 | `databases` | list | none | Databases saved as archives. |
 | `buckets` | list | none | S3 buckets saved as snapshots. |
@@ -487,6 +521,8 @@ Environment page shows the error and `devtool env` stops.
 - `invalid ignore of <path> in the environment: must be a list of key paths, such as
   connections.*.lastUsedAt`, `... needs a YAML, JSON, TOML, XML or .env file`: see [Ignored keys](#ignored-keys).
 - `invalid format of <path> in the environment: must be devtool or native`
+- `invalid sections in the environment: ...`: `by` is `folder` or `type`, and `names` maps texts to
+  non-empty texts.
 - `invalid path of <path> in the environment: write it <canonical path>`: a path without `./`, leading
   `/` or `..` segments; `<path> is declared twice in the environment`: each item has its own path;
   `<path> and <path> differ only by letter case, Unicode form or path spelling`: a backend or a disk

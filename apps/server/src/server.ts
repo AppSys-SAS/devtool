@@ -355,9 +355,14 @@ export class DevtoolServer implements McpServerHost {
     }
 
     if (message.type === 'envRun') {
-      this.environment.run(message.data.direction, message.data.targets).catch((error: unknown) => {
+      this.environment.run(message.data.action, message.data.targets).catch((error: unknown) => {
         logger.warn('Server', 'Environment', `Run failed: ${error instanceof Error ? error.message : String(error)}`)
       })
+      return
+    }
+
+    if (message.type === 'envCancel') {
+      this.environment.cancel(message.data.index)
       return
     }
 
