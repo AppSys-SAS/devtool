@@ -1,5 +1,41 @@
 # Changelog
 
+## [1.0.3](https://github.com/AppSys-SAS/devtool/compare/v1.0.2...v1.0.3) (2026-11-27)
+
+
+### Features
+
+* **cli:** add --dns-port to devtool server, replacing dns.port for one run ([6496ff2](https://github.com/AppSys-SAS/devtool/commit/6496ff21b0b6efaa6b9e0ad26f6892d225f9dada))
+* **commands:** add form inlineExpanded, the inputs unfolded from the start ([59eaef0](https://github.com/AppSys-SAS/devtool/commit/59eaef0907dc286d5d9564ab5c375a6bbb569a11))
+* **environment:** add a native archive format for databases and buckets ([3069b6b](https://github.com/AppSys-SAS/devtool/commit/3069b6bec2c102792049594092f3ab006dd5931a))
+* **environment:** name the database of a container per item ([3069b6b](https://github.com/AppSys-SAS/devtool/commit/3069b6bec2c102792049594092f3ab006dd5931a))
+* **environment:** restrict pulls and pushes to groups of the identity provider ([3069b6b](https://github.com/AppSys-SAS/devtool/commit/3069b6bec2c102792049594092f3ab006dd5931a))
+
+
+### Bug Fixes
+
+* **cli:** declare tar-stream as a dependency of the published package ([cfa2f15](https://github.com/AppSys-SAS/devtool/commit/cfa2f159b56860cfa0f436fe2b71d59b48ff8810))
+* **cli:** refuse server, load balancer and DNS ports above 65535 ([8af92f7](https://github.com/AppSys-SAS/devtool/commit/8af92f7b1e2f863fa616f4c3c0cbcd4b9f4760a4))
+* **environment:** address review of native archives and transfer groups ([605f7b2](https://github.com/AppSys-SAS/devtool/commit/605f7b28608e12650daa92026a96b5ca1b2fb43d))
+* **environment:** check native archives and backend paths strictly ([adb0fc8](https://github.com/AppSys-SAS/devtool/commit/adb0fc813c1d7ee2ec058ab38f15123e486d8b3e))
+* **environment:** check tar end blocks after the last entry ([078f818](https://github.com/AppSys-SAS/devtool/commit/078f818ca5882d9648812e70c06f5a1f769fb813))
+* **environment:** drop only the copy a restore replaced ([b2de68d](https://github.com/AppSys-SAS/devtool/commit/b2de68da6966710ad7b0864a37c9c688a1b976a9))
+* **environment:** fold item paths into their canonical form ([550e731](https://github.com/AppSys-SAS/devtool/commit/550e731ea84a11495ecdaa10b08db5888e19042a))
+* **environment:** harden native restores and use tar-stream ([d347da5](https://github.com/AppSys-SAS/devtool/commit/d347da5d5f7192b53b75d39e575b9dc2ab16dfaf))
+* **environment:** keep transfer locks in the environment folder ([d8dc135](https://github.com/AppSys-SAS/devtool/commit/d8dc1354fd172d7ca95b924f4cf4813ef62175d5))
+* **environment:** load MariaDB dumps with a database-limited account ([224f79b](https://github.com/AppSys-SAS/devtool/commit/224f79b3a276758983cdf04fd11fa3a1056adcba))
+* **environment:** make every native restore recoverable ([0365f38](https://github.com/AppSys-SAS/devtool/commit/0365f38ef9b9a5e630afd9d6c9f51c5689ab4acb))
+* **environment:** refuse every present transfer lock ([76b5228](https://github.com/AppSys-SAS/devtool/commit/76b52287966594aa724ccc7c3771cb60bc3bc21e))
+* **environment:** restore native archives with the engine's own tools ([6020e51](https://github.com/AppSys-SAS/devtool/commit/6020e51bcea88b697d070868dc2c6c0da54e7b84))
+* **environment:** serialize item transfers and harden native restores ([05fddf9](https://github.com/AppSys-SAS/devtool/commit/05fddf9fc98bb623362c8248d898edea3f495454))
+* **environment:** treat native archives as trusted and load MariaDB in sandbox ([3cf418e](https://github.com/AppSys-SAS/devtool/commit/3cf418e79e4f2602d3634371486eb2da36e2f460))
+* **environment:** validate item paths, tar sizes and mongodump headers ([4927866](https://github.com/AppSys-SAS/devtool/commit/49278661ed193e0e11f3bfcbc7ee7c7c2b218f71))
+
+
+### Miscellaneous Chores
+
+* release 1.0.3 ([0a26e68](https://github.com/AppSys-SAS/devtool/commit/0a26e68d5591efce0fb2b7c2d947be36f6b496a5))
+
 ## [1.0.2](https://github.com/AppSys-SAS/devtool/compare/v1.0.1...v1.0.2) (2026-11-25)
 
 
