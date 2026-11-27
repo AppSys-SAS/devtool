@@ -253,8 +253,13 @@ export class EncryptionSecret {
  */
 export function encrypted (backend: EnvironmentBackend, secret: EncryptionSecret): EnvironmentBackend {
   return {
-    async list (): Promise<RemoteFile[] | null> {
-      const files = await backend.list()
+    /**
+     * Lists the stored files with their plain size.
+     * @param signal Abandons the listing.
+     * @returns The files, or null when the backend cannot list them.
+     */
+    async list (signal?: AbortSignal): Promise<RemoteFile[] | null> {
+      const files = await backend.list(signal)
       return files?.map(file => ({ ...file, size: plainLengthOf(file.size) ?? file.size })) ?? null
     },
 

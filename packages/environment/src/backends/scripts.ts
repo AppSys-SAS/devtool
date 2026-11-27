@@ -113,10 +113,11 @@ class ScriptsBackend implements EnvironmentBackend {
 
   /**
    * Lists the stored files with the `list` command.
+   * @param signal Stops the command.
    * @returns The files.
    */
-  async list (): Promise<RemoteFile[] | null> {
-    const { stdout } = await this.run('list', '', '')
+  async list (signal?: AbortSignal): Promise<RemoteFile[] | null> {
+    const { stdout } = await this.run('list', '', '', { signal })
     return parseListing(stdout)
   }
 

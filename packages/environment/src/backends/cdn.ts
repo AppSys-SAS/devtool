@@ -36,10 +36,11 @@ class CdnBackend implements EnvironmentBackend {
 
   /**
    * Lists the stored files, with their size and their last upload.
+   * @param signal Abandons the request.
    * @returns The files, or null when the CDN cannot list them.
    */
-  async list (): Promise<RemoteFile[] | null> {
-    const response = await this.request('GET', '')
+  async list (signal?: AbortSignal): Promise<RemoteFile[] | null> {
+    const response = await this.request('GET', '', { signal })
     if (response.status === 404) {
       await response.body?.cancel()
       return null

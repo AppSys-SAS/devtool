@@ -34,14 +34,15 @@ class S3Backend implements EnvironmentBackend {
 
   /**
    * Lists the objects under the prefix, folders left out.
+   * @param signal Abandons the requests.
    * @returns The files, their version being the ETag of the object.
    */
-  async list (): Promise<RemoteFile[]> {
+  async list (signal?: AbortSignal): Promise<RemoteFile[]> {
     const client = await this.client()
     const files: RemoteFile[] = []
     let token: string | undefined
     do {
-      const page = await client.send(new ListObjectsV2Command({ Bucket: this._settings.bucket, Prefix: this._settings.prefix || undefined, ContinuationToken: token }))
+      const page = await client.send(new ListObjectsV2Command({ Bucket: this._settings.bucket, Prefix: this._settings.prefix || undefined, ContinuationToken: token }), { abortSignal: signal })
       for (const object of page.Contents ?? []) {
         if (object.Key === undefined || object.Key.endsWith('/')) {
           continue

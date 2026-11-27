@@ -89,6 +89,25 @@ describe('a configuration file with ignored keys', () => {
     expect(await localValue()).toEqual({ version: 1, connections: [{ id: 'dev', url: 'pg://new', lastUsedAt: 99 }] })
   })
 
+  it('keeps its local ignored values when pulled after a first listing of its backend failed', async () => {
+    files.set(ITEM.path, { content: Buffer.from(connections('pg://new', 1)), version: 2 })
+    const backend = memoryBackend()
+    const list = backend.list
+    backend.list = vi.fn(list).mockRejectedValueOnce(new Error('listing failed'))
+    const context: BackendContext = { resolve: async text => text, askSecret: async () => '', cacheDir: folder, configFolder: folder, auth: null }
+    const flaky = new Environment(
+      new Map([['memory', backend]]),
+      { folder: path.join(folder, 'env'), backends: [], defaultBackend: 'memory', items: [ITEM], configFiles: [], autoPulls: [], sections: { by: 'folder', names: new Map() }, s3: null },
+      context
+    )
+
+    expect(await flaky.pull({ item: ITEM, tables: null })).toEqual({
+      done: true,
+      detail: 'keys merged: 1 from memory, 0 kept local, not recorded as synchronized: the copy of memory could not be listed before the pull: pull again'
+    })
+    expect(await localValue()).toEqual({ version: 1, connections: [{ id: 'dev', url: 'pg://new', lastUsedAt: 99 }] })
+  })
+
   it('keeps the ignored values of its backend when pushed whole', async () => {
     await fs.writeFile(path.join(folder, 'env', ITEM.path), connections('pg://mine', 99))
 

@@ -34,9 +34,10 @@ export interface TransferOptions {
 export interface EnvironmentBackend {
   /**
    * Lists the stored files.
+   * @param signal Abandons the listing.
    * @returns The files, or null when the backend cannot list them.
    */
-  list: () => Promise<RemoteFile[] | null>
+  list: (signal?: AbortSignal) => Promise<RemoteFile[] | null>
   /**
    * Opens a stored file.
    * @param path The path of the file.
