@@ -6,13 +6,13 @@ import os from 'node:os'
 import path from 'node:path'
 import { pipeline, type Readable } from 'node:stream'
 import { promisify } from 'node:util'
-import { type BackendContext, type BackendSettings, type BackendType, byteCounter, type EnvironmentBackend, readText, type RemoteFile, type TransferOptions } from './backend.js'
+import { type BackendContext, type BackendSettings, type BackendType, byteCounter, type EnvironmentBackend, lineReader, readText, type RemoteFile, type TransferOptions } from './backend.js'
 
 const execFileAsync = promisify(execFile)
 const COMMIT_MARKER = '@@devtool-commit@@'
 const DEFAULT_IDENTITY = ['-c', 'user.name=devtool', '-c', 'user.email=devtool@localhost']
 const PROGRESS_LINE = /^(Enumerating|Counting|Delta compression|Compressing|Writing|Total) /
-const WRITTEN_PATTERN = /Writing objects:[^\r\n]*?, (\d+(?:\.\d+)?) (bytes|KiB|MiB|GiB)/g
+const WRITTEN_PATTERN = /^Writing objects:.*?, (\d+(?:\.\d+)?) (bytes|KiB|MiB|GiB)/
 const UNIT_BYTES: Record<string, number> = { bytes: 1, KiB: 1024, MiB: 1024 ** 2, GiB: 1024 ** 3 }
 
 /** Settings of a git repository storing the files, each push a commit. */
@@ -176,20 +176,21 @@ class GitBackend implements EnvironmentBackend {
     await this.git([...(await this.identity()), 'commit', '-q', '-m', message])
     const push = ['push', '--progress', 'origin', `HEAD:${this._settings.branch}`]
     /**
-     * Reports the bytes of each "Writing objects" progress line of git.
-     * @param text A piece of the error output of git.
+     * Reports the bytes of a "Writing objects" progress line of git.
+     * @param line A complete line of the error output of git.
      */
-    const onStderr = (text: string): void => {
-      for (const [, amount, unit] of text.matchAll(WRITTEN_PATTERN)) {
-        onWritten?.(Math.round(Number(amount) * UNIT_BYTES[unit]))
+    const onLine = (line: string): void => {
+      const written = WRITTEN_PATTERN.exec(line)
+      if (written) {
+        onWritten?.(Math.round(Number(written[1]) * UNIT_BYTES[written[2]]))
       }
     }
     try {
-      await this.git(push, onStderr)
+      await this.git(push, lineReader(onLine))
     } catch {
       await this.git(['fetch', '-q', 'origin', this._settings.branch])
       await this.git([...(await this.identity()), 'rebase', '-q', `origin/${this._settings.branch}`])
-      await this.git(push, onStderr)
+      await this.git(push, lineReader(onLine))
     }
   }
 

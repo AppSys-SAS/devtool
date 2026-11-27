@@ -75,11 +75,16 @@ class CdnBackend implements EnvironmentBackend {
    */
   async upload (path: string, localFile: string, mediaType: string, { onProgress }: TransferOptions = {}): Promise<void> {
     const { size } = await fs.stat(localFile)
-    await this.assertOk(await this.request('PUT', path, {
-      headers: { 'Content-Type': mediaType, 'Content-Length': String(size) },
-      body: Readable.toWeb(pipeline(createReadStream(localFile), byteCounter(size, onProgress), () => undefined)) as ReadableStream<Uint8Array>,
-      duplex: 'half'
-    }))
+    const source = createReadStream(localFile)
+    try {
+      await this.assertOk(await this.request('PUT', path, {
+        headers: { 'Content-Type': mediaType, 'Content-Length': String(size) },
+        body: Readable.toWeb(pipeline(source, byteCounter(size, onProgress), () => undefined)) as ReadableStream<Uint8Array>,
+        duplex: 'half'
+      }))
+    } finally {
+      source.destroy()
+    }
   }
 
   /**

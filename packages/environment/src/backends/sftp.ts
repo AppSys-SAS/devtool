@@ -93,7 +93,12 @@ class SftpBackend implements EnvironmentBackend {
     const partialPath = `${remotePath}${PARTIAL_SUFFIX}`
     const { size } = await fs.stat(localFile)
     await client.mkdir(path.posix.dirname(remotePath), true)
-    await client.put(pipeline(createReadStream(localFile), byteCounter(size, onProgress), () => undefined), partialPath)
+    const source = createReadStream(localFile)
+    try {
+      await client.put(pipeline(source, byteCounter(size, onProgress), () => undefined), partialPath)
+    } finally {
+      source.destroy()
+    }
     try {
       await client.posixRename(partialPath, remotePath)
     } catch {

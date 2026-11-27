@@ -271,6 +271,23 @@ describe('cancel of a pull', () => {
     expect((await readSyncJournal()).get(ITEM_PATH)).toEqual(PREVIOUS_RECORD)
   })
 
+  it('gives up a backend that does not answer, closing what it opens later', async () => {
+    let release = (): void => undefined
+    downloadGate = new Promise(resolve => {
+      release = resolve
+    })
+    const late = new PassThrough()
+    const cancel = new AbortController()
+    const pull = environmentOf(postgresItem, late).pull({ item: postgresItem, tables: null, signal: cancel.signal })
+    await vi.waitFor(() => expect(downloads).toBe(1))
+    cancel.abort(new Error('cancelled'))
+
+    await expect(pull).rejects.toBeInstanceOf(TransferCancelledError)
+    release()
+    await vi.waitFor(() => expect(late.destroyed).toBe(true))
+    expect(await localState()).toEqual({ files: ['db.dump'], copy: 'previous copy' })
+  }, 5_000)
+
   it('stops a download whose backend stalls, closing its stream', async () => {
     const stalled = new PassThrough()
     stalled.write('half an archive')
@@ -284,7 +301,9 @@ describe('cancel of a pull', () => {
   }, 5_000)
 
   it('restores to its end once the archive is complete, the download reported whole first', async () => {
-    await fakeDocker(`sleep 1; cat "${path.join(folder, 'env', 'api', 'db.dump')}" > "${path.join(folder, 'seen')}"`)
+    const started = path.join(folder, 'restore-started')
+    const released = path.join(folder, 'restore-released')
+    await fakeDocker(`touch "${started}"; while [ ! -f "${released}" ]; do sleep 0.05; done; cat "${path.join(folder, 'env', 'api', 'db.dump')}" > "${path.join(folder, 'seen')}"`)
     const cancel = new AbortController()
     const reports: [number, number | null][] = []
     const pull = environmentOf(postgresItem, Buffer.from('new archive')).pull({
@@ -295,7 +314,9 @@ describe('cancel of a pull', () => {
         reports.push([done, total])
       }
     })
-    setTimeout(() => cancel.abort(new Error('cancelled')), 400)
+    await vi.waitFor(async () => fs.access(started), { timeout: 5_000 })
+    cancel.abort(new Error('cancelled'))
+    await fs.writeFile(released, '')
 
     expect(await pull).toEqual({ done: true, detail: 'database restored in db' })
     expect(await localState()).toEqual({ files: ['db.dump'], copy: 'new archive' })
@@ -321,5 +342,20 @@ describe('progress of a transfer', () => {
     await fs.writeFile(path.join(folder, 'env', 'api', 'notes.txt'), 'local')
     await environment.push({ item, tables: null, onProgress })
     expect(reports).toEqual([[12, 12], [12, 12], [5, 5]])
+  })
+
+  it('relays the progress of a configuration file pushed key by key', async () => {
+    const item: EnvironmentItem = { kind: 'file', path: 'api/config.yml', ...open, ignore: null }
+    await fs.writeFile(path.join(folder, 'env', 'api', 'config.yml'), 'port: 2\n')
+    const reports: [number, number | null][] = []
+    await environmentOf(item, Buffer.from('port: 1\n')).push({
+      item,
+      tables: null,
+      keys: [{ path: ['port'], side: 'local' }],
+      onProgress: (done, total) => {
+        reports.push([done, total])
+      }
+    })
+    expect(reports).toEqual([[8, 8]])
   })
 })

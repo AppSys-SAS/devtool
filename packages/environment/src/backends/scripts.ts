@@ -5,7 +5,7 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import type { Readable } from 'node:stream'
-import { type BackendContext, type BackendProblem, type BackendSettings, type BackendType, type EnvironmentBackend, readText, type RemoteFile, type TransferOptions } from './backend.js'
+import { type BackendContext, type BackendProblem, type BackendSettings, type BackendType, type EnvironmentBackend, lineReader, readText, type RemoteFile, type TransferOptions } from './backend.js'
 
 const OPERATIONS = ['list', 'download', 'upload', 'remove'] as const
 const ABSENT_EXIT_CODE = 2
@@ -49,12 +49,15 @@ export interface ScriptsSettings extends BackendSettings {
 }
 
 /**
- * Sends a signal to a process group.
- * @param pid The process leading the group.
+ * Sends a signal to the process group a command leads.
+ * @param pid The process leading the group, undefined when it never started.
  * @param name The signal.
- * @returns False when the group is already gone.
+ * @returns False when there is no such group.
  */
-function signalGroup (pid: number, name: NodeJS.Signals): boolean {
+function signalGroup (pid: number | undefined, name: NodeJS.Signals): boolean {
+  if (pid === undefined || pid <= 1) {
+    return false
+  }
   try {
     process.kill(-pid, name)
     return true
@@ -213,26 +216,23 @@ class ScriptsBackend implements EnvironmentBackend {
        * Stops the process group of the command, killing it when it outlives a grace delay.
        */
       const stop = (): void => {
-        const { pid } = child
-        if (pid !== undefined && signalGroup(pid, 'SIGTERM')) {
-          forced = setTimeout(() => signalGroup(pid, 'SIGKILL'), STOP_GRACE_MS)
+        if (signalGroup(child.pid, 'SIGTERM')) {
+          forced = setTimeout(() => signalGroup(child.pid, 'SIGKILL'), STOP_GRACE_MS)
         }
       }
       signal?.addEventListener('abort', stop, { once: true })
       const stdout: Buffer[] = []
       const stderr: Buffer[] = []
-      let partialLine = ''
+      const readLine = lineReader(line => {
+        const reported = PROGRESS_LINE.exec(line.trim())
+        if (reported) {
+          onReported?.(Number(reported[1]))
+        }
+      })
       child.stdout.on('data', (chunk: Buffer) => stdout.push(chunk))
       child.stderr.on('data', (chunk: Buffer) => {
         stderr.push(chunk)
-        const lines = (partialLine + chunk.toString('utf8')).split('\n')
-        partialLine = lines.pop() ?? ''
-        for (const line of lines) {
-          const reported = PROGRESS_LINE.exec(line.trim())
-          if (reported) {
-            onReported?.(Number(reported[1]))
-          }
-        }
+        readLine(chunk.toString('utf8'))
       })
       child.on('error', error => {
         signal?.removeEventListener('abort', stop)
@@ -242,6 +242,7 @@ class ScriptsBackend implements EnvironmentBackend {
         signal?.removeEventListener('abort', stop)
         clearTimeout(forced)
         if (signal?.aborted) {
+          signalGroup(child.pid, 'SIGKILL')
           reject(new Error(`${operation} of ${this._settings.slug} stopped`))
           return
         }

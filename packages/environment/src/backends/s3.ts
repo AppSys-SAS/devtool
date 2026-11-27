@@ -89,7 +89,8 @@ class S3Backend implements EnvironmentBackend {
     const client = await this.client()
     const { size } = await fs.stat(localFile)
     const abort = new AbortController()
-    const body = pipeline(createReadStream(localFile), byteCounter(size, onProgress), error => {
+    const source = createReadStream(localFile)
+    const body = pipeline(source, byteCounter(size, onProgress), error => {
       if (error) {
         abort.abort(error)
       }
@@ -104,6 +105,9 @@ class S3Backend implements EnvironmentBackend {
       }), { abortSignal: abort.signal })
     } catch (error) {
       throw abort.signal.aborted ? abort.signal.reason : error
+    } finally {
+      source.destroy()
+      body.destroy()
     }
   }
 

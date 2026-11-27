@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto'
+import { readdirSync } from 'node:fs'
 import { expect } from 'vitest'
 import type { TransferProgress } from '../../src/backends/backend.js'
 
@@ -11,6 +12,14 @@ export const PROGRESS_FILE_SIZE = 1024 * 1024
  */
 export function progressContent (): Buffer {
   return randomBytes(PROGRESS_FILE_SIZE)
+}
+
+/**
+ * Counts the files the current process holds open.
+ * @returns The number of open file descriptors.
+ */
+export function openDescriptors (): number {
+  return readdirSync('/dev/fd').length
 }
 
 /**
