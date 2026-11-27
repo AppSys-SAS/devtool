@@ -58,7 +58,7 @@ beforeEach(async () => {
   const context: BackendContext = { resolve: async text => text, askSecret: async () => '', cacheDir: folder, configFolder: folder, auth: null }
   environment = new Environment(
     new Map([['memory', memoryBackend()]]),
-    { folder: path.join(folder, 'env'), backends: [], defaultBackend: 'memory', items: [ITEM], configFiles: [], autoPulls: [], s3: null },
+    { folder: path.join(folder, 'env'), backends: [], defaultBackend: 'memory', items: [ITEM], configFiles: [], autoPulls: [], sections: { by: 'folder', names: new Map() }, s3: null },
     context
   )
 })

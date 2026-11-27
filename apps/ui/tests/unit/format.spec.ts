@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { formatBytes, formatRelativeDate } from '@/lib/format'
+import { formatBytes, formatProgress, formatRelativeDate, progressPercent } from '@/lib/format'
 
 const KB = 1024
 const MB = 1024 ** 2
@@ -22,6 +22,30 @@ const now = Date.parse('2026-01-15T12:00:00Z')
 function at (offset: number): string {
   return new Date(now + offset).toISOString()
 }
+
+describe('progressPercent', () => {
+  it.each([
+    [0, 4 * MB, 0],
+    [MB, 4 * MB, 25],
+    [4 * MB - 1, 4 * MB, 99],
+    [4 * MB, 4 * MB, 100],
+    [5 * MB, 4 * MB, 100],
+    [MB, null, null],
+    [0, 0, null]
+  ])('gives %i of %s as %s', (done, total, expected) => {
+    expect(progressPercent(done, total)).toBe(expected)
+  })
+})
+
+describe('formatProgress', () => {
+  it('shows the bytes moved, the size and the percentage when the size is known', () => {
+    expect(formatProgress(1.5 * MB, 3 * MB)).toBe('1.5 MB / 3.0 MB · 50%')
+  })
+
+  it('shows only the bytes moved when the size is unknown', () => {
+    expect(formatProgress(12 * KB, null)).toBe('12 KB')
+  })
+})
 
 describe('formatBytes', () => {
   it.each([

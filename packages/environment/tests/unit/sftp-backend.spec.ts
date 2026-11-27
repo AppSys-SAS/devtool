@@ -9,6 +9,7 @@ import type { Attributes, FileEntry, SFTPWrapper } from 'ssh2'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import type { BackendContext, BackendSettings, EnvironmentBackend } from '../../src/backends/backend.js'
 import { sftp } from '../../src/backends/sftp.js'
+import { expectCompleteProgress, progressContent, progressRecorder } from './progress-fixtures.js'
 
 const { Server, utils } = ssh2
 const { STATUS_CODE } = utils.sftp
@@ -226,6 +227,26 @@ describe('sftp backend', { timeout: 30_000 }, () => {
     expect(after.version).not.toBe(before.version)
     expect(await textOf(await backend.download('api/config.yml'))).toBe('port: 4000\nhost: api\n')
     expect(await fs.readdir(path.join(root, 'api'))).toEqual(['config.yml'])
+    await backend.close()
+  })
+
+  it('reports the bytes it sends and receives, against the size of the file', async () => {
+    const content = progressContent()
+    const file = path.join(local, 'db.gz')
+    await fs.writeFile(file, content)
+
+    const sent = progressRecorder()
+    await backend.upload('api/db.gz', file, 'application/gzip', { onProgress: sent.onProgress })
+    expect((await fs.readFile(path.join(root, 'api/db.gz'))).equals(content)).toBe(true)
+    expectCompleteProgress(sent.reports, content.length)
+
+    const received = progressRecorder()
+    const chunks: Buffer[] = []
+    for await (const chunk of await backend.download('api/db.gz', { onProgress: received.onProgress }) ?? []) {
+      chunks.push(chunk as Buffer)
+    }
+    expect(Buffer.concat(chunks).equals(content)).toBe(true)
+    expectCompleteProgress(received.reports, content.length)
     await backend.close()
   })
 

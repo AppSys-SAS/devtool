@@ -67,6 +67,12 @@ Write the file next to its place, then rename it, as `folder.sh` does: a cut upl
 a half written file behind.
 :::
 
+### Progress
+
+While `download` runs, the devtool shows the size `%{ADT:FILE}` has reached. `upload` reports its own
+progress by printing lines `progress: <bytes sent>` on its standard error, such as `progress: 1048576`;
+without them, the upload shows its end only.
+
 ## Read-only storage
 
 A storage the developers only read from, such as archives published by another job, needs no

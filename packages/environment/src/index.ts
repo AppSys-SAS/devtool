@@ -8,7 +8,9 @@ export {
   createBackends,
   type EnvironmentBackend,
   readBackends,
-  type RemoteFile
+  type RemoteFile,
+  type TransferOptions,
+  type TransferProgress
 } from './backends/index.js'
 export { defaultEnvironmentFolder, localPathOf, writeLocalFile } from './directory.js'
 export {
@@ -19,6 +21,7 @@ export {
   type EnvironmentAutoPull,
   type EnvironmentConfigFile,
   type EnvironmentOptions,
+  type EnvironmentSections,
   type EnvironmentSelection,
   itemStoredAt,
   listTables,
@@ -27,8 +30,10 @@ export {
   parseTargets,
   readEnvironmentOptions,
   canonicalBackendPath,
+  sectionOf,
   SHARED_CONFIG_PATH,
   sharedConfigItem,
+  TransferCancelledError,
   transfersParts,
   type TransferResult
 } from './environment.js'

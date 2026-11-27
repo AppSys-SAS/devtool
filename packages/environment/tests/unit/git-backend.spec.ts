@@ -6,6 +6,7 @@ import type { Readable } from 'node:stream'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { BackendContext, EnvironmentBackend } from '../../src/backends/backend.js'
 import { git } from '../../src/backends/git.js'
+import { expectCompleteProgress, progressContent, progressRecorder } from './progress-fixtures.js'
 
 const hasGit = ((): boolean => {
   try {
@@ -151,5 +152,25 @@ describe.skipIf(!hasGit)('git backend', () => {
 
   it('refuses a path leaving its folder', async () => {
     await expect(backendOf('team').upload('../outside.yml', await localFile('a', 'x'), 'application/yaml')).rejects.toThrow('leaves the folder of the repository')
+  })
+
+  it('reports the bytes git writes to the remote and the bytes read back, against the size of the file', async () => {
+    const backend = backendOf('team')
+    const content = progressContent()
+    const file = path.join(folder, 'db.gz')
+    await fs.writeFile(file, content)
+
+    const sent = progressRecorder()
+    await backend.upload('api/db.gz', file, 'application/gzip', { onProgress: sent.onProgress })
+    expectCompleteProgress(sent.reports, content.length)
+    expect(sent.reports[0][0]).toBeGreaterThan(0)
+
+    const received = progressRecorder()
+    const chunks: Buffer[] = []
+    for await (const chunk of await backendOf('other').download('api/db.gz', { onProgress: received.onProgress }) ?? []) {
+      chunks.push(chunk as Buffer)
+    }
+    expect(Buffer.concat(chunks).equals(content)).toBe(true)
+    expectCompleteProgress(received.reports, content.length)
   })
 })

@@ -4,13 +4,16 @@ import { createReadStream } from 'node:fs'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import type { Readable } from 'node:stream'
+import { pipeline, type Readable } from 'node:stream'
 import { promisify } from 'node:util'
-import { type BackendContext, type BackendSettings, type BackendType, type EnvironmentBackend, readText, type RemoteFile } from './backend.js'
+import { type BackendContext, type BackendSettings, type BackendType, byteCounter, type EnvironmentBackend, readText, type RemoteFile, type TransferOptions } from './backend.js'
 
 const execFileAsync = promisify(execFile)
 const COMMIT_MARKER = '@@devtool-commit@@'
 const DEFAULT_IDENTITY = ['-c', 'user.name=devtool', '-c', 'user.email=devtool@localhost']
+const PROGRESS_LINE = /^(Enumerating|Counting|Delta compression|Compressing|Writing|Total) /
+const WRITTEN_PATTERN = /Writing objects:[^\r\n]*?, (\d+(?:\.\d+)?) (bytes|KiB|MiB|GiB)/g
+const UNIT_BYTES: Record<string, number> = { bytes: 1, KiB: 1024, MiB: 1024 ** 2, GiB: 1024 ** 3 }
 
 /** Settings of a git repository storing the files, each push a commit. */
 export interface GitSettings extends BackendSettings {
@@ -67,44 +70,49 @@ class GitBackend implements EnvironmentBackend {
   /**
    * Opens a stored file, copied out of the working copy so later operations do not change it while it is read.
    * @param filePath The path of the file.
+   * @param options Follows the bytes read from the copy.
    * @returns Its content, or null when the repository does not hold it.
    */
-  async download (filePath: string): Promise<Readable | null> {
+  async download (filePath: string, { onProgress }: TransferOptions = {}): Promise<Readable | null> {
     const copy = await this.serialize(async () => {
       if (!(await this.sync())) {
         return null
       }
-      const source = this.pathOf(filePath)
-      if (!(await fs.stat(source).then(stat => stat.isFile(), () => false))) {
+      const source = await fs.stat(this.pathOf(filePath)).catch(() => null)
+      if (!source?.isFile()) {
         return null
       }
       const temporary = path.join(os.tmpdir(), `devtool-git-${randomUUID()}`)
-      await fs.copyFile(source, temporary)
-      return temporary
+      await fs.copyFile(this.pathOf(filePath), temporary)
+      return { temporary, size: source.size }
     })
     if (copy === null) {
       return null
     }
-    const content = createReadStream(copy)
+    const content = createReadStream(copy.temporary)
     content.on('close', () => {
-      void fs.rm(copy, { force: true })
+      void fs.rm(copy.temporary, { force: true })
     })
-    return content
+    return pipeline(content, byteCounter(copy.size, onProgress), () => undefined)
   }
 
   /**
    * Commits a local file into the repository and pushes it, nothing being committed when it did not change.
    * @param filePath The path of the file in the repository folder.
    * @param localFile The local file.
+   * @param _mediaType Unused, a file of the repository having no media type.
+   * @param options Follows the bytes git writes to the remote, the size of the file standing for the total.
    */
-  async upload (filePath: string, localFile: string): Promise<void> {
+  async upload (filePath: string, localFile: string, _mediaType: string, { onProgress }: TransferOptions = {}): Promise<void> {
     await this.serialize(async () => {
       await this.sync()
       const target = this.pathOf(filePath)
       await fs.mkdir(path.dirname(target), { recursive: true })
       await fs.copyFile(localFile, target)
+      const { size } = await fs.stat(target)
       await this.git(['add', '--', this._settings.path + filePath])
-      await this.commitAndPush(`devtool: push ${filePath}`)
+      await this.commitAndPush(`devtool: push ${filePath}`, bytes => onProgress?.(Math.min(bytes, size), size))
+      onProgress?.(size, size)
     })
   }
 
@@ -158,20 +166,30 @@ class GitBackend implements EnvironmentBackend {
   /**
    * Commits what is staged and pushes it, rebasing once on the remote when the push is refused.
    * @param message The message of the commit.
+   * @param onWritten Told the bytes git reports as written to the remote, as it writes them.
    */
-  private async commitAndPush (message: string): Promise<void> {
+  private async commitAndPush (message: string, onWritten?: (bytes: number) => void): Promise<void> {
     const staged = await execFileAsync('git', ['-C', this._folder, 'diff', '--cached', '--quiet']).then(() => false, () => true)
     if (!staged) {
       return
     }
     await this.git([...(await this.identity()), 'commit', '-q', '-m', message])
-    const push = ['push', '-q', 'origin', `HEAD:${this._settings.branch}`]
+    const push = ['push', '--progress', 'origin', `HEAD:${this._settings.branch}`]
+    /**
+     * Reports the bytes of each "Writing objects" progress line of git.
+     * @param text A piece of the error output of git.
+     */
+    const onStderr = (text: string): void => {
+      for (const [, amount, unit] of text.matchAll(WRITTEN_PATTERN)) {
+        onWritten?.(Math.round(Number(amount) * UNIT_BYTES[unit]))
+      }
+    }
     try {
-      await this.git(push)
+      await this.git(push, onStderr)
     } catch {
       await this.git(['fetch', '-q', 'origin', this._settings.branch])
       await this.git([...(await this.identity()), 'rebase', '-q', `origin/${this._settings.branch}`])
-      await this.git(push)
+      await this.git(push, onStderr)
     }
   }
 
@@ -206,19 +224,23 @@ class GitBackend implements EnvironmentBackend {
   }
 
   /**
-   * Runs git in the working copy, never asking for credentials.
+   * Runs git in the working copy, in the C locale so its messages read the same on every machine,
+   * never asking for credentials.
    * @param args The arguments of git.
+   * @param onStderr Told each piece of the error output as git writes it.
    * @returns The standard output.
    */
-  private async git (args: string[]): Promise<string> {
+  private async git (args: string[], onStderr?: (text: string) => void): Promise<string> {
     try {
-      const { stdout } = await execFileAsync('git', ['-C', this._folder, ...args], {
-        env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+      const run = execFileAsync('git', ['-C', this._folder, ...args], {
+        env: { ...process.env, GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C' },
         maxBuffer: 64 * 1024 * 1024
       })
+      run.child.stderr?.on('data', (chunk: Buffer) => onStderr?.(chunk.toString()))
+      const { stdout } = await run
       return stdout
     } catch (error) {
-      const stderr = (error as { stderr?: string }).stderr?.trim()
+      const stderr = (error as { stderr?: string }).stderr?.split(/[\r\n]+/).filter(line => line.trim() !== '' && !PROGRESS_LINE.test(line)).join('\n')
       throw new Error(`git ${args.filter(arg => !arg.startsWith('user.')).join(' ')} failed for ${this._settings.slug}: ${stderr || (error as Error).message}`, { cause: error })
     }
   }

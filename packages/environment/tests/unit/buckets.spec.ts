@@ -230,7 +230,7 @@ describe('native bucket archives', () => {
       close: async () => undefined
     }
     const context: BackendContext = { resolve: async text => text, askSecret: async () => '', cacheDir: folder, configFolder: folder, auth: null }
-    const environment = new Environment(new Map([['team', backend]]), { folder, backends: [], defaultBackend: 'team', items: [item], configFiles: [], autoPulls: [], s3: null }, context)
+    const environment = new Environment(new Map([['team', backend]]), { folder, backends: [], defaultBackend: 'team', items: [item], configFiles: [], autoPulls: [], sections: { by: 'folder', names: new Map() }, s3: null }, context)
 
     await expect(environment.pull({ item, tables: null })).rejects.toThrow('api/uploads.tar.gz is not a complete tar.gz archive')
   })

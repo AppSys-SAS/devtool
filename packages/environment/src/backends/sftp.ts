@@ -1,9 +1,10 @@
+import { createReadStream } from 'node:fs'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import type { Readable } from 'node:stream'
+import { pipeline, type Readable } from 'node:stream'
 import SftpClient from 'ssh2-sftp-client'
-import { type BackendContext, type BackendProblem, type BackendSettings, type BackendType, type EnvironmentBackend, readText, type RemoteFile } from './backend.js'
+import { type BackendContext, type BackendProblem, type BackendSettings, type BackendType, byteCounter, type EnvironmentBackend, readText, type RemoteFile, type TransferOptions } from './backend.js'
 
 const PARTIAL_SUFFIX = '.part'
 
@@ -61,33 +62,38 @@ class SftpBackend implements EnvironmentBackend {
   }
 
   /**
-   * Opens a file of the folder.
+   * Opens a file of the folder; the stream fails when the file arrives incomplete.
    * @param filePath The path of the file.
+   * @param options Follows the bytes received.
    * @returns Its content, or null when the file does not exist.
    */
-  async download (filePath: string): Promise<Readable | null> {
+  async download (filePath: string, { onProgress }: TransferOptions = {}): Promise<Readable | null> {
     const client = await this.client()
     const remotePath = this.remotePath(filePath)
     if (await client.exists(remotePath) !== '-') {
       return null
     }
+    const { size } = await client.stat(remotePath)
     const content = client.createReadStream(remotePath)
     this._downloads.add(content)
     content.once('close', () => this._downloads.delete(content))
-    return content
+    return pipeline(content, byteCounter(size, onProgress), () => undefined)
   }
 
   /**
    * Stores a local file, written next to its place then renamed, so a cut upload never replaces the stored file.
    * @param filePath The path of the file.
    * @param localFile The local file.
+   * @param _mediaType Unused, a file of the server having no media type.
+   * @param options Follows the bytes sent.
    */
-  async upload (filePath: string, localFile: string): Promise<void> {
+  async upload (filePath: string, localFile: string, _mediaType: string, { onProgress }: TransferOptions = {}): Promise<void> {
     const client = await this.client()
     const remotePath = this.remotePath(filePath)
     const partialPath = `${remotePath}${PARTIAL_SUFFIX}`
+    const { size } = await fs.stat(localFile)
     await client.mkdir(path.posix.dirname(remotePath), true)
-    await client.put(localFile, partialPath)
+    await client.put(pipeline(createReadStream(localFile), byteCounter(size, onProgress), () => undefined), partialPath)
     try {
       await client.posixRename(partialPath, remotePath)
     } catch {

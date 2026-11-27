@@ -728,6 +728,19 @@
           "items": { "$ref": "#/$defs/encryptionRule" }
         },
         "folder": { "type": "string", "description": "Local mirror of the files of the backends. Default: the parent of the configuration folder." },
+        "sections": {
+          "type": "object",
+          "description": "How the Environment page groups the items.",
+          "additionalProperties": false,
+          "properties": {
+            "by": { "enum": ["folder", "type"], "description": "Groups by the first folder of the item paths, or by type of item (file, database, bucket, redis). Default: folder." },
+            "names": {
+              "type": "object",
+              "description": "The name shown for a folder or a type, in place of the default one.",
+              "additionalProperties": { "type": "string", "pattern": "\\S" }
+            }
+          }
+        },
         "mcp": { "$ref": "#/$defs/mcpRules" },
         "files": {
           "type": "array",

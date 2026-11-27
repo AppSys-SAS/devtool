@@ -98,7 +98,7 @@ describe('Environment groups', () => {
    */
   function environmentWith (groups: EnvironmentItem['groups']): { environment: Environment, item: EnvironmentItem } {
     const item: EnvironmentItem = { kind: 'file', path: 'api/config.yml', backend: 'team', encryption: null, groups, ignore: null }
-    const options = { folder: path.join(folder, 'env'), backends: [], defaultBackend: 'team', items: [item], configFiles: [], autoPulls: [], s3: null }
+    const options = { folder: path.join(folder, 'env'), backends: [], defaultBackend: 'team', items: [item], configFiles: [], autoPulls: [], sections: { by: 'folder' as const, names: new Map<string, string>() }, s3: null }
     const environment = new Environment(new Map([['team', backend]]), options, { ...context, cacheDir: path.join(folder, 'cache') })
     return { environment, item }
   }
@@ -128,6 +128,6 @@ describe('Environment groups', () => {
     const { environment, item } = environmentWith({ pull: ['developers'], push: null })
 
     expect(await environment.pull({ item, tables: null })).toEqual({ done: false, detail: 'absent from team' })
-    expect(backend.download).toHaveBeenCalledWith('api/config.yml')
+    expect(backend.download).toHaveBeenCalledWith('api/config.yml', { onProgress: undefined, signal: undefined })
   })
 })

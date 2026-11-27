@@ -60,6 +60,26 @@ export function formatBytes (bytes: number): string {
 }
 
 /**
+ * Gives the share of a transfer done.
+ * @param done The bytes moved.
+ * @param total The size of the file, null when unknown.
+ * @returns The whole percentage done, at most 100, null when the size is unknown or empty.
+ */
+export function progressPercent (done: number, total: number | null): number | null {
+  return total ? Math.min(100, Math.floor((done * 100) / total)) : null
+}
+
+/**
+ * Formats the progress of a transfer for reading.
+ * @param done The bytes moved.
+ * @param total The size of the file, null when unknown.
+ * @returns The bytes moved, with the size and the percentage when the size is known, such as `1.5 MB / 3.0 MB · 50%`.
+ */
+export function formatProgress (done: number, total: number | null): string {
+  return total ? `${formatBytes(done)} / ${formatBytes(total)} · ${progressPercent(done, total)}%` : formatBytes(done)
+}
+
+/**
  * Formats a date relatively to now.
  * @param date The date, in ISO format.
  * @param now The current time, in milliseconds since the epoch.

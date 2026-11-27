@@ -1,8 +1,8 @@
 import { createReadStream } from 'node:fs'
 import fs from 'node:fs/promises'
-import type { Readable } from 'node:stream'
+import { PassThrough, pipeline, type Readable } from 'node:stream'
 import { DeleteObjectCommand, GetObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client, S3ServiceException } from '@aws-sdk/client-s3'
-import { type BackendContext, type BackendProblem, type BackendSettings, type BackendType, type EnvironmentBackend, readText, type RemoteFile } from './backend.js'
+import { type BackendContext, type BackendProblem, type BackendSettings, type BackendType, byteCounter, type EnvironmentBackend, readText, type RemoteFile, type TransferOptions } from './backend.js'
 
 /** Settings of an S3 bucket storing the files, under a prefix. */
 export interface S3Settings extends BackendSettings {
@@ -59,15 +59,16 @@ class S3Backend implements EnvironmentBackend {
   }
 
   /**
-   * Opens an object.
+   * Opens an object; the stream fails when the object arrives incomplete.
    * @param path The path of the file.
+   * @param options Follows the bytes received, and abandons the request.
    * @returns Its content, or null when the object does not exist.
    */
-  async download (path: string): Promise<Readable | null> {
+  async download (path: string, { onProgress, signal }: TransferOptions = {}): Promise<Readable | null> {
     const client = await this.client()
     try {
-      const object = await client.send(new GetObjectCommand({ Bucket: this._settings.bucket, Key: this._settings.prefix + path }))
-      return object.Body as Readable
+      const object = await client.send(new GetObjectCommand({ Bucket: this._settings.bucket, Key: this._settings.prefix + path }), { abortSignal: signal })
+      return pipeline(object.Body as Readable, byteCounter(object.ContentLength ?? null, onProgress), () => undefined)
     } catch (error) {
       if (error instanceof S3ServiceException && (error.name === 'NoSuchKey' || error.$metadata.httpStatusCode === 404)) {
         return null
@@ -77,21 +78,33 @@ class S3Backend implements EnvironmentBackend {
   }
 
   /**
-   * Stores a local file as an object, streamed, replacing the stored one.
+   * Stores a local file as an object, streamed, replacing the stored one; a file that cannot be read
+   * whole aborts the request.
    * @param path The path of the file.
    * @param localFile The local file.
    * @param mediaType The media type of the object.
+   * @param options Follows the bytes sent.
    */
-  async upload (path: string, localFile: string, mediaType: string): Promise<void> {
+  async upload (path: string, localFile: string, mediaType: string, { onProgress }: TransferOptions = {}): Promise<void> {
     const client = await this.client()
     const { size } = await fs.stat(localFile)
-    await client.send(new PutObjectCommand({
-      Bucket: this._settings.bucket,
-      Key: this._settings.prefix + path,
-      Body: createReadStream(localFile),
-      ContentLength: size,
-      ContentType: mediaType
-    }))
+    const abort = new AbortController()
+    const body = pipeline(createReadStream(localFile), byteCounter(size, onProgress), error => {
+      if (error) {
+        abort.abort(error)
+      }
+    }).pipe(new PassThrough())
+    try {
+      await client.send(new PutObjectCommand({
+        Bucket: this._settings.bucket,
+        Key: this._settings.prefix + path,
+        Body: body,
+        ContentLength: size,
+        ContentType: mediaType
+      }), { abortSignal: abort.signal })
+    } catch (error) {
+      throw abort.signal.aborted ? abort.signal.reason : error
+    }
   }
 
   /**

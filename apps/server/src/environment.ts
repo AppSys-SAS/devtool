@@ -9,7 +9,6 @@ import {
   configFormatOf,
   type CopyInfo,
   createBackends,
-  defaultEnvironmentFolder,
   Environment,
   type EnvironmentBackend,
   type EnvironmentOptions,
@@ -18,13 +17,17 @@ import {
   localPathOf,
   readEnvironmentOptions,
   redisDatabaseName,
+  sectionOf,
   SHARED_CONFIG_PATH,
   sharedConfigItem,
-  transfersParts
+  TransferCancelledError,
+  transfersParts,
+  type TransferResult
 } from '@appsys-sas/devtool-environment'
 import { logger } from '@appsys-sas/devtool-shared'
 import { Cron } from 'croner'
 import type {
+  EnvironmentAction,
   EnvironmentCopyPayload,
   EnvironmentItemPayload,
   EnvironmentKeyChoicePayload,
@@ -76,6 +79,7 @@ function copyPayload (copy: CopyInfo): EnvironmentCopyPayload {
 }
 
 const PEM_MAX_BYTES = 1024 * 1024
+const PROGRESS_PUBLISH_MS = 200
 
 /**
  * Tells what a local PEM file holds: its first certificate, with the end of its validity, or a private key.
@@ -121,6 +125,8 @@ export class DevtoolEnvironment {
   private _items: EnvironmentItemPayload[] = []
   private _error: string | null = null
   private _run: EnvironmentRunPayload | null = null
+  /** Cancels each step of the run in progress. */
+  private _cancels: AbortController[] = []
   /** The scheduled pulls of the configuration. */
   private _pullJobs: Cron[] = []
   /** Why some scheduled pulls could not be scheduled. */
@@ -248,16 +254,17 @@ export class DevtoolEnvironment {
    */
   async refresh (): Promise<void> {
     const environment = this.environment()
-    if (environment) {
+    const options = this._options
+    if (environment && options) {
       const { items, errors } = await environment.describe()
       this._error = Object.entries(errors).map(([backend, message]) => `${backend}: ${message}`).join('; ') || null
-      const folder = this._options?.folder ?? defaultEnvironmentFolder()
       this._items = await Promise.all(
         items.map(async ({ item, local, remote, synced }) => {
           const keyed = item.kind === 'file' && configFormatOf(item.path) !== null
           return {
             path: item.path,
             kind: item.kind,
+            section: sectionOf(options.sections, item),
             backend: item.backend,
             encrypted: item.encryption !== null,
             engine: item.kind === 'database' ? item.engine : null,
@@ -271,7 +278,7 @@ export class DevtoolEnvironment {
             local: local ? copyPayload(local) : null,
             remote: remote === 'unknown' || remote === null ? remote : copyPayload(remote),
             synced: synced ? { localUpdatedAt: synced.localUpdatedAt.toISOString(), remoteUpdatedAt: synced.remoteUpdatedAt.toISOString() } : null,
-            pem: item.kind === 'file' && !keyed && local ? await readPem(localPathOf(folder, item.path), local.size) : null
+            pem: item.kind === 'file' && !keyed && local ? await readPem(localPathOf(options.folder, item.path), local.size) : null
           }
         })
       )
@@ -367,50 +374,92 @@ export class DevtoolEnvironment {
   }
 
   /**
-   * Pulls or pushes items one after the other, publishing the progress of each, then describes the
-   * items again. A request while a run is in progress does nothing.
+   * Cancels the download of items of the pull in progress: the item being downloaded is left as it
+   * was, an item waiting is skipped, and an item whose restore has started runs to its end.
+   * Nothing happens outside a pull in progress.
    *
-   * @param direction - Whether the copies of the backends replace the local ones, or the reverse.
+   * @param index - The step of the item, null for every step not finished.
+   */
+  cancel (index: number | null): void {
+    if (this._run?.action !== 'pull' || this._run.finished) {
+      return
+    }
+    for (const [step, cancel] of this._cancels.entries()) {
+      if (index === null || index === step) {
+        cancel.abort(new Error('cancelled'))
+      }
+    }
+  }
+
+  /**
+   * Runs an action over items one after the other, publishing the progress of each, then describes
+   * the items again. A request while a run is in progress does nothing.
+   *
+   * @param action - Pull or push the items, restore their local data from their local copies, or remove those copies.
    * @param targets - The items, with the tables of the databases and the keys of the configuration files.
    * @param skipped - Items reported as skipped in the run, with the reason.
    */
-  async run (direction: 'pull' | 'push', targets: EnvironmentTarget[], skipped: { path: string, detail: string }[] = []): Promise<void> {
+  async run (action: EnvironmentAction, targets: EnvironmentTarget[], skipped: { path: string, detail: string }[] = []): Promise<void> {
     const environment = this.environment()
     if (!environment || !this._options || (this._run && !this._run.finished)) {
       return
     }
 
     const steps: EnvironmentRunPayload['steps'] = [
-      ...targets.map(target => ({ target: targetName(target), status: 'pending' as const, detail: null })),
-      ...skipped.map(({ path, detail }) => ({ target: path, status: 'skipped' as const, detail }))
+      ...targets.map(target => ({ target: targetName(target), status: 'pending' as const, detail: null, progress: null })),
+      ...skipped.map(({ path, detail }) => ({ target: path, status: 'skipped' as const, detail, progress: null }))
     ]
-    const run: EnvironmentRunPayload = { direction, steps, finished: false }
+    const run: EnvironmentRunPayload = { action, steps, finished: false }
+    const actions: Record<EnvironmentAction, (selection: EnvironmentSelection) => Promise<TransferResult>> = {
+      pull: async selection => environment.pull(selection),
+      push: async selection => environment.push(selection),
+      restore: async selection => environment.restoreLocal(selection),
+      remove: async selection => environment.removeLocalCopy(selection)
+    }
     this._run = run
+    this._cancels = targets.map(() => new AbortController())
     await this._publish(this.state())
 
+    let pendingPublish: NodeJS.Timeout | undefined
     for (const [index, target] of targets.entries()) {
+      const { signal } = this._cancels[index]
       const item = this._options.items.find(candidate => candidate.path === target.path)
       run.steps[index] = { ...run.steps[index], status: 'running' }
       await this._publish(this.state())
       try {
+        if (signal.aborted) {
+          throw new TransferCancelledError(target.path)
+        }
         if (!item) {
           throw new Error(`${target.path} is not part of the environment`)
         }
 
-        const selection: EnvironmentSelection = {
+        const result = await actions[action]({
           item,
           tables: (item.kind === 'database' || item.kind === 'redis') && target.tables?.length ? target.tables : null,
-          keys: item.kind === 'file' && target.keys ? target.keys : null
-        }
-        const result = await (direction === 'pull' ? environment.pull(selection) : environment.push(selection))
-        run.steps[index] = { ...run.steps[index], status: result.done ? 'done' : 'skipped', detail: result.detail }
+          keys: item.kind === 'file' && target.keys ? target.keys : null,
+          signal,
+          onProgress: (done, total) => {
+            run.steps[index] = { ...run.steps[index], progress: { done, total } }
+            pendingPublish ??= setTimeout(() => {
+              pendingPublish = undefined
+              this._publish(this.state()).catch((error: unknown) => logger.warn('Environment', 'Progress', `Not published: ${error instanceof Error ? error.message : String(error)}`))
+            }, PROGRESS_PUBLISH_MS)
+          }
+        })
+        run.steps[index] = { ...run.steps[index], status: result.done ? 'done' : 'skipped', detail: result.detail, progress: null }
       } catch (error) {
-        run.steps[index] = { ...run.steps[index], status: 'failed', detail: error instanceof Error ? error.message : String(error) }
+        const cancelled = error instanceof TransferCancelledError
+        const detail = cancelled ? 'cancelled' : error instanceof Error ? error.message : String(error)
+        run.steps[index] = { ...run.steps[index], status: cancelled ? 'skipped' : 'failed', detail, progress: null }
       }
+      clearTimeout(pendingPublish)
+      pendingPublish = undefined
       await this._publish(this.state())
     }
 
     run.finished = true
+    this._cancels = []
     await this.refresh()
   }
 

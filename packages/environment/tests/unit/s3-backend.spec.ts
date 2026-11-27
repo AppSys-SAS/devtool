@@ -8,6 +8,7 @@ import type { Readable } from 'node:stream'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import type { BackendContext, BackendSettings, EnvironmentBackend, RemoteFile } from '../../src/backends/backend.js'
 import { s3 } from '../../src/backends/s3.js'
+import { expectCompleteProgress, progressContent, progressRecorder } from './progress-fixtures.js'
 
 const BUCKET = 'acme-dev'
 const PAGE_SIZE = 2
@@ -71,6 +72,9 @@ async function answer (request: IncomingMessage, response: ServerResponse): Prom
   const [, bucket, ...keyParts] = url.pathname.split('/')
   const key = keyParts.map(decodeURIComponent).join('/')
   requests.push(`${request.method} ${key}`)
+  if (key === 'never/answered.gz') {
+    return
+  }
   if (bucket !== BUCKET) {
     response.writeHead(404, { 'Content-Type': 'application/xml' }).end('<Error><Code>NoSuchBucket</Code></Error>')
     return
@@ -236,6 +240,46 @@ describe('s3 backend', () => {
     expect(await textOf(await backend.download('api/config.yml'))).toBe('port: 4000\n')
     await backend.close()
   })
+
+  it('reports the bytes it sends and receives, against the size of the object', async () => {
+    const backend = backendOf()
+    const content = progressContent()
+    const file = path.join(local, 'db.gz')
+    await fs.writeFile(file, content)
+
+    const sent = progressRecorder()
+    await backend.upload('api/db.gz', file, 'application/gzip', { onProgress: sent.onProgress })
+    expect(objects.get('api/db.gz')?.body.equals(content)).toBe(true)
+    expectCompleteProgress(sent.reports, content.length)
+
+    const received = progressRecorder()
+    const stream = await backend.download('api/db.gz', { onProgress: received.onProgress })
+    const chunks: Buffer[] = []
+    for await (const chunk of stream ?? []) {
+      chunks.push(chunk as Buffer)
+    }
+    expect(Buffer.concat(chunks).equals(content)).toBe(true)
+    expectCompleteProgress(received.reports, content.length)
+    await backend.close()
+  })
+
+  it('abandons a download its signal cancels before the object answers', async () => {
+    const backend = backendOf()
+    const cancel = new AbortController()
+    setTimeout(() => cancel.abort(new Error('cancelled')), 100)
+    await expect(backend.download('never/answered.gz', { signal: cancel.signal })).rejects.toThrow()
+    expect(cancel.signal.aborted).toBe(true)
+    await backend.close()
+  }, 10_000)
+
+  it('fails an upload whose file cannot be read whole rather than waiting for it', async () => {
+    const backend = backendOf()
+    const folder = path.join(local, 'not-a-file')
+    await fs.mkdir(folder)
+    await expect(backend.upload('api/db.gz', folder, 'application/gzip')).rejects.toThrow('EISDIR')
+    expect(objects.has('api/db.gz')).toBe(false)
+    await backend.close()
+  }, 10_000)
 
   it('stores at the root of the bucket without prefix', async () => {
     const backend = backendOf()
