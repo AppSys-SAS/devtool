@@ -199,6 +199,21 @@ describe.skipIf(!hasBash)('scripts backend commands', () => {
     await expect(backend.upload('a.gz', await localFile('a.gz', 'x'), 'application/gzip')).rejects.toThrow(/failed \(exit 1\): storage full$/)
   })
 
+  it('kills what a cancelled download command left running once the command ends', async () => {
+    const marker = path.join(folder, 'written-after-cancel')
+    const backend = backendOf({
+      list: ['true'],
+      download: ['bash', '-c', '(trap "" TERM; sleep 1.5; touch "$1") > /dev/null 2>&1 & printf partial > "$0"; wait', '%{ADT:FILE}', marker],
+      upload: ['true'],
+      remove: ['true']
+    })
+    const cancel = new AbortController()
+    setTimeout(() => cancel.abort(new Error('cancelled')), 300)
+    await expect(backend.download('a.gz', { signal: cancel.signal })).rejects.toThrow('download of shared stopped')
+    await delay(2000)
+    await expect(fs.access(marker)).rejects.toThrow()
+  }, 10_000)
+
   it('stops the download command its signal cancels, with the processes it started', async () => {
     const marker = path.join(folder, 'written-after-cancel')
     const backend = backendOf({

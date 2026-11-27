@@ -5,10 +5,11 @@ import type { AddressInfo } from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 import type { Readable } from 'node:stream'
+import { setTimeout as delay } from 'node:timers/promises'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import type { BackendContext, BackendSettings, EnvironmentBackend, RemoteFile } from '../../src/backends/backend.js'
 import { s3 } from '../../src/backends/s3.js'
-import { expectCompleteProgress, progressContent, progressRecorder } from './progress-fixtures.js'
+import { expectCompleteProgress, openDescriptors, progressContent, progressRecorder } from './progress-fixtures.js'
 
 const BUCKET = 'acme-dev'
 const PAGE_SIZE = 2
@@ -260,6 +261,19 @@ describe('s3 backend', () => {
     }
     expect(Buffer.concat(chunks).equals(content)).toBe(true)
     expectCompleteProgress(received.reports, content.length)
+    await backend.close()
+  })
+
+  it('closes the local file when the service refuses an upload before reading it', async () => {
+    const backend = backendOf({ bucket: 'unknown-bucket' })
+    const file = path.join(local, 'db.gz')
+    await fs.writeFile(file, progressContent())
+    const before = openDescriptors()
+    for (let attempt = 0; attempt < 10; attempt++) {
+      await expect(backend.upload('api/db.gz', file, 'application/gzip')).rejects.toThrow()
+    }
+    await delay(100)
+    expect(openDescriptors() - before).toBeLessThan(3)
     await backend.close()
   })
 

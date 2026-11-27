@@ -3,12 +3,13 @@ import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
-import { pipeline, Readable } from 'node:stream'
+import type { Readable } from 'node:stream'
+import { setTimeout as delay } from 'node:timers/promises'
 import type { AuthOptions } from '@appsys-sas/devtool-auth'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { type BackendSettings, byteCounter, type EnvironmentBackend } from '../../src/backends/backend.js'
+import type { BackendSettings, EnvironmentBackend } from '../../src/backends/backend.js'
 import { cdn } from '../../src/backends/cdn.js'
-import { expectCompleteProgress, progressContent, progressRecorder } from './progress-fixtures.js'
+import { expectCompleteProgress, openDescriptors, progressContent, progressRecorder } from './progress-fixtures.js'
 
 const AUTH: AuthOptions = { type: 'openid', name: null, issuer: 'https://auth.example.dev', clientId: 'devtool', callbackPort: 0, scopes: [] }
 
@@ -94,8 +95,16 @@ describe('cdn backend', () => {
     await expect(backendOf().download('api/never-answered.gz', { signal: cancel.signal })).rejects.toThrow('cancelled')
   }, 10_000)
 
-  it('fails a download that arrives shorter than announced', async () => {
-    await expect(bytesOf(pipeline(Readable.from([Buffer.alloc(10)]), byteCounter(20), () => undefined))).rejects.toThrow('incomplete transfer: 10 of 20 bytes')
+  it('closes the local file when an upload fails before reaching the server', async () => {
+    const localFile = path.join(folder, 'db.gz')
+    await fs.writeFile(localFile, progressContent())
+    await fs.rm(path.join(folder, 'session.json'))
+    const before = openDescriptors()
+    for (let attempt = 0; attempt < 10; attempt++) {
+      await expect(backendOf().upload('api/db.gz', localFile, 'application/gzip')).rejects.toThrow('not signed in')
+    }
+    await delay(100)
+    expect(openDescriptors() - before).toBeLessThan(3)
   })
 
   it('reports the bytes it sends and receives, against the size of the file', async () => {

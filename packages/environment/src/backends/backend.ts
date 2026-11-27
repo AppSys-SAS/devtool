@@ -147,6 +147,23 @@ export function byteCounter (expected: number | null, onProgress?: TransferProgr
 }
 
 /**
+ * Builds a reader of text written in pieces, such as the error output of a command, telling each
+ * line once it is complete, a line ending at a carriage return or a newline.
+ * @param onLine Told each complete line.
+ * @returns Takes each piece of text as it comes.
+ */
+export function lineReader (onLine: (line: string) => void): (text: string) => void {
+  let partial = ''
+  return text => {
+    const lines = (partial + text).split(/[\r\n]/)
+    partial = lines.pop() ?? ''
+    for (const line of lines) {
+      onLine(line)
+    }
+  }
+}
+
+/**
  * Reads a setting that must hold a non-blank text.
  * @param value The raw setting.
  * @returns The text, null when the setting is not a string or is blank.

@@ -4,12 +4,13 @@ import type { AddressInfo } from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 import type { Readable } from 'node:stream'
+import { setTimeout as delay } from 'node:timers/promises'
 import ssh2 from 'ssh2'
 import type { Attributes, FileEntry, SFTPWrapper } from 'ssh2'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import type { BackendContext, BackendSettings, EnvironmentBackend } from '../../src/backends/backend.js'
 import { sftp } from '../../src/backends/sftp.js'
-import { expectCompleteProgress, progressContent, progressRecorder } from './progress-fixtures.js'
+import { expectCompleteProgress, openDescriptors, progressContent, progressRecorder } from './progress-fixtures.js'
 
 const { Server, utils } = ssh2
 const { STATUS_CODE } = utils.sftp
@@ -247,6 +248,19 @@ describe('sftp backend', { timeout: 30_000 }, () => {
     }
     expect(Buffer.concat(chunks).equals(content)).toBe(true)
     expectCompleteProgress(received.reports, content.length)
+    await backend.close()
+  })
+
+  it('closes the local file when the server refuses an upload', async () => {
+    const file = path.join(local, 'db.gz')
+    await fs.writeFile(file, progressContent())
+    await fs.mkdir(path.join(root, 'api', 'db.gz.part'), { recursive: true })
+    const before = openDescriptors()
+    for (let attempt = 0; attempt < 10; attempt++) {
+      await expect(backend.upload('api/db.gz', file, 'application/gzip')).rejects.toThrow()
+    }
+    await delay(100)
+    expect(openDescriptors() - before).toBeLessThan(3)
     await backend.close()
   })
 

@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import type { Readable } from 'node:stream'
 import type { S3Client } from '@aws-sdk/client-s3'
 import { mergeTransferGroups, OPEN_ACCESS, type TransferAccess, type TransferDirection, TransferGate, readTransferGroups } from './access.js'
 import { ArchiveWriter, readArchive, type RecordHeader } from './archive.js'
@@ -558,6 +559,35 @@ function assertWholeNative (item: EnvironmentItem, tables: string[] | null, acti
 }
 
 /**
+ * Waits for the content a backend opens, giving up as soon as a signal aborts; content opened after
+ * that is closed.
+ *
+ * @param opening - The content being opened, null when the backend has no such file.
+ * @param signal - Abandons the wait.
+ * @returns The content.
+ */
+async function openedUnlessAborted (opening: Promise<Readable | null>, signal: AbortSignal | undefined): Promise<Readable | null> {
+  if (!signal) {
+    return opening
+  }
+  return new Promise((resolve, reject) => {
+    /**
+     * Gives up the wait, closing the content whenever it opens.
+     */
+    const abort = (): void => {
+      opening.then(content => content?.destroy(), () => undefined)
+      reject(new Error('download abandoned'))
+    }
+    if (signal.aborted) {
+      abort()
+      return
+    }
+    signal.addEventListener('abort', abort, { once: true })
+    opening.finally(() => signal.removeEventListener('abort', abort)).then(resolve, reject)
+  })
+}
+
+/**
  * Gives an item whose local data lives apart from its local copy: a database, a bucket or a Redis database.
  *
  * @param item - The item.
@@ -979,7 +1009,7 @@ export class Environment {
   private async pushItem (selection: EnvironmentSelection): Promise<TransferResult> {
     const { item, tables } = selection
     if (item.kind === 'file' && (selection.keys || await this.mergesWhole(item))) {
-      return this.pushKeys(item, selection.keys ?? null)
+      return this.pushKeys(item, selection.keys ?? null, selection.onProgress)
     }
 
     const localPath = localPathOf(this._options.folder, item.path)
@@ -1063,9 +1093,10 @@ export class Environment {
    *
    * @param item - The file item.
    * @param keys - The value to keep for each differing key, null to send every local value.
+   * @param onProgress - Told the bytes of the merged copy sent to the backend.
    * @returns What was done.
    */
-  private async pushKeys (item: EnvironmentItem, keys: KeyChoice[] | null): Promise<TransferResult> {
+  private async pushKeys (item: EnvironmentItem, keys: KeyChoice[] | null, onProgress?: TransferProgress): Promise<TransferResult> {
     const { format, local, remote } = await this.readBothCopies(item)
     const ignored = ignoredKeysOf(item)
     const differences = diffConfig(format, local, remote, ignored)
@@ -1074,7 +1105,7 @@ export class Environment {
     const mergedPath = `${localPathOf(this._options.folder, item.path)}.merged`
     try {
       await fs.writeFile(mergedPath, merged, { mode: 0o600 })
-      await this.backendFor(item).upload(item.path, mergedPath, mediaTypeOf(item.path))
+      await this.backendFor(item).upload(item.path, mergedPath, mediaTypeOf(item.path), { onProgress })
     } finally {
       await fs.rm(mergedPath, { force: true })
     }
@@ -1250,7 +1281,7 @@ export class Environment {
   private async download (item: EnvironmentItem, localPath = localPathOf(this._options.folder, item.path), { onProgress, signal }: TransferOptions = {}): Promise<boolean> {
     await this.assertAllowed(item, 'pull')
     try {
-      const content = await this.backendFor(item).download(item.path, { onProgress, signal })
+      const content = await openedUnlessAborted(this.backendFor(item).download(item.path, { onProgress, signal }), signal)
       if (!content) {
         return false
       }

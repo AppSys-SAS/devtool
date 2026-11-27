@@ -127,6 +127,10 @@ export class DevtoolEnvironment {
   private _run: EnvironmentRunPayload | null = null
   /** Cancels each step of the run in progress. */
   private _cancels: AbortController[] = []
+  /** Counts the refreshes started. */
+  private _refreshes = 0
+  /** The latest refresh published, so an older one ending later never replaces its items. */
+  private _publishedRefresh = 0
   /** The scheduled pulls of the configuration. */
   private _pullJobs: Cron[] = []
   /** Why some scheduled pulls could not be scheduled. */
@@ -250,16 +254,19 @@ export class DevtoolEnvironment {
   }
 
   /**
-   * Describes the items again and publishes the state.
+   * Describes the items again and publishes the state, unless a later refresh already published its own.
    */
   async refresh (): Promise<void> {
+    const generation = ++this._refreshes
     const environment = this.environment()
     const options = this._options
+    let items: EnvironmentItemPayload[] = []
+    let error = this._error
     if (environment && options) {
-      const { items, errors } = await environment.describe()
-      this._error = Object.entries(errors).map(([backend, message]) => `${backend}: ${message}`).join('; ') || null
-      this._items = await Promise.all(
-        items.map(async ({ item, local, remote, synced }) => {
+      const described = await environment.describe()
+      error = Object.entries(described.errors).map(([backend, message]) => `${backend}: ${message}`).join('; ') || null
+      items = await Promise.all(
+        described.items.map(async ({ item, local, remote, synced }) => {
           const keyed = item.kind === 'file' && configFormatOf(item.path) !== null
           return {
             path: item.path,
@@ -282,10 +289,14 @@ export class DevtoolEnvironment {
           }
         })
       )
-    } else {
-      this._items = []
+    }
+    if (generation < this._publishedRefresh) {
+      return
     }
 
+    this._publishedRefresh = generation
+    this._error = error
+    this._items = items
     await this._publish(this.state())
   }
 
@@ -392,8 +403,8 @@ export class DevtoolEnvironment {
   }
 
   /**
-   * Runs an action over items one after the other, publishing the progress of each, then describes
-   * the items again. A request while a run is in progress does nothing.
+   * Runs an action over items one after the other, publishing the progress of each and the end of
+   * the run, then describes the items again. A request while a run is in progress does nothing.
    *
    * @param action - Pull or push the items, restore their local data from their local copies, or remove those copies.
    * @param targets - The items, with the tables of the databases and the keys of the configuration files.
@@ -460,6 +471,7 @@ export class DevtoolEnvironment {
 
     run.finished = true
     this._cancels = []
+    await this._publish(this.state())
     await this.refresh()
   }
 
