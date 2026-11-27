@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { PassThrough, Readable } from 'node:stream'
 import { setImmediate } from 'node:timers/promises'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BackendContext, EnvironmentBackend, RemoteFile, TransferOptions } from '../../src/backends/backend.js'
 import { decrypt, encrypt, encrypted, EncryptionSecret, keyFileKey, passwordFileKey, plainLengthOf, readEncryption } from '../../src/backends/encryption.js'
 import { progressRecorder } from './progress-fixtures.js'
@@ -151,6 +151,19 @@ describe('encrypted', () => {
     const received = progressRecorder()
     await bytesOf((await store.download('api/db.gz', { onProgress: received.onProgress }))!)
     expect(received.reports).toEqual([[sealed, sealed]])
+  })
+
+  it('passes the signal of a listing and the options of a transfer to its backend', async () => {
+    const { backend } = memoryBackend()
+    const list = vi.spyOn(backend, 'list')
+    const download = vi.spyOn(backend, 'download')
+    const store = encrypted(backend, new EncryptionSecret({ key: KEY.toString('base64') }, contextOf().context, 'team'))
+    const cancel = new AbortController()
+
+    await store.list(cancel.signal)
+    await store.download('absent.gz', { signal: cancel.signal })
+    expect(list).toHaveBeenCalledWith(cancel.signal)
+    expect(download).toHaveBeenCalledWith('absent.gz', { signal: cancel.signal })
   })
 
   it('closes the stored file when its decrypted content is closed before being read', async () => {

@@ -1,13 +1,13 @@
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { setTimeout as delay } from 'node:timers/promises'
 import { Environment } from '@appsys-sas/devtool-environment'
 import type { EnvironmentPayload } from '@appsys-sas/devtool-shared'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DevtoolEnvironment } from '../../src/environment.js'
 
 const LISTING = '{"files":[{"path":"api/a.txt","size":3,"updatedAt":"2026-01-01T00:00:00Z"},{"path":"api/b.txt","size":3,"updatedAt":"2026-01-01T00:00:00Z"}]}'
+const describeItems = Environment.prototype.describe
 
 let folder: string
 let published: EnvironmentPayload[]
@@ -15,10 +15,9 @@ let published: EnvironmentPayload[]
 /**
  * Builds the environment of two files on a scripts backend whose download waits before writing.
  * @param wait - The seconds each download waits.
- * @param listWait - The seconds each listing of the backend waits.
  * @returns The environment.
  */
-function environmentOf (wait: number, listWait = 0): DevtoolEnvironment {
+function environmentOf (wait: number): DevtoolEnvironment {
   const environment = new DevtoolEnvironment(async payload => {
     published.push(structuredClone(payload))
   }, async () => '')
@@ -28,7 +27,7 @@ function environmentOf (wait: number, listWait = 0): DevtoolEnvironment {
       backends: {
         shared: {
           type: 'scripts',
-          list: ['bash', '-c', `sleep ${listWait}; printf %s '${LISTING}'`],
+          list: ['printf', '%s', LISTING],
           download: ['bash', '-c', `sleep ${wait}; printf new > "$0"`, '%{ADT:FILE}'],
           upload: ['true'],
           remove: ['true']
@@ -41,34 +40,31 @@ function environmentOf (wait: number, listWait = 0): DevtoolEnvironment {
 }
 
 /**
- * Builds the environment of one file on a scripts backend whose listing waits, both read from files
- * the test changes between refreshes.
- * @param wait - The seconds the listing waits.
- * @param size - The size the listing gives the file.
- * @returns The environment, and a way to change the wait and the size of the next listings.
+ * Makes the next description of the items wait until released, then gives every item a copy on its
+ * backend of one size.
+ * @param size - The size of the copies on the backend.
+ * @returns Releases the description.
  */
-async function listedEnvironment (wait: number, size: number): Promise<{ environment: DevtoolEnvironment, list: (wait: number, size: number) => Promise<void> }> {
-  const delayFile = path.join(folder, 'list-delay')
-  const listingFile = path.join(folder, 'listing.json')
-  /**
-   * Sets the wait and the size of the next listings.
-   * @param seconds - The seconds a listing waits.
-   * @param bytes - The size a listing gives the file.
-   */
-  const list = async (seconds: number, bytes: number): Promise<void> => {
-    await fs.writeFile(delayFile, String(seconds))
-    await fs.writeFile(listingFile, JSON.stringify({ files: [{ path: 'api/a.txt', size: bytes, updatedAt: '2026-01-01T00:00:00Z' }] }))
-  }
-  await list(wait, size)
-  const environment = new DevtoolEnvironment(async () => undefined, async () => '')
-  environment.configure({
-    environment: {
-      folder: path.join(folder, 'env'),
-      backends: { shared: { type: 'scripts', list: ['bash', '-c', 'listing=$(cat "$1"); sleep "$(cat "$0")"; printf %s "$listing"', delayFile, listingFile], download: ['true'], upload: ['true'], remove: ['true'] } },
-      files: ['api/a.txt']
-    }
+function gatedDescribe (size: number): () => void {
+  let release = (): void => undefined
+  const gate = new Promise<void>(resolve => {
+    release = resolve
   })
-  return { environment, list }
+  vi.spyOn(Environment.prototype, 'describe').mockImplementationOnce(async function (this: Environment) {
+    await gate
+    const described = await describeItems.call(this)
+    return { ...described, items: described.items.map(entry => ({ ...entry, remote: { size, updatedAt: new Date(0), version: String(size) } })) }
+  })
+  return release
+}
+
+/**
+ * Gives the size of the copy on its backend of each item, as last published.
+ * @param environment - The environment.
+ * @returns The sizes, in the order of the items.
+ */
+function remoteSizes (environment: DevtoolEnvironment): (number | null)[] {
+  return environment.state().items.map(item => (item.remote && item.remote !== 'unknown' ? item.remote.size : null))
 }
 
 /**
@@ -127,36 +123,41 @@ describe('DevtoolEnvironment run', () => {
   }, 10_000)
 
   it('publishes the end of a run before describing the items again', async () => {
-    const environment = environmentOf(0, 3)
+    const environment = environmentOf(0)
+    const release = gatedDescribe(0)
     const run = environment.run('remove', [{ path: 'api/a.txt', tables: null }])
 
-    await vi.waitFor(() => expect(published.some(payload => payload.run?.finished === true)).toBe(true), { timeout: 1_500 })
+    await vi.waitFor(() => expect(published.some(payload => payload.run?.finished === true)).toBe(true))
+    release()
     await run
-  }, 10_000)
+  })
 
   it('keeps the items of the latest refresh when an earlier one ends after it', async () => {
-    const { environment, list } = await listedEnvironment(1.5, 111)
-
+    const environment = environmentOf(0)
+    const releaseEarlier = gatedDescribe(111)
+    const releaseLater = gatedDescribe(222)
     const earlier = environment.refresh()
-    await delay(500)
-    await list(0, 222)
-    await environment.refresh()
-    await earlier
+    const later = environment.refresh()
 
-    expect(environment.state().items[0].remote).toMatchObject({ size: 222 })
-  }, 10_000)
+    releaseLater()
+    await later
+    expect(remoteSizes(environment)).toEqual([222, 222])
+    releaseEarlier()
+    await earlier
+    expect(remoteSizes(environment)).toEqual([222, 222])
+  })
 
   it('publishes an earlier refresh when the later one fails', async () => {
-    const { environment } = await listedEnvironment(1, 111)
-
+    const environment = environmentOf(0)
+    const releaseEarlier = gatedDescribe(111)
+    vi.mocked(Environment.prototype.describe).mockRejectedValueOnce(new Error('listing failed'))
     const earlier = environment.refresh()
-    await delay(300)
-    vi.spyOn(Environment.prototype, 'describe').mockRejectedValueOnce(new Error('listing failed'))
-    await expect(environment.refresh()).rejects.toThrow('listing failed')
-    await earlier
 
-    expect(environment.state().items[0].remote).toMatchObject({ size: 111 })
-  }, 10_000)
+    await expect(environment.refresh()).rejects.toThrow('listing failed')
+    releaseEarlier()
+    await earlier
+    expect(remoteSizes(environment)).toEqual([111, 111])
+  })
 
   it('ignores a cancel outside a pull, and reports a failure as a failure', async () => {
     const environment = environmentOf(0)

@@ -73,7 +73,7 @@ async function answer (request: IncomingMessage, response: ServerResponse): Prom
   const [, bucket, ...keyParts] = url.pathname.split('/')
   const key = keyParts.map(decodeURIComponent).join('/')
   requests.push(`${request.method} ${key}`)
-  if (key === 'never/answered.gz') {
+  if (key === 'never/answered.gz' || url.searchParams.get('prefix') === 'never/') {
     return
   }
   if (bucket !== BUCKET) {
@@ -276,6 +276,15 @@ describe('s3 backend', () => {
     expect(openDescriptors() - before).toBeLessThan(3)
     await backend.close()
   })
+
+  it('abandons a listing its signal cancels before the service answers', async () => {
+    const backend = backendOf({ prefix: 'never' })
+    const cancel = new AbortController()
+    setTimeout(() => cancel.abort(new Error('cancelled')), 100)
+    await expect(backend.list(cancel.signal)).rejects.toThrow()
+    expect(cancel.signal.aborted).toBe(true)
+    await backend.close()
+  }, 10_000)
 
   it('abandons a download its signal cancels before the object answers', async () => {
     const backend = backendOf()

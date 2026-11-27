@@ -2,7 +2,6 @@ import { createHash, randomUUID } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import type { Readable } from 'node:stream'
 import type { S3Client } from '@aws-sdk/client-s3'
 import { mergeTransferGroups, OPEN_ACCESS, type TransferAccess, type TransferDirection, TransferGate, readTransferGroups } from './access.js'
 import { ArchiveWriter, readArchive, type RecordHeader } from './archive.js'
@@ -559,31 +558,34 @@ function assertWholeNative (item: EnvironmentItem, tables: string[] | null, acti
 }
 
 /**
- * Waits for the content a backend opens, giving up as soon as a signal aborts; content opened after
- * that is closed.
+ * Waits for what a backend gives during a pull, giving up as soon as the pull is cancelled; what it
+ * gives after that is released.
  *
- * @param opening - The content being opened, null when the backend has no such file.
- * @param signal - Abandons the wait.
- * @returns The content.
+ * @param itemPath - The path of the item pulled.
+ * @param pending - What the backend is giving.
+ * @param signal - Cancels the pull.
+ * @param release - Releases what arrives once the wait is abandoned.
+ * @returns What the backend gave.
+ * @throws {TransferCancelledError} When the pull is cancelled first.
  */
-async function openedUnlessAborted (opening: Promise<Readable | null>, signal: AbortSignal | undefined): Promise<Readable | null> {
+async function settledUnlessCancelled<T> (itemPath: string, pending: Promise<T>, signal: AbortSignal | undefined, release: (value: T) => void = () => undefined): Promise<T> {
   if (!signal) {
-    return opening
+    return pending
   }
   return new Promise((resolve, reject) => {
     /**
-     * Gives up the wait, closing the content whenever it opens.
+     * Gives up the wait, releasing whatever arrives later.
      */
     const abort = (): void => {
-      opening.then(content => content?.destroy(), () => undefined)
-      reject(new Error('download abandoned'))
+      pending.then(release, () => undefined)
+      reject(new TransferCancelledError(itemPath))
     }
     if (signal.aborted) {
       abort()
       return
     }
     signal.addEventListener('abort', abort, { once: true })
-    opening.finally(() => signal.removeEventListener('abort', abort)).then(resolve, reject)
+    pending.finally(() => signal.removeEventListener('abort', abort)).then(resolve, reject)
   })
 }
 
@@ -816,9 +818,15 @@ export class Environment {
     const { item, tables, onProgress, signal } = selection
     const localPath = localPathOf(this._options.folder, item.path)
     assertWholeNative(item, tables, 'pull')
-    const pulled = await this.backendFor(item).list().then(files => files && (files.find(file => file.path === item.path) ?? undefined), () => undefined)
+    const files = await settledUnlessCancelled(item.path, this.backendFor(item).list(signal), signal).catch((error: unknown) => {
+      if (error instanceof TransferCancelledError) {
+        throw error
+      }
+      return undefined
+    })
+    const pulled = files && (files.find(file => file.path === item.path) ?? undefined)
     if (item.kind === 'file') {
-      if (selection.keys || await this.mergesWhole(item)) {
+      if (selection.keys || await this.mergesWhole(item, files === undefined ? undefined : Boolean(pulled), signal)) {
         return this.pullKeys(item, selection.keys ?? null, pulled, { onProgress, signal })
       }
       if (!(await this.download(item, localPath, { onProgress, signal }))) {
@@ -1053,13 +1061,15 @@ export class Environment {
    * ignored keys: when it ignores some and both copies exist.
    *
    * @param item - The file item.
+   * @param stored - Whether its backend holds a copy, listed when not given.
+   * @param signal - Cancels the pull waiting for that listing.
    * @returns True when it is merged key by key.
    */
-  private async mergesWhole (item: EnvironmentItem): Promise<boolean> {
+  private async mergesWhole (item: EnvironmentItem, stored?: boolean, signal?: AbortSignal): Promise<boolean> {
     if (!ignoredKeysOf(item) || !(await fs.stat(localPathOf(this._options.folder, item.path)).then(stat => stat.isFile(), () => false))) {
       return false
     }
-    return (await this.backendFor(item).list())?.some(file => file.path === item.path) ?? false
+    return stored ?? (await settledUnlessCancelled(item.path, this.backendFor(item).list(signal), signal))?.some(file => file.path === item.path) ?? false
   }
 
   /**
@@ -1281,7 +1291,7 @@ export class Environment {
   private async download (item: EnvironmentItem, localPath = localPathOf(this._options.folder, item.path), { onProgress, signal }: TransferOptions = {}): Promise<boolean> {
     await this.assertAllowed(item, 'pull')
     try {
-      const content = await openedUnlessAborted(this.backendFor(item).download(item.path, { onProgress, signal }), signal)
+      const content = await settledUnlessCancelled(item.path, this.backendFor(item).download(item.path, { onProgress, signal }), signal, opened => opened?.destroy())
       if (!content) {
         return false
       }

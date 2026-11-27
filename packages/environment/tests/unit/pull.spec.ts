@@ -271,6 +271,27 @@ describe('cancel of a pull', () => {
     expect((await readSyncJournal()).get(ITEM_PATH)).toEqual(PREVIOUS_RECORD)
   })
 
+  it('gives up a listing that does not answer, before downloading anything, releasing the item', async () => {
+    let listings = 0
+    /**
+     * Lists the archive of the item, the first listing never answering.
+     * @returns The files of the backend.
+     */
+    const listing = async (): Promise<RemoteFile[]> => {
+      listings += 1
+      return listings === 1 ? new Promise(() => {}) : [{ path: ITEM_PATH, size: 11, updatedAt: UPDATED_AT, version: 'v2' }]
+    }
+    const environment = environmentOf(postgresItem, Buffer.from('new archive'), listing)
+    const cancel = new AbortController()
+    const pull = environment.pull({ item: postgresItem, tables: null, signal: cancel.signal })
+    setTimeout(() => cancel.abort(new Error('cancelled')), 100)
+
+    await expect(pull).rejects.toBeInstanceOf(TransferCancelledError)
+    expect(downloads).toBe(0)
+    expect(await localState()).toEqual({ files: ['db.dump'], copy: 'previous copy' })
+    expect(await environment.pull({ item: postgresItem, tables: null })).toEqual({ done: true, detail: 'database restored in db' })
+  }, 5_000)
+
   it('gives up a backend that does not answer, closing what it opens later', async () => {
     let release = (): void => undefined
     downloadGate = new Promise(resolve => {

@@ -14,6 +14,7 @@ import { expectCompleteProgress, openDescriptors, progressContent, progressRecor
 const AUTH: AuthOptions = { type: 'openid', name: null, issuer: 'https://auth.example.dev', clientId: 'devtool', callbackPort: 0, scopes: [] }
 
 const stored = new Map<string, Buffer>()
+let listingHangs = false
 let server: Server
 let url: string
 let folder: string
@@ -37,7 +38,7 @@ beforeAll(async () => {
     request.on('data', (chunk: Buffer) => chunks.push(chunk))
     request.on('end', () => {
       const key = decodeURIComponent(request.url ?? '')
-      if (key.endsWith('never-answered.gz')) {
+      if (key.endsWith('never-answered.gz') || (key === '/devtool' && listingHangs)) {
         return
       }
       if (request.method === 'PUT') {
@@ -67,6 +68,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   stored.clear()
+  listingHangs = false
   folder = await fs.mkdtemp(path.join(os.tmpdir(), 'devtool-cdn-'))
   const session = { issuer: AUTH.issuer, clientId: AUTH.clientId, accessToken: 'token', expiresAt: Date.now() + 3_600_000, refreshToken: null, user: null }
   await fs.writeFile(path.join(folder, 'session.json'), JSON.stringify(session))
@@ -89,6 +91,13 @@ function backendOf (): EnvironmentBackend {
 }
 
 describe('cdn backend', () => {
+  it('abandons a listing its signal cancels before the server answers', async () => {
+    listingHangs = true
+    const cancel = new AbortController()
+    setTimeout(() => cancel.abort(new Error('cancelled')), 100)
+    await expect(backendOf().list(cancel.signal)).rejects.toThrow('cancelled')
+  }, 10_000)
+
   it('abandons a download its signal cancels before the server answers', async () => {
     const cancel = new AbortController()
     setTimeout(() => cancel.abort(new Error('cancelled')), 100)
