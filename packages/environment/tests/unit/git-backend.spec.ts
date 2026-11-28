@@ -343,6 +343,21 @@ describe.skipIf(!hasGit)('git backend', { timeout: 30_000 }, () => {
     expect(await backendOf('other').list().then(files => files!.map(file => file.path))).toEqual(['environment/api/config.yml'])
   })
 
+  it('syncs again once an upload was cancelled with its file staged, though the remote changed that file', async () => {
+    const first = backendOf('first')
+    await first.upload('api/config.yml', await localFile('a', 'port: 3000\n'), 'application/yaml')
+    const signing = await slowSigner(30)
+    const cancel = new AbortController()
+    const cancelled = first.upload('api/config.yml', await localFile('b', 'port: 4000\n'), 'application/yaml', { signal: cancel.signal })
+    await signing()
+    cancel.abort(new Error('cancelled'))
+    await expect(cancelled).rejects.toThrow()
+    await fs.writeFile(process.env.GIT_CONFIG_GLOBAL!, '')
+
+    await backendOf('second').upload('api/config.yml', await localFile('c', 'port: 5000\n'), 'application/yaml')
+    expect(await textOf(await first.download('api/config.yml'))).toBe('port: 5000\n')
+  }, 20_000)
+
   it('sees what another working copy pushed, and pushes over it', async () => {
     const first = backendOf('first')
     const second = backendOf('second')

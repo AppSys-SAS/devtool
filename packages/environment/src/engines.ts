@@ -1,4 +1,5 @@
-import { type ChildProcess, spawn } from 'node:child_process'
+import { type ChildProcess, execFile, spawn } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { createReadStream } from 'node:fs'
 import { stat } from 'node:fs/promises'
@@ -45,6 +46,50 @@ export interface DatabaseEngine {
 }
 
 const OUTPUT_TAIL_BYTES = 4096
+const STOP_RUN_TIMEOUT_MS = 60_000
+
+/**
+ * Script stopping inside a container the processes marked with `ADT_RUN=$1`. Each round freezes
+ * them all, so that none starts or ends a process, then terminates only those no process descends
+ * from and resumes them all: every process is reaped by its own parent, never left to the main
+ * process of the container. It ends once two scans half a second apart find no marked process,
+ * leaving none frozen.
+ */
+const STOP_RUN_SCRIPT = `marked() {
+  for proc in /proc/[0-9]*; do
+    tr '\\0' '\\n' 2>/dev/null < "$proc/environ" | grep -qx "ADT_RUN=$1" && echo "\${proc#/proc/}"
+  done
+}
+tries=0
+empty=0
+while [ "$tries" -lt 100 ] && [ "$empty" -lt 2 ]; do
+  tries=$((tries + 1))
+  pids=$(marked "$1")
+  if [ -z "$pids" ]; then
+    empty=$((empty + 1))
+    sleep 0.5
+    continue
+  fi
+  empty=0
+  frozen=1
+  for pid in $pids; do
+    case $(sed -n 's/^State:[[:space:]]*\\(.\\).*/\\1/p' "/proc/$pid/status" 2>/dev/null) in
+      T | Z | '') ;;
+      *) kill -STOP "$pid" 2>/dev/null; frozen= ;;
+    esac
+  done
+  if [ -n "$frozen" ]; then
+    parents=$(sed -n 's/^PPid:[[:space:]]*//p' /proc/[0-9]*/status 2>/dev/null)
+    for pid in $pids; do
+      printf '%s\\n' "$parents" | grep -qx "$pid" || kill -TERM "$pid" 2>/dev/null
+    done
+    kill -CONT $pids 2>/dev/null
+    sleep 0.1
+  fi
+done
+pids=$(marked "$1")
+[ -z "$pids" ] || kill -CONT $pids 2>/dev/null
+true`
 const MONGODUMP_MAGIC = Buffer.from([0x6d, 0xe2, 0x99, 0x81])
 const MONGODUMP_TERMINATOR = -1
 const BSON_MIN_DOCUMENT_BYTES = 5
@@ -116,13 +161,16 @@ async function assertExit (child: ChildProcess, errors: () => string, label: str
  * @param interactive - Whether the script reads its standard input.
  * @param script - The script, reading its arguments as `$1`, `$2`...
  * @param args - The arguments of the script.
+ * @param run - Marks the script and every process it starts with `$ADT_RUN`, so they can be stopped
+ * inside the container.
  * @returns The arguments of `docker`.
  */
-function dockerExec (target: DatabaseTarget, interactive: boolean, script: string, args: string[]): string[] {
+function dockerExec (target: DatabaseTarget, interactive: boolean, script: string, args: string[], run?: string): string[] {
   return [
     'exec',
     ...(interactive ? ['-i'] : []),
     ...(target.database === null ? [] : ['-e', `ADT_DATABASE=${target.database}`]),
+    ...(run === undefined ? [] : ['-e', `ADT_RUN=${run}`]),
     target.container,
     'sh',
     '-c',
@@ -133,26 +181,47 @@ function dockerExec (target: DatabaseTarget, interactive: boolean, script: strin
 }
 
 /**
+ * Stops inside a container the processes marked with a run, without failing.
+ *
+ * @param container - The container.
+ * @param run - The value of `$ADT_RUN` marking the processes.
+ * @returns Resolves once the stop has ended, whatever its outcome.
+ */
+export async function stopRun (container: string, run: string): Promise<void> {
+  await new Promise<void>(resolve => {
+    execFile('docker', ['exec', container, 'sh', '-c', STOP_RUN_SCRIPT, 'sh', run], { timeout: STOP_RUN_TIMEOUT_MS }, () => {
+      resolve()
+    })
+  })
+}
+
+/**
  * Runs a shell script in a container, streaming its output.
  *
  * @param target - The database whose container runs the script.
  * @param script - The script, reading its arguments as `$1`, `$2`...
  * @param args - The arguments of the script.
  * @param signal - Stops `docker exec` at once and stops reading its output, which the processes it
- * started may still hold, the output then failing.
+ * started may still hold, the output then failing; the processes of the script inside the container
+ * are stopped too.
  * @returns The output, failing at its end when the script failed.
  */
 async function* scriptOutput (target: DatabaseTarget, script: string, args: string[] = [], signal?: AbortSignal): AsyncGenerator<Buffer> {
-  const child = spawn('docker', dockerExec(target, false, script, args), { stdio: ['ignore', 'pipe', 'pipe'], signal })
+  const run = signal ? randomUUID() : undefined
+  const child = spawn('docker', dockerExec(target, false, script, args, run), { stdio: ['ignore', 'pipe', 'pipe'], signal })
   const errors = collectTail(child.stderr)
   const exited = assertExit(child, errors, `docker exec ${target.container}`)
   exited.catch(() => undefined)
   /**
-   * Stops reading the output once the script is abandoned.
+   * Stops reading the output once the script is abandoned, and stops its processes inside the
+   * container, which outlive `docker exec`.
    */
   const release = (): void => {
     child.stdout.destroy()
     child.stderr.destroy()
+    if (run !== undefined) {
+      void stopRun(target.container, run)
+    }
   }
   signal?.addEventListener('abort', release, { once: true })
   try {
@@ -174,7 +243,8 @@ async function* scriptOutput (target: DatabaseTarget, script: string, args: stri
  *
  * @param target - The database whose container runs the script.
  * @param script - The script.
- * @param signal - Stops `docker exec` at once, the reading then failing.
+ * @param signal - Stops `docker exec` and the processes of the script inside the container, the
+ * reading then failing.
  * @returns The output text.
  */
 async function scriptText (target: DatabaseTarget, script: string, signal?: AbortSignal): Promise<string> {

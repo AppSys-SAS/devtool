@@ -154,7 +154,8 @@ class GitBackend implements EnvironmentBackend {
   /**
    * Brings the working copy to the branch of the remote, creating the working copy on first use, and
    * again, empty, while the remote has no such branch yet, so that nothing an earlier operation left
-   * is pushed with the next file. A rebase an earlier process left unfinished is undone first.
+   * is pushed with the next file. A rebase an earlier process left unfinished is undone first, and
+   * what a cancelled operation left staged is discarded.
    * @param signal Stops the exchanges with the remote, which leave the working copy as it was.
    * @returns False when the remote has no such branch yet.
    */
@@ -176,7 +177,7 @@ class GitBackend implements EnvironmentBackend {
     }
     await this.git(['fetch', '-q', 'origin', branch], undefined, signal)
     signal?.throwIfAborted()
-    await this.git(['checkout', '-q', '-B', branch, `origin/${branch}`])
+    await this.git(['checkout', '-q', '-f', '-B', branch, `origin/${branch}`])
     await this.git(['reset', '-q', '--hard', `origin/${branch}`])
     await this.git(['clean', '-q', '-fd'])
     return true
