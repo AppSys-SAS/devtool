@@ -5,8 +5,8 @@ import os from 'node:os'
 import path from 'node:path'
 import type { Readable } from 'node:stream'
 import { setTimeout as delay } from 'node:timers/promises'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { BackendContext, EnvironmentBackend } from '../../src/backends/backend.js'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { type BackendContext, type EnvironmentBackend, PossiblyStoredError } from '../../src/backends/backend.js'
 import { git } from '../../src/backends/git.js'
 import { expectCompleteProgress, progressContent, progressRecorder } from './progress-fixtures.js'
 
@@ -86,11 +86,14 @@ function remoteLog (): string[] {
 /**
  * Makes every commit wait for its signature, the way a signing program waits for the developer.
  * @param seconds - How long the signature takes.
+ * @returns Waits until a commit waits for its signature.
  */
-async function slowSigner (seconds: number): Promise<void> {
+async function slowSigner (seconds: number): Promise<() => Promise<void>> {
   const signer = path.join(folder, 'signer')
-  await fs.writeFile(signer, `#!/bin/sh\nsleep ${seconds}\nexit 1\n`, { mode: 0o755 })
+  const signing = path.join(folder, 'signing')
+  await fs.writeFile(signer, `#!/bin/sh\ntouch "${signing}"\nsleep ${seconds}\nexit 1\n`, { mode: 0o755 })
   await fs.writeFile(process.env.GIT_CONFIG_GLOBAL!, `[commit]\n\tgpgsign = true\n[gpg]\n\tprogram = ${signer}\n`)
+  return async () => vi.waitFor(async () => fs.access(signing), { timeout: 10_000 })
 }
 
 beforeEach(async () => {
@@ -178,28 +181,32 @@ describe.skipIf(!hasGit)('git backend', { timeout: 30_000 }, () => {
   })
 
   it('cancels a commit waiting for the developer', async () => {
-    await slowSigner(30)
+    const signing = await slowSigner(30)
     const cancel = new AbortController()
-    setTimeout(() => cancel.abort(new Error('cancelled')), 500)
+    const upload = backendOf('team').upload('api/config.yml', await localFile('a', 'port: 3000\n'), 'application/yaml', { signal: cancel.signal })
+    await signing()
     const started = Date.now()
+    cancel.abort(new Error('cancelled'))
 
-    await expect(backendOf('team').upload('api/config.yml', await localFile('a', 'port: 3000\n'), 'application/yaml', { signal: cancel.signal })).rejects.toThrow()
+    await expect(upload).rejects.toThrow()
     expect(Date.now() - started).toBeLessThan(5000)
     await fs.writeFile(process.env.GIT_CONFIG_GLOBAL!, '')
-  }, 15_000)
+  }, 20_000)
 
   it('settles a cancelled operation only once git exited', async () => {
     const bin = path.join(folder, 'bin')
     const exited = path.join(folder, 'exited')
     await fs.mkdir(bin)
     await fs.writeFile(path.join(bin, 'git'), `#!/bin/sh\n"${execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim()}" "$@" &\npid=$!\ntrap 'kill $pid; wait $pid; sleep 1; touch "${exited}"; exit 143' TERM\nwait $pid\n`, { mode: 0o755 })
-    await slowSigner(5)
+    const signing = await slowSigner(5)
     const original = process.env.PATH
     process.env.PATH = `${bin}:${original}`
     const cancel = new AbortController()
-    setTimeout(() => cancel.abort(new Error('cancelled')), 1000)
     try {
-      await expect(backendOf('team').upload('api/config.yml', await localFile('a', 'port: 3000\n'), 'application/yaml', { signal: cancel.signal })).rejects.toThrow()
+      const upload = backendOf('team').upload('api/config.yml', await localFile('a', 'port: 3000\n'), 'application/yaml', { signal: cancel.signal })
+      await signing()
+      cancel.abort(new Error('cancelled'))
+      await expect(upload).rejects.toThrow()
       await expect(fs.access(exited)).resolves.toBeUndefined()
     } finally {
       process.env.PATH = original
@@ -207,18 +214,19 @@ describe.skipIf(!hasGit)('git backend', { timeout: 30_000 }, () => {
     }
   }, 15_000)
 
-  it('runs to its end a push cancelled once git sent the whole commit, while the remote checks it', async () => {
+  it('cancels a push whose remote check does not end, telling that the remote may take it still', async () => {
     const hook = path.join(remote, 'hooks', 'pre-receive')
-    const checked = path.join(folder, 'checked')
-    await fs.writeFile(hook, `#!/bin/sh\nsleep 3\ntouch "${checked}"\n`, { mode: 0o755 })
+    const checking = path.join(folder, 'checking')
+    await fs.writeFile(hook, `#!/bin/sh\ntouch "${checking}"\nsleep 10\n`, { mode: 0o755 })
     const cancel = new AbortController()
-    setTimeout(() => cancel.abort(new Error('cancelled')), 1500)
+    const upload = backendOf('team').upload('api/config.yml', await localFile('a', 'port: 3000\n'), 'application/yaml', { signal: cancel.signal })
+    await vi.waitFor(async () => fs.access(checking), { timeout: 10_000 })
+    const started = Date.now()
+    cancel.abort(new Error('cancelled'))
 
-    await backendOf('team').upload('api/config.yml', await localFile('a', 'port: 3000\n'), 'application/yaml', { signal: cancel.signal })
-    expect(execFileSync('git', ['--git-dir', remote, 'ls-tree', '-r', '--name-only', 'main'], { encoding: 'utf8' }).trim()).toBe('api/config.yml')
-    await expect(fs.access(checked)).resolves.toBeUndefined()
-    await fs.rm(hook)
-  }, 15_000)
+    await expect(upload).rejects.toThrow(PossiblyStoredError)
+    expect(Date.now() - started).toBeLessThan(5000)
+  }, 20_000)
 
   it('ends an operation shortly after git exited, whatever the programs git started still hold', async () => {
     const backend = backendOf('team')
@@ -244,11 +252,13 @@ describe.skipIf(!hasGit)('git backend', { timeout: 30_000 }, () => {
   })
 
   it('never publishes a file of a first commit that was cancelled with the next upload', async () => {
-    await slowSigner(3)
+    const signing = await slowSigner(3)
     const backend = backendOf('team')
     const cancel = new AbortController()
-    setTimeout(() => cancel.abort(new Error('cancelled')), 1000)
-    await expect(backend.upload('api/cancelled.yml', await localFile('a', 'cancelled: true\n'), 'application/yaml', { signal: cancel.signal })).rejects.toThrow()
+    const upload = backend.upload('api/cancelled.yml', await localFile('a', 'cancelled: true\n'), 'application/yaml', { signal: cancel.signal })
+    await signing()
+    cancel.abort(new Error('cancelled'))
+    await expect(upload).rejects.toThrow()
 
     await fs.writeFile(process.env.GIT_CONFIG_GLOBAL!, '')
     await backend.upload('api/config.yml', await localFile('b', 'port: 3000\n'), 'application/yaml')

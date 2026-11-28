@@ -6,7 +6,7 @@ import type { Readable } from 'node:stream'
 import { setTimeout as delay } from 'node:timers/promises'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { TransferAccess } from '../../src/access.js'
-import type { BackendContext, BackendSettings, EnvironmentBackend } from '../../src/backends/backend.js'
+import { type BackendContext, type BackendSettings, type EnvironmentBackend, PossiblyStoredError } from '../../src/backends/backend.js'
 import { scripts } from '../../src/backends/scripts.js'
 import { progressRecorder } from './progress-fixtures.js'
 
@@ -65,6 +65,36 @@ function folderBackend (): EnvironmentBackend {
     remove: [FOLDER_SCRIPT, 'remove', '%{ADT:PATH}'],
     env: { ROOT: root }
   })
+}
+
+/**
+ * Waits for a command to write the identifier of a process it started, written to a temporary file
+ * then renamed so that it is never read half written.
+ * @param pidFile - The file holding the identifier.
+ * @param timeout - How long to wait for it, in milliseconds.
+ * @returns The identifier, always a positive number.
+ */
+async function pidOf (pidFile: string, timeout = 5000): Promise<number> {
+  return vi.waitFor(async () => {
+    const pid = Number((await fs.readFile(pidFile, 'utf-8')).trim())
+    expect(Number.isInteger(pid) && pid > 0).toBe(true)
+    return pid
+  }, { timeout })
+}
+
+/**
+ * Kills a process a command left running, when its file holds a valid identifier.
+ * @param pidFile - The file holding the identifier.
+ */
+async function killLeft (pidFile: string): Promise<void> {
+  const pid = Number((await fs.readFile(pidFile, 'utf-8').catch(() => '')).trim())
+  if (Number.isInteger(pid) && pid > 0) {
+    try {
+      process.kill(pid, 'SIGKILL')
+    } catch {
+      return
+    }
+  }
 }
 
 /**
@@ -260,7 +290,7 @@ describe.skipIf(!hasBash)('scripts backend commands', () => {
 
   it('passes a stop signal of the devtool on to a cancellable command and the processes it started', async () => {
     const pidFile = path.join(folder, 'started')
-    const backend = backendOf({ list: ['true'], download: ['bash', '-c', 'sleep 30 & echo $! > "$0"; wait', pidFile], upload: ['true'], remove: ['true'] })
+    const backend = backendOf({ list: ['true'], download: ['bash', '-c', 'sleep 30 & echo $! > "$0.tmp"; mv "$0.tmp" "$0"; wait', pidFile], upload: ['true'], remove: ['true'] })
     const listeners = process.listenerCount('SIGTERM')
     const kill = process.kill.bind(process)
     const raised: (string | number | undefined)[] = []
@@ -272,11 +302,7 @@ describe.skipIf(!hasBash)('scripts backend commands', () => {
       return kill(pid, name)
     })
     const download = backend.download('a.gz', { signal: new AbortController().signal })
-    const sleeper = await vi.waitFor(async () => {
-      const pid = Number((await fs.readFile(pidFile, 'utf-8')).trim())
-      expect(pid).toBeGreaterThan(0)
-      return pid
-    }, { timeout: 5000 })
+    const sleeper = await pidOf(pidFile)
     process.emit('SIGTERM', 'SIGTERM')
 
     await expect(download).rejects.toThrow('download of shared failed')
@@ -287,7 +313,7 @@ describe.skipIf(!hasBash)('scripts backend commands', () => {
 
   it('leaves a stop signal to the listener the devtool already has, after passing it on', async () => {
     const pidFile = path.join(folder, 'started')
-    const backend = backendOf({ list: ['true'], download: ['bash', '-c', 'sleep 30 & echo $! > "$0"; wait', pidFile], upload: ['true'], remove: ['true'] })
+    const backend = backendOf({ list: ['true'], download: ['bash', '-c', 'sleep 30 & echo $! > "$0.tmp"; mv "$0.tmp" "$0"; wait', pidFile], upload: ['true'], remove: ['true'] })
     const kill = process.kill.bind(process)
     const raised: (string | number | undefined)[] = []
     vi.spyOn(process, 'kill').mockImplementation((pid, name) => {
@@ -300,11 +326,7 @@ describe.skipIf(!hasBash)('scripts backend commands', () => {
     const stopping = vi.fn()
     process.once('SIGTERM', stopping)
     const download = backend.download('a.gz', { signal: new AbortController().signal })
-    const sleeper = await vi.waitFor(async () => {
-      const pid = Number((await fs.readFile(pidFile, 'utf-8')).trim())
-      expect(pid).toBeGreaterThan(0)
-      return pid
-    }, { timeout: 5000 })
+    const sleeper = await pidOf(pidFile)
     process.emit('SIGTERM', 'SIGTERM')
 
     await expect(download).rejects.toThrow('download of shared failed')
@@ -314,13 +336,12 @@ describe.skipIf(!hasBash)('scripts backend commands', () => {
   }, 10_000)
 
   it('kills every cancellable command and the processes they started as the devtool exits, with one listener', async () => {
-    const backend = backendOf({ list: ['true'], download: ['bash', '-c', 'trap "" TERM INT; sleep 30 & echo $! > "$0"; wait', '%{ADT:PATH}'], upload: ['true'], remove: ['true'] })
+    const backend = backendOf({ list: ['true'], download: ['bash', '-c', 'trap "" TERM INT; sleep 30 & echo $! > "$0.tmp"; mv "$0.tmp" "$0"; wait', '%{ADT:PATH}'], upload: ['true'], remove: ['true'] })
     const exits = process.listeners('exit')
     const stops = process.listenerCount('SIGTERM')
     const pidFiles = [1, 2, 3].map(index => path.join(folder, `started-${index}`))
     const outcomes = pidFiles.map(async pidFile => backend.download(pidFile, { signal: new AbortController().signal }).then(() => 'downloaded', (error: unknown) => (error as Error).message))
-    await vi.waitFor(async () => Promise.all(pidFiles.map(async pidFile => fs.access(pidFile))), { timeout: 5000 })
-    const sleepers = await Promise.all(pidFiles.map(async pidFile => Number((await fs.readFile(pidFile, 'utf-8')).trim())))
+    const sleepers = await Promise.all(pidFiles.map(async pidFile => pidOf(pidFile)))
     expect(process.listeners('exit')).toHaveLength(exits.length + 1)
     expect(process.listenerCount('SIGTERM')).toBe(stops + 1)
     for (const listener of process.listeners('exit').filter(candidate => !exits.includes(candidate))) {
@@ -341,12 +362,11 @@ describe.skipIf(!hasBash)('scripts backend commands', () => {
 
   it('ends a stopped command once it exits, though a process that left its group keeps its output open', async () => {
     const pidFile = path.join(folder, 'escaped')
-    const escape = `perl -MPOSIX -e 'POSIX::setsid(); open(my $f, ">", $ARGV[0]); print $f $$; close $f; sleep 8' "$0" & wait`
+    const escape = `perl -MPOSIX -e 'POSIX::setsid(); open(my $f, ">", "$ARGV[0].tmp"); print $f $$; close $f; rename("$ARGV[0].tmp", $ARGV[0]); sleep 8' "$0" & wait`
     const backend = backendOf({ list: ['true'], download: ['true'], upload: ['bash', '-c', escape, pidFile], remove: ['true'] })
     const cancel = new AbortController()
     const upload = backend.upload('a.gz', await localFile('a.gz', 'content'), 'application/gzip', { signal: cancel.signal })
-    await vi.waitFor(async () => fs.access(pidFile), { timeout: 5000 })
-    const escaped = Number((await fs.readFile(pidFile, 'utf-8')).trim())
+    await pidOf(pidFile)
     const started = Date.now()
     cancel.abort(new Error('cancelled'))
 
@@ -354,13 +374,13 @@ describe.skipIf(!hasBash)('scripts backend commands', () => {
       await expect(upload).rejects.toThrow('upload of shared stopped')
       expect(Date.now() - started).toBeLessThan(2000)
     } finally {
-      process.kill(escaped, 'SIGKILL')
+      await killLeft(pidFile)
     }
   }, 15_000)
 
   it('ends a command once it exits, though a process that left its group keeps its output open', async () => {
     const pidFile = path.join(folder, 'escaped')
-    const escape = `perl -MPOSIX -e 'POSIX::setsid(); open(my $f, ">", $ARGV[0]); print $f $$; close $f; sleep 8' "$0" & sleep 0.3; echo '{"files":[]}'`
+    const escape = `perl -MPOSIX -e 'POSIX::setsid(); open(my $f, ">", "$ARGV[0].tmp"); print $f $$; close $f; rename("$ARGV[0].tmp", $ARGV[0]); sleep 8' "$0" & sleep 0.3; echo '{"files":[]}'`
     const backend = backendOf({ list: ['bash', '-c', escape, pidFile], download: ['true'], upload: ['true'], remove: ['true'] })
     const started = Date.now()
 
@@ -368,13 +388,13 @@ describe.skipIf(!hasBash)('scripts backend commands', () => {
       expect(await backend.list()).toEqual([])
       expect(Date.now() - started).toBeLessThan(3000)
     } finally {
-      process.kill(Number((await fs.readFile(pidFile, 'utf-8')).trim()), 'SIGKILL')
+      await killLeft(pidFile)
     }
   }, 15_000)
 
   it('ends a command cancelled once it exited as it ended, not as stopped', async () => {
     const pidFile = path.join(folder, 'escaped')
-    const escape = `perl -MPOSIX -e 'POSIX::setsid(); open(my $f, ">", $ARGV[0]); print $f $$; close $f; sleep 5' "$0" & sleep 0.2; exit 0`
+    const escape = `perl -MPOSIX -e 'POSIX::setsid(); open(my $f, ">", "$ARGV[0].tmp"); print $f $$; close $f; rename("$ARGV[0].tmp", $ARGV[0]); sleep 5' "$0" & sleep 0.2; exit 0`
     const backend = backendOf({ list: ['true'], download: ['true'], upload: ['bash', '-c', escape, pidFile], remove: ['true'] })
     const cancel = new AbortController()
     setTimeout(() => cancel.abort(new Error('cancelled')), 600)
@@ -382,16 +402,16 @@ describe.skipIf(!hasBash)('scripts backend commands', () => {
     try {
       await backend.upload('a.gz', await localFile('a.gz', 'content'), 'application/gzip', { signal: cancel.signal })
     } finally {
-      process.kill(Number((await fs.readFile(pidFile, 'utf-8')).trim()), 'SIGKILL')
+      await killLeft(pidFile)
     }
   }, 15_000)
 
   it('kills what a command left running in its group once it ends', async () => {
     const pidFile = path.join(folder, 'left')
-    const backend = backendOf({ list: ['true'], download: ['true'], upload: ['bash', '-c', 'sleep 300 > /dev/null 2>&1 & echo $! > "$0"', pidFile], remove: ['true'] })
+    const backend = backendOf({ list: ['true'], download: ['true'], upload: ['bash', '-c', 'sleep 300 > /dev/null 2>&1 & echo $! > "$0.tmp"; mv "$0.tmp" "$0"', pidFile], remove: ['true'] })
 
     await backend.upload('a.gz', await localFile('a.gz', 'content'), 'application/gzip')
-    const left = Number((await fs.readFile(pidFile, 'utf-8')).trim())
+    const left = await pidOf(pidFile)
     await vi.waitFor(() => {
       expect(() => process.kill(left, 0)).toThrow()
     })
@@ -399,15 +419,11 @@ describe.skipIf(!hasBash)('scripts backend commands', () => {
 
   it('runs every command in a group of its own that the stop signals of the devtool reach', async () => {
     const pidFile = path.join(folder, 'started')
-    const backend = backendOf({ list: ['true'], download: ['true'], upload: ['true'], remove: ['bash', '-c', 'sleep 30 & echo $! > "$0"; wait', pidFile] })
+    const backend = backendOf({ list: ['true'], download: ['true'], upload: ['true'], remove: ['bash', '-c', 'sleep 30 & echo $! > "$0.tmp"; mv "$0.tmp" "$0"; wait', pidFile] })
     const stopping = vi.fn()
     process.once('SIGTERM', stopping)
     const removal = backend.remove('a.gz')
-    const sleeper = await vi.waitFor(async () => {
-      const pid = Number((await fs.readFile(pidFile, 'utf-8')).trim())
-      expect(pid).toBeGreaterThan(0)
-      return pid
-    }, { timeout: 5000 })
+    const sleeper = await pidOf(pidFile)
     process.emit('SIGTERM', 'SIGTERM')
 
     await expect(removal).rejects.toThrow('remove of shared failed')
@@ -468,16 +484,13 @@ describe.skipIf(!hasBash)('scripts backend commands', () => {
 
   it('stops the upload command its signal cancels, with the processes it started', async () => {
     const pidFile = path.join(folder, 'started')
-    const backend = backendOf({ list: ['true'], download: ['true'], upload: ['bash', '-c', 'echo "progress: 1" >&2; sleep 30 & echo $! > "$0"; wait', pidFile], remove: ['true'] })
+    const backend = backendOf({ list: ['true'], download: ['true'], upload: ['bash', '-c', 'echo "progress: 1" >&2; sleep 30 & echo $! > "$0.tmp"; mv "$0.tmp" "$0"; wait', pidFile], remove: ['true'] })
     const cancel = new AbortController()
     const upload = backend.upload('a.gz', await localFile('a.gz', 'content'), 'application/gzip', { signal: cancel.signal })
-    const sleeper = await vi.waitFor(async () => {
-      const pid = Number((await fs.readFile(pidFile, 'utf-8')).trim())
-      expect(pid).toBeGreaterThan(0)
-      return pid
-    }, { timeout: 5000 })
+    const sleeper = await pidOf(pidFile)
     cancel.abort(new Error('cancelled'))
 
+    await expect(upload).rejects.toThrow(PossiblyStoredError)
     await expect(upload).rejects.toThrow('upload of shared stopped')
     await vi.waitFor(() => {
       expect(() => process.kill(sleeper, 0)).toThrow()

@@ -8,7 +8,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 import ssh2 from 'ssh2'
 import type { Attributes, FileEntry, SFTPWrapper } from 'ssh2'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { BackendContext, BackendSettings, EnvironmentBackend } from '../../src/backends/backend.js'
+import { type BackendContext, type BackendSettings, type EnvironmentBackend, PossiblyStoredError } from '../../src/backends/backend.js'
 import { sftp } from '../../src/backends/sftp.js'
 import { expectCompleteProgress, openDescriptors, progressContent, progressRecorder } from './progress-fixtures.js'
 
@@ -28,6 +28,10 @@ let frozen = false
 let refusedRenames = 0
 let refusedOpens = false
 let heldCloses: (() => void)[] | null = null
+let heldRemoves = false
+let movedAside: (() => void) | null = null
+let lostRename = false
+let closedSessions = 0
 let backend: EnvironmentBackend
 let local: string
 let context: BackendContext
@@ -134,9 +138,20 @@ function serveFiles (channel: SFTPWrapper): void {
     fs.mkdir(target).then(() => channel.status(reqid, STATUS_CODE.OK), (error: unknown) => fail(reqid, error))
   })
   channel.on('REMOVE', (reqid, target) => {
+    if (heldRemoves) {
+      return
+    }
     fs.unlink(target).then(() => channel.status(reqid, STATUS_CODE.OK), (error: unknown) => fail(reqid, error))
   })
   channel.on('RENAME', (reqid, from, to) => {
+    if (!from.endsWith('.part')) {
+      movedAside?.()
+    }
+    if (lostRename && from.endsWith('.part')) {
+      lostRename = false
+      fs.access(to).then(() => undefined, async () => fs.rename(from, to)).catch(() => undefined)
+      return
+    }
     if (refusedRenames > 0 && from.endsWith('.part')) {
       refusedRenames -= 1
       channel.status(reqid, STATUS_CODE.FAILURE)
@@ -196,6 +211,9 @@ beforeAll(async () => {
       })
     })
     client.on('error', () => undefined)
+    client.on('close', () => {
+      closedSessions += 1
+    })
   })
   await new Promise<void>(resolve => {
     server.listen(0, '127.0.0.1', resolve)
@@ -243,6 +261,9 @@ beforeEach(async () => {
   refusedRenames = 0
   refusedOpens = false
   heldCloses = null
+  heldRemoves = false
+  movedAside = null
+  lostRename = false
   const base = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'devtool-sftp-')))
   root = path.join(base, 'remote', 'environment')
   local = path.join(base, 'local')
@@ -358,6 +379,26 @@ describe('sftp backend', { timeout: 30_000 }, () => {
     await backend.close()
   })
 
+  it('puts the stored file back when an upload is cancelled once the stored file was moved aside', async () => {
+    await backend.upload('api/db.gz', await localFile('first.gz', 'stored'), 'application/gzip')
+    const cancel = new AbortController()
+    movedAside = () => cancel.abort(new Error('cancelled'))
+
+    await expect(backend.upload('api/db.gz', await localFile('second.gz', 'replacement'), 'application/gzip', { signal: cancel.signal })).rejects.toThrow('cancelled')
+    expect(await textOf(await backend.download('api/db.gz'))).toBe('stored')
+    expect(await fs.readdir(path.join(root, 'api'))).toEqual(['db.gz'])
+    await backend.close()
+  })
+
+  it('tells that the stored file may have been replaced when the server never answers the rename putting the new one in place', async () => {
+    await backend.upload('api/db.gz', await localFile('first.gz', 'stored'), 'application/gzip')
+    lostRename = true
+
+    await expect(backend.upload('api/db.gz', await localFile('second.gz', 'replacement'), 'application/gzip')).rejects.toThrow(PossiblyStoredError)
+    expect(await fs.readFile(path.join(root, 'api', 'db.gz'), 'utf-8')).toBe('replacement')
+    await backend.close()
+  })
+
   it('never touches the partial file of another upload of the same file', async () => {
     await fs.mkdir(path.join(root, 'api'), { recursive: true })
     await fs.writeFile(path.join(root, 'api', 'db.gz.part'), 'another upload')
@@ -379,7 +420,7 @@ describe('sftp backend', { timeout: 30_000 }, () => {
     await backend.close()
   })
 
-  it('cancels at once an upload whose file the server never ends writing, then removes its partial file', async () => {
+  it('cancels at once an upload whose file the server never ends writing, removing its partial file meanwhile', async () => {
     await backend.upload('api/db.gz', await localFile('first.gz', 'stored'), 'application/gzip')
     heldCloses = []
     const cancel = new AbortController()
@@ -389,12 +430,30 @@ describe('sftp backend', { timeout: 30_000 }, () => {
 
     await expect(upload).rejects.toThrow('cancelled')
     expect(await fs.readFile(path.join(root, 'api', 'db.gz'), 'utf-8')).toBe('stored')
+    await vi.waitFor(async () => expect(await fs.readdir(path.join(root, 'api'))).toEqual(['db.gz']))
+    expect(heldCloses).toHaveLength(1)
     const held = heldCloses
     heldCloses = null
     for (const close of held) {
       close()
     }
-    await vi.waitFor(async () => expect(await fs.readdir(path.join(root, 'api'))).toEqual(['db.gz']))
+  })
+
+  it('closes the connection when the server does not answer the removal of the partial file of a cancelled upload', async () => {
+    await backend.upload('api/db.gz', await localFile('first.gz', 'stored'), 'application/gzip')
+    heldCloses = []
+    heldRemoves = true
+    const closed = closedSessions
+    const cancel = new AbortController()
+    const upload = backend.upload('api/db.gz', await localFile('second.gz', 'another upload'), 'application/gzip', { signal: cancel.signal })
+    await vi.waitFor(() => expect(heldCloses).toHaveLength(1))
+    cancel.abort(new Error('cancelled'))
+
+    await expect(upload).rejects.toThrow('cancelled')
+    await vi.waitFor(() => expect(closedSessions).toBeGreaterThan(closed), { timeout: 6000 })
+    heldCloses = null
+    heldRemoves = false
+    expect(await textOf(await backend.download('api/db.gz'))).toBe('stored')
   })
 
   it('cancels at once an upload waiting for a server that does not answer its connection', async () => {
@@ -403,9 +462,12 @@ describe('sftp backend', { timeout: 30_000 }, () => {
     const cancel = new AbortController()
     setTimeout(() => cancel.abort(new Error('cancelled')), 300)
 
-    await expect(reached.upload('api/db.gz', await localFile('first.gz', 'stored'), 'application/gzip', { signal: cancel.signal })).rejects.toThrow('cancelled')
-    frozen = false
-    await reached.close()
+    try {
+      await expect(reached.upload('api/db.gz', await localFile('first.gz', 'stored'), 'application/gzip', { signal: cancel.signal })).rejects.toThrow('cancelled')
+    } finally {
+      frozen = false
+      await reached.close()
+    }
   })
 
   it('reads a passphrase that does not open its private key again, before reaching the server', async () => {
@@ -448,11 +510,15 @@ describe('sftp backend', { timeout: 30_000 }, () => {
     await reached.upload('api/db.gz', await localFile('first.gz', 'stored'), 'application/gzip')
     frozen = true
 
-    const started = Date.now()
-    await expect(reached.upload('api/db.gz', await localFile('second.gz', 'replacement'), 'application/gzip')).rejects.toThrow()
-    expect(Date.now() - started).toBeLessThan(10_000)
-    frozen = false
-    expect(await textOf(await reached.download('api/db.gz'))).toBe('stored')
-    await reached.close()
+    try {
+      const started = Date.now()
+      await expect(reached.upload('api/db.gz', await localFile('second.gz', 'replacement'), 'application/gzip')).rejects.toThrow()
+      expect(Date.now() - started).toBeLessThan(10_000)
+      frozen = false
+      expect(await textOf(await reached.download('api/db.gz'))).toBe('stored')
+    } finally {
+      frozen = false
+      await reached.close()
+    }
   })
 })

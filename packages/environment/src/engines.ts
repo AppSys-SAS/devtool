@@ -19,12 +19,12 @@ export interface DatabaseTarget {
 
 /** Dump and restore operations of a database engine, run inside its container. */
 export interface DatabaseEngine {
-  /** Lists the tables of the database holding rows, as identifiers usable in SQL. */
-  listTables(target: DatabaseTarget): Promise<string[]>
-  /** Dumps the schema of the database, without data. */
-  dumpSchema(target: DatabaseTarget): AsyncIterable<Buffer>
-  /** Dumps the rows of a table, without its definition. */
-  dumpTable(target: DatabaseTarget, table: string): AsyncIterable<Buffer>
+  /** Lists the tables of the database holding rows, as identifiers usable in SQL, the signal stopping the listing. */
+  listTables(target: DatabaseTarget, signal?: AbortSignal): Promise<string[]>
+  /** Dumps the schema of the database, without data, the signal stopping the dump. */
+  dumpSchema(target: DatabaseTarget, signal?: AbortSignal): AsyncIterable<Buffer>
+  /** Dumps the rows of a table, without its definition, the signal stopping the dump. */
+  dumpTable(target: DatabaseTarget, table: string, signal?: AbortSignal): AsyncIterable<Buffer>
   /** Drops and recreates the database, empty. */
   reset(target: DatabaseTarget): Promise<void>
   /** Runs a schema dump. */
@@ -33,8 +33,8 @@ export interface DatabaseEngine {
   importTable(target: DatabaseTarget, table: string, sql: AsyncIterable<Buffer>, replace: boolean): Promise<void>
   /** Brings what depends on loaded rows, such as sequences, in line with them. */
   finish(target: DatabaseTarget): Promise<void>
-  /** Dumps the whole database in the archive format of the engine's own tools. */
-  dumpNative(target: DatabaseTarget): AsyncIterable<Buffer>
+  /** Dumps the whole database in the archive format of the engine's own tools, the signal stopping the dump. */
+  dumpNative(target: DatabaseTarget, signal?: AbortSignal): AsyncIterable<Buffer>
   /**
    * Replaces the database, or the rows of some of its tables, each having to be in the archive, by an
    * archive file of the engine's own tools. The archive is sent whole to the container before
@@ -138,19 +138,31 @@ function dockerExec (target: DatabaseTarget, interactive: boolean, script: strin
  * @param target - The database whose container runs the script.
  * @param script - The script, reading its arguments as `$1`, `$2`...
  * @param args - The arguments of the script.
+ * @param signal - Stops `docker exec` at once and stops reading its output, which the processes it
+ * started may still hold, the output then failing.
  * @returns The output, failing at its end when the script failed.
  */
-async function* scriptOutput (target: DatabaseTarget, script: string, args: string[] = []): AsyncGenerator<Buffer> {
-  const child = spawn('docker', dockerExec(target, false, script, args), { stdio: ['ignore', 'pipe', 'pipe'] })
+async function* scriptOutput (target: DatabaseTarget, script: string, args: string[] = [], signal?: AbortSignal): AsyncGenerator<Buffer> {
+  const child = spawn('docker', dockerExec(target, false, script, args), { stdio: ['ignore', 'pipe', 'pipe'], signal })
   const errors = collectTail(child.stderr)
   const exited = assertExit(child, errors, `docker exec ${target.container}`)
   exited.catch(() => undefined)
+  /**
+   * Stops reading the output once the script is abandoned.
+   */
+  const release = (): void => {
+    child.stdout.destroy()
+    child.stderr.destroy()
+  }
+  signal?.addEventListener('abort', release, { once: true })
   try {
     for await (const chunk of child.stdout) {
       yield chunk as Buffer
     }
+    signal?.throwIfAborted()
     await exited
   } finally {
+    signal?.removeEventListener('abort', release)
     if (child.exitCode === null) {
       child.kill()
     }
@@ -162,11 +174,12 @@ async function* scriptOutput (target: DatabaseTarget, script: string, args: stri
  *
  * @param target - The database whose container runs the script.
  * @param script - The script.
+ * @param signal - Stops `docker exec` at once, the reading then failing.
  * @returns The output text.
  */
-async function scriptText (target: DatabaseTarget, script: string): Promise<string> {
+async function scriptText (target: DatabaseTarget, script: string, signal?: AbortSignal): Promise<string> {
   const chunks: Buffer[] = []
-  for await (const chunk of scriptOutput(target, script)) {
+  for await (const chunk of scriptOutput(target, script, [], signal)) {
     chunks.push(chunk)
   }
 
@@ -465,18 +478,19 @@ pg_restore --data-only -L "$work/list" -f "$work/data.sql" "$ARCHIVE"
 
 /** PostgreSQL of the official image: local socket, credentials from the container environment. */
 const postgres: DatabaseEngine = {
-  async listTables (target) {
+  async listTables (target, signal) {
     const text = await scriptText(
       target,
-      `${POSTGRES_SETUP}${POSTGRES_CLIENT} -At -c "SELECT format('%I.%I', n.nspname, c.relname) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relkind = 'r' AND n.nspname NOT IN ('pg_catalog', 'information_schema') ORDER BY 1"`
+      `${POSTGRES_SETUP}${POSTGRES_CLIENT} -At -c "SELECT format('%I.%I', n.nspname, c.relname) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relkind = 'r' AND n.nspname NOT IN ('pg_catalog', 'information_schema') ORDER BY 1"`,
+      signal
     )
     return text.split('\n').filter(line => line !== '')
   },
-  dumpSchema (target) {
-    return scriptOutput(target, `${POSTGRES_SETUP}pg_dump -U "$POSTGRES_USER" --schema-only --no-owner --no-privileges -d "$CONN"`)
+  dumpSchema (target, signal) {
+    return scriptOutput(target, `${POSTGRES_SETUP}pg_dump -U "$POSTGRES_USER" --schema-only --no-owner --no-privileges -d "$CONN"`, [], signal)
   },
-  dumpTable (target, table) {
-    return scriptOutput(target, `${POSTGRES_SETUP}pg_dump -U "$POSTGRES_USER" --data-only --no-owner --no-privileges -t "$1" -d "$CONN"`, [table])
+  dumpTable (target, table, signal) {
+    return scriptOutput(target, `${POSTGRES_SETUP}pg_dump -U "$POSTGRES_USER" --data-only --no-owner --no-privileges -t "$1" -d "$CONN"`, [table], signal)
   },
   async reset (target) {
     await scriptText(target, `${POSTGRES_SETUP}dropdb -U "$POSTGRES_USER" --force --if-exists -- "$DB" && createdb -U "$POSTGRES_USER" -- "$DB"`)
@@ -491,8 +505,8 @@ const postgres: DatabaseEngine = {
   async finish (target) {
     await scriptInput(target, `${POSTGRES_SETUP}${POSTGRES_CLIENT}`, textStream(postgresSequencesSql(null)))
   },
-  dumpNative (target) {
-    return scriptOutput(target, `${POSTGRES_SETUP}pg_dump -U "$POSTGRES_USER" -Fc -d "$CONN"`)
+  dumpNative (target, signal) {
+    return scriptOutput(target, `${POSTGRES_SETUP}pg_dump -U "$POSTGRES_USER" -Fc -d "$CONN"`, [], signal)
   },
   async restoreNative (target, archivePath, tables) {
     assertTablesChosen(tables)
@@ -583,18 +597,18 @@ function quoteMariadb (name: string): string {
 
 /** MariaDB of the official image: root account, credentials from the container environment. */
 const mariadb: DatabaseEngine = {
-  async listTables (target) {
-    const text = await scriptText(target, `${MARIADB_SETUP}mariadb -uroot -N -B -e "SHOW FULL TABLES WHERE Table_type = 'BASE TABLE'" -- "$DB"`)
+  async listTables (target, signal) {
+    const text = await scriptText(target, `${MARIADB_SETUP}mariadb -uroot -N -B -e "SHOW FULL TABLES WHERE Table_type = 'BASE TABLE'" -- "$DB"`, signal)
     return text
       .split('\n')
       .filter(line => line !== '')
       .map(line => line.split('\t')[0])
   },
-  dumpSchema (target) {
-    return scriptOutput(target, `${MARIADB_SETUP}mariadb-dump -uroot --no-data --routines --triggers --events --skip-comments -- "$DB"`)
+  dumpSchema (target, signal) {
+    return scriptOutput(target, `${MARIADB_SETUP}mariadb-dump -uroot --no-data --routines --triggers --events --skip-comments -- "$DB"`, [], signal)
   },
-  dumpTable (target, table) {
-    return scriptOutput(target, `${MARIADB_SETUP}mariadb-dump -uroot --no-create-info --skip-triggers --skip-comments --single-transaction -- "$DB" "$1"`, [table])
+  dumpTable (target, table, signal) {
+    return scriptOutput(target, `${MARIADB_SETUP}mariadb-dump -uroot --no-create-info --skip-triggers --skip-comments --single-transaction -- "$DB" "$1"`, [table], signal)
   },
   async reset (target) {
     await scriptText(target, `${MARIADB_SETUP}empty && grant`)
@@ -609,8 +623,8 @@ const mariadb: DatabaseEngine = {
   finish () {
     return Promise.resolve()
   },
-  dumpNative (target) {
-    return transformed(scriptOutput(target, `${MARIADB_SETUP}mariadb-dump -uroot --single-transaction --routines --triggers --events -- "$DB"`), createGzip())
+  dumpNative (target, signal) {
+    return transformed(scriptOutput(target, `${MARIADB_SETUP}mariadb-dump -uroot --single-transaction --routines --triggers --events -- "$DB"`, [], signal), createGzip())
   },
   async restoreNative (target, archivePath, tables) {
     if (tables !== null) {
@@ -816,18 +830,19 @@ function emptyStream (): AsyncIterable<Buffer> {
 
 /** MongoDB of the official image: collections as tables, credentials from the container environment. */
 const mongodb: DatabaseEngine = {
-  async listTables (target) {
+  async listTables (target, signal) {
     const text = await scriptText(
       target,
-      `${MONGODB_SETUP}auth mongosh --quiet --eval 'db.getSiblingDB(process.env.DB).getCollectionNames().filter((name) => !name.startsWith("system.")).sort().forEach((name) => print(name))'`
+      `${MONGODB_SETUP}auth mongosh --quiet --eval 'db.getSiblingDB(process.env.DB).getCollectionNames().filter((name) => !name.startsWith("system.")).sort().forEach((name) => print(name))'`,
+      signal
     )
     return text.split('\n').filter(line => line !== '')
   },
   dumpSchema () {
     return emptyStream()
   },
-  dumpTable (target, table) {
-    return scriptOutput(target, `${MONGODB_SETUP}auth mongodump --quiet --archive --db "$DB" --collection "$1"`, [table])
+  dumpTable (target, table, signal) {
+    return scriptOutput(target, `${MONGODB_SETUP}auth mongodump --quiet --archive --db "$DB" --collection "$1"`, [table], signal)
   },
   async reset (target) {
     await scriptText(target, `${MONGODB_SETUP}auth mongosh --quiet --eval 'db.getSiblingDB(process.env.DB).dropDatabase()'`)
@@ -848,8 +863,8 @@ const mongodb: DatabaseEngine = {
   finish () {
     return Promise.resolve()
   },
-  dumpNative (target) {
-    return scriptOutput(target, `${MONGODB_SETUP}${MONGODB_DUMP}`)
+  dumpNative (target, signal) {
+    return scriptOutput(target, `${MONGODB_SETUP}${MONGODB_DUMP}`, [], signal)
   },
   async restoreNative (target, archivePath, tables) {
     assertTablesChosen(tables)

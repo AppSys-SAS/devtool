@@ -159,14 +159,14 @@ async function takeLock (lockPath: string): Promise<string | null> {
  *
  * @param localPath - The file.
  * @param content - Its content, as text, bytes or a stream.
- * @param signal - Abandons the writing, leaving the file as it was.
+ * @param signal - Abandons the writing, between two pieces of the content, leaving the file as it was.
  */
 export async function writeLocalFile (localPath: string, content: Parameters<typeof fs.writeFile>[1], signal?: AbortSignal): Promise<void> {
   const partialPath = temporaryPathOf(localPath, 'part')
   let created: string | undefined
   try {
     created = await fs.mkdir(path.dirname(localPath), { recursive: true, mode: 0o700 })
-    await fs.writeFile(partialPath, content, { mode: 0o600 })
+    await fs.writeFile(partialPath, content, { mode: 0o600, signal })
     signal?.throwIfAborted()
     await fs.rename(partialPath, localPath)
   } catch (error) {

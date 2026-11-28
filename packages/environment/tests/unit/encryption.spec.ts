@@ -189,6 +189,25 @@ describe('encrypted', () => {
     expect(await fs.readdir(folder)).toEqual(['db.gz'])
   })
 
+  it('stops an encryption cancelled while it runs, its backend never reached and no file left', async () => {
+    const { backend } = memoryBackend()
+    const upload = vi.spyOn(backend, 'upload')
+    const store = encrypted(backend, new EncryptionSecret({ key: KEY.toString('base64') }, contextOf().context, 'team'))
+    const local = path.join(folder, 'db.gz')
+    await fs.writeFile(local, randomBytes(64 * 1024 * 1024))
+    const cancel = new AbortController()
+    const uploading = store.upload('api/db.gz', local, 'application/gzip', { signal: cancel.signal })
+    await vi.waitFor(async () => {
+      const sealed = (await fs.readdir(folder)).find(name => name.endsWith('.sealed'))
+      expect(sealed && (await fs.stat(path.join(folder, sealed))).size).toBeGreaterThan(0)
+    }, { timeout: 10_000, interval: 5 })
+    cancel.abort(new Error('cancelled'))
+
+    await expect(uploading).rejects.toThrow()
+    expect(upload).not.toHaveBeenCalled()
+    expect(await fs.readdir(folder)).toEqual(['db.gz'])
+  }, 20_000)
+
   it('closes the stored file when its decrypted content is closed before being read', async () => {
     const { backend, files } = memoryBackend()
     const store = encrypted(backend, new EncryptionSecret({ key: KEY.toString('base64') }, contextOf().context, 'team'))

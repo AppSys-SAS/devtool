@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import fs from 'node:fs/promises'
 import { promisify } from 'node:util'
+import treeKill from 'tree-kill'
 import { authReaderOf, readAuthOptions } from '@appsys-sas/devtool-auth'
 import { readCertificate } from '@appsys-sas/devtool-certs'
 import { type RawConfig, resolveCacheFolder, resolveConfigFolder } from '@appsys-sas/devtool-config'
@@ -44,6 +45,36 @@ import { CommandSecrets } from './command-automation.js'
 const execFileAsync = promisify(execFile)
 
 /**
+ * Runs the shell command of a value block, killed with every process it started when it does not
+ * end within the time the developer has to answer, then ended whatever a detached process still
+ * holds of its output.
+ *
+ * @param command - The shell command.
+ * @param cwd - The folder it runs in.
+ * @returns What it printed.
+ */
+async function runValueCommand (command: string, cwd: string): Promise<string> {
+  const run = execFileAsync('/bin/sh', ['-c', command], { cwd })
+  const { child } = run
+  let late = false
+  const timer = setTimeout(() => {
+    late = true
+    if (child.pid !== undefined) {
+      treeKill(child.pid, 'SIGKILL', () => undefined)
+    }
+    child.stdout?.destroy()
+    child.stderr?.destroy()
+  }, DEVELOPER_ANSWER_MS)
+  try {
+    return (await run).stdout
+  } catch (error) {
+    throw late ? new Error(`the command of a value block did not end within ${DEVELOPER_ANSWER_MS / 60_000} minutes`, { cause: error }) : error
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/**
  * Builds what the backends of the environment need: value blocks read from the configuration folder,
  * their commands stopped when they do not answer within the time the developer has to answer, the
  * cache folder, the identity provider and a way to ask the developer for a secret.
@@ -58,7 +89,7 @@ export function createBackendContext (config: RawConfig, askSecret: (label: stri
   const secrets = new CommandSecrets({
     account: null,
     folder: configFolder,
-    runShell: async command => (await execFileAsync('/bin/sh', ['-c', command], { cwd: configFolder, timeout: DEVELOPER_ANSWER_MS, killSignal: 'SIGKILL' })).stdout,
+    runShell: async command => runValueCommand(command, configFolder),
     readAuth: authReaderOf(auth)
   })
   return { resolve: async text => secrets.resolve(text), askSecret, cacheDir: resolveCacheFolder(config), configFolder, auth }
@@ -328,6 +359,7 @@ export class DevtoolEnvironment {
       }
     } catch (error) {
       if (generation >= this._publishedRefresh) {
+        this._publishedRefresh = generation
         this._error = `the environment could not be described: ${error instanceof Error ? error.message : String(error)}`
       }
     } finally {
@@ -487,9 +519,10 @@ export class DevtoolEnvironment {
 
   /**
    * Cancels the transfer of items of the pull or push in progress: the item whose file moves is left
-   * as it was, an item waiting is skipped at once, and an item whose restore started or whose file
-   * is stored runs to its end. Nothing happens outside a pull or push in progress, nor for another
-   * run than the one in progress.
+   * as it was, an item waiting is skipped at once, and an item whose restore started runs to its
+   * end; a push cancelled once its file was sent tells that its backend may have stored it all the
+   * same. Nothing happens outside a pull or push in progress, nor for another run than the one in
+   * progress.
    *
    * @param runId - The run.
    * @param index - The step of the item, null for every step not finished.
@@ -611,7 +644,9 @@ export class DevtoolEnvironment {
           run.steps[index] = { ...run.steps[index], status: result.done ? 'done' : 'skipped', detail: result.detail, progress: null }
         } catch (error) {
           const cancelled = error instanceof TransferCancelledError
-          const detail = cancelled ? 'cancelled' : error instanceof Error ? error.message : String(error)
+          const detail = cancelled
+            ? error.possiblyStored ? 'cancelled: the backend may have stored it all the same, refresh to see' : 'cancelled'
+            : error instanceof Error ? error.message : String(error)
           run.steps[index] = { ...run.steps[index], status: cancelled ? 'skipped' : 'failed', detail, progress: null }
         }
         clearTimeout(pendingPublish)

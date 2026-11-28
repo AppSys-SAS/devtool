@@ -7,7 +7,7 @@ import path from 'node:path'
 import type { Readable } from 'node:stream'
 import { setTimeout as delay } from 'node:timers/promises'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { BackendContext, BackendSettings, EnvironmentBackend, RemoteFile } from '../../src/backends/backend.js'
+import { type BackendContext, type BackendSettings, type EnvironmentBackend, PossiblyStoredError, type RemoteFile } from '../../src/backends/backend.js'
 import { s3 } from '../../src/backends/s3.js'
 import { expectCompleteProgress, openDescriptors, progressContent, progressRecorder } from './progress-fixtures.js'
 
@@ -27,6 +27,7 @@ interface StoredObject {
 
 const objects = new Map<string, StoredObject>()
 const requests: string[] = []
+const drained: string[] = []
 let server: Server
 let endpoint: string
 let local: string
@@ -77,7 +78,12 @@ async function answer (request: IncomingMessage, response: ServerResponse): Prom
   const [, bucket, ...keyParts] = url.pathname.split('/')
   const key = keyParts.map(decodeURIComponent).join('/')
   requests.push(`${request.method} ${key}`)
+  if (key === 'never/read.gz') {
+    request.pause()
+    return
+  }
   if (key === 'never/answered.gz' || url.searchParams.get('prefix') === 'never/') {
+    request.on('end', () => drained.push(key))
     request.resume()
     return
   }
@@ -212,6 +218,7 @@ beforeAll(async () => {
 })
 
 afterAll(async () => {
+  server.closeAllConnections()
   await new Promise<void>(resolve => {
     server.close(() => resolve())
   })
@@ -220,6 +227,7 @@ afterAll(async () => {
 beforeEach(async () => {
   objects.clear()
   requests.length = 0
+  drained.length = 0
   local = await fs.mkdtemp(path.join(os.tmpdir(), 'devtool-s3-'))
 })
 
@@ -309,13 +317,27 @@ describe('s3 backend', () => {
     await backend.close()
   }, 10_000)
 
-  it('abandons an upload its signal cancels before the service answers, the stored object left as it was', async () => {
+  it('abandons an upload its signal cancels once the service read the whole file, telling that it may have stored it', async () => {
     const backend = backendOf()
     objects.set('never/answered.gz', { body: Buffer.from('stored'), contentType: 'application/gzip', etag: 'stored', updatedAt: new Date() })
     const cancel = new AbortController()
-    setTimeout(() => cancel.abort(new Error('cancelled')), 100)
-    await expect(backend.upload('never/answered.gz', await localFile('db.gz', 'replacement'), 'application/gzip', { signal: cancel.signal })).rejects.toThrow()
+    const upload = backend.upload('never/answered.gz', await localFile('db.gz', 'replacement'), 'application/gzip', { signal: cancel.signal })
+    await vi.waitFor(() => expect(drained).toContain('never/answered.gz'))
+    cancel.abort(new Error('cancelled'))
+    await expect(upload).rejects.toThrow(PossiblyStoredError)
     expect(objects.get('never/answered.gz')?.body.toString()).toBe('stored')
+    await backend.close()
+  }, 10_000)
+
+  it('abandons an upload its signal cancels while its file is sent, telling nothing was stored', async () => {
+    const backend = backendOf()
+    const file = path.join(local, 'big.gz')
+    await fs.writeFile(file, Buffer.alloc(32 * 1024 * 1024, 7))
+    const cancel = new AbortController()
+    setTimeout(() => cancel.abort(new Error('cancelled')), 300)
+    const error: unknown = await backend.upload('never/read.gz', file, 'application/gzip', { signal: cancel.signal }).catch((failure: unknown) => failure)
+    expect(error).toBeInstanceOf(Error)
+    expect(error).not.toBeInstanceOf(PossiblyStoredError)
     await backend.close()
   }, 10_000)
 

@@ -24,7 +24,37 @@ describe('createBackendContext', () => {
     expect(await context.resolve('{{ $(echo token) }}')).toBe('token')
 
     const started = Date.now()
-    await expect(context.resolve('{{ $(sleep 5; echo late) }}')).rejects.toThrow()
+    await expect(context.resolve('{{ $(sleep 5; echo late) }}')).rejects.toThrow('did not end within')
     expect(Date.now() - started).toBeLessThan(3000)
+  })
+
+  it('gives the value of a command by the time the developer has, though a process it detached keeps its output open', async () => {
+    const context = createBackendContext({}, async () => '')
+    const pidFile = path.join(folder, 'detached')
+    const started = Date.now()
+
+    try {
+      expect(await context.resolve(`{{ $(sleep 30 & echo $! > "${pidFile}"; echo value) }}`)).toBe('value')
+      expect(Date.now() - started).toBeLessThan(3000)
+    } finally {
+      const pid = Number((await fs.readFile(pidFile, 'utf-8').catch(() => '')).trim())
+      if (Number.isInteger(pid) && pid > 0) {
+        try {
+          process.kill(pid, 'SIGKILL')
+        } catch {
+          void pid
+        }
+      }
+    }
+  })
+
+  it('kills the processes a value block command started once it does not answer in time', async () => {
+    const context = createBackendContext({}, async () => '')
+    const pidFile = path.join(folder, 'child')
+
+    await expect(context.resolve(`{{ $(sleep 30 & echo $! > "${pidFile}"; wait) }}`)).rejects.toThrow('did not end within')
+    const child = Number((await fs.readFile(pidFile, 'utf-8')).trim())
+    expect(child).toBeGreaterThan(0)
+    expect(() => process.kill(child, 0)).toThrow()
   })
 })

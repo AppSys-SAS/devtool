@@ -4,7 +4,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import type { Readable } from 'node:stream'
 import { scratchPath } from '../directory.js'
-import { type BackendContext, type BackendProblem, type BackendSettings, type BackendType, type EnvironmentBackend, knownSize, lineReader, readText, type RemoteFile, STDIO_GRACE_MS, type TransferOptions, unlessAborted } from './backend.js'
+import { type BackendContext, type BackendProblem, type BackendSettings, type BackendType, type EnvironmentBackend, knownSize, lineReader, PossiblyStoredError, readText, type RemoteFile, STDIO_GRACE_MS, type TransferOptions, unlessAborted } from './backend.js'
 
 const OPERATIONS = ['list', 'download', 'upload', 'remove'] as const
 const ABSENT_EXIT_CODE = 2
@@ -327,7 +327,7 @@ class ScriptsBackend implements EnvironmentBackend {
    * replaced, in a process group of its own that the stop signals of the current process reach. A
    * command ends once its process exits, at once when stopped, else once its output is read or a
    * short delay later, whatever processes outside its group still hold; the processes it left in
-   * its group are then killed.
+   * its group are then killed. A stopped upload command tells that it may have stored the file.
    * @param operation The operation.
    * @param filePath The path of the file in the backend.
    * @param localFile The local file the command reads or writes.
@@ -374,7 +374,8 @@ class ScriptsBackend implements EnvironmentBackend {
         child.stdout.destroy()
         child.stderr.destroy()
         if (stopped) {
-          reject(new Error(`${operation} of ${this._settings.slug} stopped`))
+          const message = `${operation} of ${this._settings.slug} stopped`
+          reject(operation === 'upload' ? new PossiblyStoredError(`${message}, the command may have stored the file`) : new Error(message))
           return
         }
         resolve(result)

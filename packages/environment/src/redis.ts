@@ -52,13 +52,26 @@ async function connect (url: string): Promise<Redis> {
  *
  * @param url - The database.
  * @param operation - The operation.
+ * @param signal - Abandons the operation, closing the connection, which fails the command waiting.
  * @returns What the operation returns.
  */
-async function withRedis<T> (url: string, operation: (client: Redis) => Promise<T>): Promise<T> {
+async function withRedis<T> (url: string, operation: (client: Redis) => Promise<T>, signal?: AbortSignal): Promise<T> {
+  signal?.throwIfAborted()
   const client = await connect(url)
+  /**
+   * Closes the connection once the operation is abandoned.
+   */
+  const abandon = (): void => {
+    client.disconnect()
+  }
+  signal?.addEventListener('abort', abandon, { once: true })
   try {
-    return await operation(client)
+    signal?.throwIfAborted()
+    const result = await operation(client)
+    signal?.throwIfAborted()
+    return result
   } finally {
+    signal?.removeEventListener('abort', abandon)
     await client.quit().catch(() => client.disconnect())
   }
 }
@@ -100,16 +113,17 @@ async function bytesOf (body: AsyncIterable<Buffer>): Promise<Buffer> {
  * Lists the key groups of a Redis database.
  *
  * @param url - The database.
+ * @param signal - Abandons the listing.
  * @returns The groups, sorted.
  */
-export async function listRedisGroups (url: string): Promise<string[]> {
+export async function listRedisGroups (url: string, signal?: AbortSignal): Promise<string[]> {
   return withRedis(url, async client => {
     const groups = new Set<string>()
     for await (const key of keysOf(client)) {
       groups.add(redisKeyGroup(key))
     }
     return [...groups].sort()
-  })
+  }, signal)
 }
 
 /**
@@ -119,9 +133,10 @@ export async function listRedisGroups (url: string): Promise<string[]> {
  * @param url - The database.
  * @param archive - The archive being written.
  * @param groups - The key groups to write, or null for every key.
+ * @param signal - Abandons the snapshot.
  * @returns The number of keys written.
  */
-export async function snapshotRedis (url: string, archive: ArchiveWriter, groups: string[] | null): Promise<number> {
+export async function snapshotRedis (url: string, archive: ArchiveWriter, groups: string[] | null, signal?: AbortSignal): Promise<number> {
   return withRedis(url, async client => {
     let count = 0
     for await (const key of keysOf(client)) {
@@ -137,7 +152,7 @@ export async function snapshotRedis (url: string, archive: ArchiveWriter, groups
       }
     }
     return count
-  })
+  }, signal)
 }
 
 /**

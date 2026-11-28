@@ -2,7 +2,7 @@ import { createReadStream } from 'node:fs'
 import fs from 'node:fs/promises'
 import { PassThrough, pipeline, type Readable } from 'node:stream'
 import { DeleteObjectCommand, GetObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client, S3ServiceException } from '@aws-sdk/client-s3'
-import { BACKEND_IDLE_MS, type BackendContext, type BackendProblem, type BackendSettings, type BackendType, byteCounter, type EnvironmentBackend, knownSize, readText, type RemoteFile, type TransferOptions } from './backend.js'
+import { BACKEND_IDLE_MS, type BackendContext, type BackendProblem, type BackendSettings, type BackendType, byteCounter, type EnvironmentBackend, knownSize, PossiblyStoredError, readText, type RemoteFile, type TransferOptions } from './backend.js'
 
 /** Settings of an S3 bucket storing the files, under a prefix. */
 export interface S3Settings extends BackendSettings {
@@ -80,7 +80,9 @@ class S3Backend implements EnvironmentBackend {
 
   /**
    * Stores a local file as an object, streamed, replacing the stored one; a file that cannot be read
-   * whole, or a cancel, aborts the request, the stored object then left as it was.
+   * whole, or a cancel, aborts the request, the stored object then left as it was, unless the HTTP
+   * client took the whole file, which a cancel then tells as the object possibly stored; the client
+   * takes a small file at once, before reaching the service.
    * @param path The path of the file.
    * @param localFile The local file.
    * @param mediaType The media type of the object.
@@ -106,6 +108,10 @@ class S3Backend implements EnvironmentBackend {
         abort.abort(error)
       }
     }).pipe(new PassThrough())
+    let sent = false
+    body.once('end', () => {
+      sent = true
+    })
     try {
       await client.send(new PutObjectCommand({
         Bucket: this._settings.bucket,
@@ -115,6 +121,9 @@ class S3Backend implements EnvironmentBackend {
         ContentType: mediaType
       }), { abortSignal: abort.signal })
     } catch (error) {
+      if (signal?.aborted && sent) {
+        throw new PossiblyStoredError(`the upload to ${this._settings.slug} was cancelled once the whole file was sent`, { cause: error })
+      }
       throw abort.signal.aborted ? abort.signal.reason : error
     } finally {
       signal?.removeEventListener('abort', cancel)

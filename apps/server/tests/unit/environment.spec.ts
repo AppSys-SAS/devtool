@@ -195,6 +195,22 @@ describe('DevtoolEnvironment run', () => {
     expect([await localCopy('a.txt'), await localCopy('b.txt')]).toEqual(['old', 'old'])
   }, 10_000)
 
+  it('cancels a push while its command uploads, telling that its backend may have stored the file', async () => {
+    const environment = new DevtoolEnvironment(async payload => {
+      published.push(structuredClone(payload))
+    }, async () => '')
+    const config = configOf(0)
+    environment.configure({ ...config, environment: { ...config.environment as object, backends: { shared: { type: 'scripts', list: ['printf', '%s', LISTING], download: ['true'], upload: ['bash', '-c', 'printf "progress: 1\\n" >&2; sleep 30'], remove: ['true'] } } } })
+    const started = Date.now()
+    const run = environment.run('push', [{ path: 'api/a.txt', tables: null }])
+    await vi.waitFor(() => expect(published.at(-1)?.run?.steps[0].progress).not.toBeNull())
+    environment.cancel(runIdOf(environment), null)
+    await run
+
+    expect(environment.state().run?.steps.map(step => [step.status, step.detail])).toEqual([['skipped', 'cancelled: the backend may have stored it all the same, refresh to see']])
+    expect(Date.now() - started).toBeLessThan(4000)
+  }, 10_000)
+
   it('cancels one waiting item, the others pulled', async () => {
     const environment = environmentOf(0.3)
     const run = environment.run('pull', [{ path: 'api/a.txt', tables: null }, { path: 'api/b.txt', tables: null }])
@@ -257,27 +273,6 @@ describe('DevtoolEnvironment run', () => {
     environment.cancel(runIdOf(environment), null)
     await run
     expect(environment.state().run?.steps.map(step => step.status)).toEqual(['skipped', 'skipped'])
-  }, 10_000)
-
-  it('cancels a push while its file uploads, the step skipped', async () => {
-    const environment = new DevtoolEnvironment(async payload => {
-      published.push(structuredClone(payload))
-    }, async () => '')
-    environment.configure({
-      environment: {
-        folder: path.join(folder, 'env'),
-        backends: { shared: { type: 'scripts', list: ['printf', '%s', LISTING], download: ['true'], upload: ['bash', '-c', 'sleep 5'], remove: ['true'] } },
-        files: ['api/a.txt']
-      }
-    })
-    const started = Date.now()
-    const run = environment.run('push', [{ path: 'api/a.txt', tables: null }])
-    await running(0)
-    environment.cancel(runIdOf(environment), null)
-    await run
-
-    expect(environment.state().run?.steps.map(step => [step.status, step.detail])).toEqual([['skipped', 'cancelled']])
-    expect(Date.now() - started).toBeLessThan(4000)
   }, 10_000)
 
   it('forgets a finished run only when asked for that run', async () => {
@@ -367,7 +362,7 @@ describe('DevtoolEnvironment run', () => {
     expect(remoteSizes(environment)).toEqual([222, 222])
   })
 
-  it('publishes why a refresh failed, then an earlier refresh ending after it', async () => {
+  it('keeps why a refresh failed over an earlier refresh ending after it', async () => {
     const environment = environmentOf(0)
     const releaseEarlier = gatedDescribe(111)
     vi.mocked(Environment.prototype.describe).mockRejectedValueOnce(new Error('listing failed'))
@@ -377,8 +372,8 @@ describe('DevtoolEnvironment run', () => {
     expect(published.at(-1)).toMatchObject({ error: 'the environment could not be described: listing failed', refreshing: true })
     releaseEarlier()
     await earlier
-    expect(remoteSizes(environment)).toEqual([111, 111])
-    expect(published.at(-1)).toMatchObject({ error: null, refreshing: false })
+    expect(remoteSizes(environment)).toEqual([])
+    expect(published.at(-1)).toMatchObject({ error: 'the environment could not be described: listing failed', refreshing: false })
   })
 
   it('never publishes the items of a refresh started before the configuration changed', async () => {

@@ -2,6 +2,8 @@
 import { Icon } from '@iconify/vue'
 import { X } from '@lucide/vue'
 import { ToastClose, ToastDescription, ToastProvider, ToastRoot, ToastTitle, ToastViewport } from 'reka-ui'
+import { computed } from 'vue'
+import layoutStore from '@/stores/layout'
 import mcpStore from '@/stores/mcp'
 
 const LEVEL_CLASSES = {
@@ -11,6 +13,7 @@ const LEVEL_CLASSES = {
 } as const
 
 const messages = mcpStore.messages
+const covered = computed(() => layoutStore.covers('left') || layoutStore.covers('right'))
 
 /**
  * Hides a message once its toast closes.
@@ -27,7 +30,7 @@ function closed (id: string, open: boolean): void {
 <template>
   <ToastProvider :duration="10000">
     <ToastRoot
-      v-for="message in messages"
+      v-for="message in covered ? [] : messages"
       :key="message.id"
       class="flex items-start gap-3 rounded-lg border bg-background p-3 shadow-lg data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-80 data-[state=open]:slide-in-from-bottom-4"
       :class="LEVEL_CLASSES[message.level]"

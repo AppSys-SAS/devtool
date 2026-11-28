@@ -8,13 +8,14 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { gzipSync } from 'node:zlib'
 import type { AuthOptions } from '@appsys-sas/devtool-auth'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { BackendSettings, EnvironmentBackend } from '../../src/backends/backend.js'
+import { type BackendSettings, type EnvironmentBackend, PossiblyStoredError } from '../../src/backends/backend.js'
 import { cdn } from '../../src/backends/cdn.js'
 import { expectCompleteProgress, openDescriptors, progressContent, progressRecorder } from './progress-fixtures.js'
 
 const AUTH: AuthOptions = { type: 'openid', name: null, issuer: 'https://auth.example.dev', clientId: 'devtool', callbackPort: 0, scopes: [] }
 
 const stored = new Map<string, Buffer>()
+const received: string[] = []
 let listingHangs = false
 let server: Server
 let url: string
@@ -35,11 +36,16 @@ async function bytesOf (stream: Readable | null): Promise<Buffer> {
 
 beforeAll(async () => {
   server = createServer((request, response) => {
+    if ((request.url ?? '').endsWith('never-read.gz')) {
+      request.pause()
+      return
+    }
     const chunks: Buffer[] = []
     request.on('data', (chunk: Buffer) => chunks.push(chunk))
     request.on('end', () => {
       const key = decodeURIComponent(request.url ?? '')
       if (key.endsWith('never-answered.gz') || (key === '/devtool' && listingHangs)) {
+        received.push(key)
         return
       }
       if (request.method === 'PUT') {
@@ -67,6 +73,7 @@ beforeAll(async () => {
 })
 
 afterAll(async () => {
+  server.closeAllConnections()
   await new Promise<void>(resolve => {
     server.close(() => resolve())
   })
@@ -75,6 +82,7 @@ afterAll(async () => {
 beforeEach(async () => {
   stored.clear()
   listingHangs = false
+  received.length = 0
   folder = await fs.mkdtemp(path.join(os.tmpdir(), 'devtool-cdn-'))
   const session = { issuer: AUTH.issuer, clientId: AUTH.clientId, accessToken: 'token', expiresAt: Date.now() + 3_600_000, refreshToken: null, user: null }
   await fs.writeFile(path.join(folder, 'session.json'), JSON.stringify(session))
@@ -100,23 +108,39 @@ describe('cdn backend', () => {
   it('abandons a listing its signal cancels before the server answers', async () => {
     listingHangs = true
     const cancel = new AbortController()
-    setTimeout(() => cancel.abort(new Error('cancelled')), 100)
-    await expect(backendOf().list(cancel.signal)).rejects.toThrow('cancelled')
+    const listing = backendOf().list(cancel.signal)
+    await vi.waitFor(() => expect(received).toContain('/devtool'))
+    cancel.abort(new Error('cancelled'))
+    await expect(listing).rejects.toThrow('cancelled')
   }, 10_000)
 
   it('abandons a download its signal cancels before the server answers', async () => {
     const cancel = new AbortController()
-    setTimeout(() => cancel.abort(new Error('cancelled')), 100)
-    await expect(backendOf().download('api/never-answered.gz', { signal: cancel.signal })).rejects.toThrow('cancelled')
+    const download = backendOf().download('api/never-answered.gz', { signal: cancel.signal })
+    await vi.waitFor(() => expect(received).toContain('/devtool/api/never-answered.gz'))
+    cancel.abort(new Error('cancelled'))
+    await expect(download).rejects.toThrow('cancelled')
   }, 10_000)
 
-  it('abandons an upload its signal cancels before the server answers, storing nothing', async () => {
+  it('abandons an upload its signal cancels once the server read the whole file, telling that it may have stored it', async () => {
     const localFile = path.join(folder, 'db.gz')
     await fs.writeFile(localFile, progressContent())
     const cancel = new AbortController()
-    setTimeout(() => cancel.abort(new Error('cancelled')), 100)
-    await expect(backendOf().upload('api/never-answered.gz', localFile, 'application/gzip', { signal: cancel.signal })).rejects.toThrow()
+    const upload = backendOf().upload('api/never-answered.gz', localFile, 'application/gzip', { signal: cancel.signal })
+    await vi.waitFor(() => expect(received).toContain('/devtool/api/never-answered.gz'))
+    cancel.abort(new Error('cancelled'))
+    await expect(upload).rejects.toThrow(PossiblyStoredError)
     expect(stored.has('/devtool/api/never-answered.gz')).toBe(false)
+  }, 10_000)
+
+  it('abandons an upload its signal cancels while its file is sent, telling nothing was stored', async () => {
+    const localFile = path.join(folder, 'big.gz')
+    await fs.writeFile(localFile, Buffer.alloc(32 * 1024 * 1024, 7))
+    const cancel = new AbortController()
+    setTimeout(() => cancel.abort(new Error('cancelled')), 300)
+    const error: unknown = await backendOf().upload('api/never-read.gz', localFile, 'application/gzip', { signal: cancel.signal }).catch((failure: unknown) => failure)
+    expect(error).toBeInstanceOf(Error)
+    expect(error).not.toBeInstanceOf(PossiblyStoredError)
   }, 10_000)
 
   it('reads a compressed answer whole, counting its bytes without the compressed size as total', async () => {

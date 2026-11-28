@@ -42,9 +42,9 @@ describe('formatProgress', () => {
     expect(formatProgress(1.5 * MB, 3 * MB)).toBe('1.5 MB / 3.0 MB · 50%')
   })
 
-  it('says the size is unknown, with the bytes moved once some are', () => {
-    expect(formatProgress(12 * KB, null)).toBe('12 KB / size unknown')
-    expect(formatProgress(0, null)).toBe('size unknown')
+  it('shows only the bytes moved when the size is unknown', () => {
+    expect(formatProgress(12 * KB, null)).toBe('12 KB')
+    expect(formatProgress(0, null)).toBe('0 B')
   })
 
   it('shows an empty file as complete', () => {
@@ -53,7 +53,7 @@ describe('formatProgress', () => {
 
   it('adds the speed when it is known, the size known or not', () => {
     expect(formatProgress(1.5 * MB, 3 * MB, 2 * MB)).toBe('1.5 MB / 3.0 MB · 50% · 2.0 MB/s')
-    expect(formatProgress(12 * KB, null, 512 * KB)).toBe('12 KB / size unknown · 512 KB/s')
+    expect(formatProgress(12 * KB, null, 512 * KB)).toBe('12 KB · 512 KB/s')
   })
 })
 

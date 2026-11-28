@@ -6,7 +6,7 @@ import path from 'node:path'
 import { pipeline, type Readable } from 'node:stream'
 import { promisify } from 'node:util'
 import { scratchPath, withFileLock } from '../directory.js'
-import { BACKEND_IDLE_MS, type BackendContext, type BackendSettings, type BackendType, byteCounter, type EnvironmentBackend, lineReader, readText, type RemoteFile, STDIO_GRACE_MS, type TransferOptions } from './backend.js'
+import { BACKEND_IDLE_MS, type BackendContext, type BackendSettings, type BackendType, byteCounter, type EnvironmentBackend, lineReader, PossiblyStoredError, readText, type RemoteFile, STDIO_GRACE_MS, type TransferOptions } from './backend.js'
 
 const execFileAsync = promisify(execFile)
 const queues = new Map<string, Promise<unknown>>()
@@ -15,7 +15,6 @@ const DEFAULT_IDENTITY = ['-c', 'user.name=devtool', '-c', 'user.email=devtool@l
 const PROGRESS_LINE = /^(Enumerating|Counting|Delta compression|Compressing|Writing|Total) /
 const WRITTEN_PATTERN = /^Writing objects:.*?, (\d+(?:\.\d+)?) (bytes|KiB|MiB|GiB)/
 const WRITTEN_ALL = /, done\.?$/
-const SENT_ALL = /^Writing objects: +100% /
 const UNIT_BYTES: Record<string, number> = { bytes: 1, KiB: 1024, MiB: 1024 ** 2, GiB: 1024 ** 3 }
 const IDLE_SECONDS = Math.max(1, Math.round(BACKEND_IDLE_MS / 1000))
 const TRANSPORT_LIMITS = ['-c', 'http.lowSpeedLimit=1', '-c', `http.lowSpeedTime=${IDLE_SECONDS}`]
@@ -208,13 +207,12 @@ class GitBackend implements EnvironmentBackend {
 
   /**
    * Commits what is staged and pushes it, rebasing once on the remote when the push is refused, a
-   * rebase that fails being undone. A push cancelled before git sent the whole commit leaves the
-   * remote as it was, the commit being dropped by the next sync; once it is sent, the push runs to
-   * its end, the remote then deciding alone whether it takes it.
+   * rebase that fails being undone. A cancel stops git at any step; one that stops a push leaves the
+   * remote free to take the commit still, which the next sync tells.
    * @param message The message of the commit.
    * @param onWritten Told the bytes git reports as written to the remote, as it writes them, and
    * whether it wrote them all.
-   * @param signal Cancels the commit, and the push until git sent the whole commit.
+   * @param signal Cancels the commit and the push.
    */
   private async commitAndPush (message: string, onWritten?: (bytes: number, all: boolean) => void, signal?: AbortSignal): Promise<void> {
     const staged = await execFileAsync('git', ['-C', this._folder, 'diff', '--cached', '--quiet']).then(() => false, () => true)
@@ -222,34 +220,29 @@ class GitBackend implements EnvironmentBackend {
       return
     }
     await this.git([...(await this.identity()), 'commit', '-q', '-m', message], undefined, signal)
-    const push = ['push', '--progress', 'origin', `HEAD:${this._settings.branch}`]
-    let sent = false
     /**
      * Reports the bytes of a "Writing objects" progress line of git, and whether git wrote them all.
      * @param line A complete line of the error output of git.
      */
     const onLine = (line: string): void => {
       const written = WRITTEN_PATTERN.exec(line)
-      sent ||= SENT_ALL.test(line)
       if (written) {
         onWritten?.(Math.round(Number(written[1]) * UNIT_BYTES[written[2]]), WRITTEN_ALL.test(line))
       }
     }
-    const pushing = new AbortController()
     /**
-     * Stops the push once it is cancelled, unless git already sent the whole commit.
+     * Pushes the commit, a cancelled push telling that the remote may still take it.
      */
-    const cancel = (): void => {
-      if (!sent) {
-        pushing.abort(signal?.reason)
-      }
+    const pushCommit = async (): Promise<void> => {
+      signal?.throwIfAborted()
+      await this.git(['push', '--progress', 'origin', `HEAD:${this._settings.branch}`], lineReader(onLine), signal).catch((error: unknown) => {
+        throw signal?.aborted ? new PossiblyStoredError(`the push to ${this._settings.slug} was cancelled while the remote may have taken the commit`, { cause: error }) : error
+      })
     }
-    signal?.throwIfAborted()
-    signal?.addEventListener('abort', cancel, { once: true })
     try {
-      await this.git(push, lineReader(onLine), pushing.signal)
+      await pushCommit()
     } catch (error) {
-      if (pushing.signal.aborted) {
+      if (signal?.aborted) {
         throw error
       }
       await this.git(['fetch', '-q', 'origin', this._settings.branch], undefined, signal)
@@ -257,11 +250,7 @@ class GitBackend implements EnvironmentBackend {
         await this.git(['rebase', '--abort']).catch(() => undefined)
         throw failure
       })
-      signal?.throwIfAborted()
-      sent = false
-      await this.git(push, lineReader(onLine), pushing.signal)
-    } finally {
-      signal?.removeEventListener('abort', cancel)
+      await pushCommit()
     }
   }
 
