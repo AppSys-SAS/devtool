@@ -3,12 +3,27 @@ import type { AuthOptions } from '@appsys-sas/devtool-auth'
 import type { TransferAccess } from '../access.js'
 import type { EncryptionSettings } from './encryption.js'
 
+/** How long a backend may show no activity before what waits for it gives up, in milliseconds. */
+export const BACKEND_IDLE_MS = 60_000
+
+/** How long the developer may take to answer what a backend asks, such as a password, in milliseconds. */
+export const DEVELOPER_ANSWER_MS = 5 * 60_000
+
+/**
+ * Reads the size a backend gives for a file.
+ * @param value The size given.
+ * @returns The size in bytes, null when it is not a whole number of bytes, such as a size the backend does not know.
+ */
+export function knownSize (value: unknown): number | null {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null
+}
+
 /** A file stored by a backend. */
 export interface RemoteFile {
   /** Path of the file, relative to the root of the backend. */
   path: string
-  /** Size of the file as the environment reads it, in bytes. */
-  size: number
+  /** Size of the file as the environment reads it, in bytes, null when the backend does not give it. */
+  size: number | null
   /** Last change of the stored file. */
   updatedAt: Date
   /** Changes whenever the stored file is written, and only then. */
@@ -33,6 +48,10 @@ export interface TransferOptions {
 /** Where the files of the environment are stored, read and written. */
 export interface EnvironmentBackend {
   /**
+   * Whether the backend bounds each of its exchanges itself, so that no silence is timed around it.
+   */
+  readonly boundsItself?: boolean
+  /**
    * Lists the stored files.
    * @param signal Abandons the listing.
    * @returns The files, or null when the backend cannot list them.
@@ -46,13 +65,18 @@ export interface EnvironmentBackend {
    */
   download: (path: string, options?: TransferOptions) => Promise<Readable | null>
   /**
-   * Stores a local file, replacing the stored one.
+   * Stores a local file, replacing the stored one only once the whole file is stored.
    * @param path The path of the file in the backend.
    * @param localFile The local file.
    * @param mediaType The media type of the file.
-   * @param options Follows the bytes sent.
+   * @param options Follows the bytes sent, and abandons the upload, the stored file then left as it was.
    */
   upload: (path: string, localFile: string, mediaType: string, options?: TransferOptions) => Promise<void>
+  /**
+   * Gets what transferring a file needs from the developer, such as a password, before any transfer
+   * is timed.
+   */
+  prepare?: () => Promise<void>
   /**
    * Deletes a stored file; a missing file counts as deleted.
    * @param path The path of the file.

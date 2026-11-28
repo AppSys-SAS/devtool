@@ -194,7 +194,7 @@ export function environmentTools (host: McpHost): McpTool[] {
     defineTool({
       name: 'environment_status',
       title: 'Environment status',
-      description: 'Describes the environment synchronized with its backends: its files, databases, buckets and Redis databases, the backend of each, their local copies and the copies of their backends, and the pull or push running.',
+      description: 'Describes the environment synchronized with its backends: its files, databases, buckets and Redis databases, the backend of each, their local copies and the copies of their backends, and the run in progress: pull, push, restore or removal of local copies.',
       input: {},
       readOnly: true,
       run: async (_input, call) => {
@@ -248,12 +248,12 @@ export function environmentTools (host: McpHost): McpTool[] {
       input: {
         direction: z.enum(['pull', 'push']),
         targets: z
-          .array(z.object({ path: z.string(), tables: z.array(z.string()).optional().describe('Only these tables of a database') }))
+          .array(z.object({ path: z.string(), tables: z.array(z.string()).min(1).optional().describe('Only these tables of a database') }))
           .min(1)
       },
       run: async ({ direction, targets }, call) => {
         if (host.environment.state().run?.finished === false) {
-          throw new McpToolError('A pull or push is already running')
+          throw new McpToolError('A run over the environment is already in progress')
         }
         const paths = targets.map(target => target.path)
         const items = host.environment.state().items
@@ -271,9 +271,14 @@ export function environmentTools (host: McpHost): McpTool[] {
           grantKey: `run:environment:pull:${paths.join(',')}`,
           grantLabel: `Pull ${paths.join(', ')}`
         })
+        const previous = host.environment.state().run
         host.environment.run(direction, targets.map(target => ({ path: target.path, tables: target.tables ?? null }))).catch((error: unknown) => {
           logger.warn('MCP', 'Environment', error instanceof Error ? error.message : String(error))
         })
+        const { run: started, error } = host.environment.state()
+        if (!started || started === previous) {
+          throw new McpToolError(previous?.finished === false ? 'A run over the environment is already in progress' : `The environment declares no backend it can use${error ? `: ${error}` : ''}`)
+        }
         return { started: direction, targets: paths }
       }
     }),

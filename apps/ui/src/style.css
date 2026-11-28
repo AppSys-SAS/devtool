@@ -120,6 +120,16 @@
     --color-chart-3: var(--chart-3);
     --color-chart-2: var(--chart-2);
     --color-chart-1: var(--chart-1);
+    --animate-indeterminate: indeterminate 1.4s ease-in-out infinite;
+
+    @keyframes indeterminate {
+        from {
+            transform: translateX(-100%);
+        }
+        to {
+            transform: translateX(300%);
+        }
+    }
 }
 
 @layer base {

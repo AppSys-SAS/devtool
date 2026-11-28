@@ -63,20 +63,31 @@ export function formatBytes (bytes: number): string {
  * Gives the share of a transfer done.
  * @param done The bytes moved.
  * @param total The size of the file, null when unknown.
- * @returns The whole percentage done, at most 100, null when the size is unknown or empty.
+ * @returns The whole percentage done, at most 100 and 100 for an empty file, null when the size is unknown.
  */
 export function progressPercent (done: number, total: number | null): number | null {
-  return total ? Math.min(100, Math.floor((done * 100) / total)) : null
+  if (total === null) {
+    return null
+  }
+  return total === 0 ? 100 : Math.min(100, Math.floor((done * 100) / total))
 }
 
 /**
  * Formats the progress of a transfer for reading.
  * @param done The bytes moved.
  * @param total The size of the file, null when unknown.
- * @returns The bytes moved, with the size and the percentage when the size is known, such as `1.5 MB / 3.0 MB · 50%`.
+ * @param bytesPerSecond The speed of the transfer, null when unknown.
+ * @returns The bytes moved, with the size and the percentage when the size is known, then the speed
+ * when known, such as `1.5 MB / 3.0 MB · 50% · 2.0 MB/s` or `1.5 MB / size unknown · 2.0 MB/s`.
  */
-export function formatProgress (done: number, total: number | null): string {
-  return total ? `${formatBytes(done)} / ${formatBytes(total)} · ${progressPercent(done, total)}%` : formatBytes(done)
+export function formatProgress (done: number, total: number | null, bytesPerSecond: number | null = null): string {
+  let moved: string
+  if (total !== null) {
+    moved = `${formatBytes(done)} / ${formatBytes(total)} · ${progressPercent(done, total)}%`
+  } else {
+    moved = done === 0 ? 'size unknown' : `${formatBytes(done)} / size unknown`
+  }
+  return bytesPerSecond === null ? moved : `${moved} · ${formatBytes(bytesPerSecond)}/s`
 }
 
 /**

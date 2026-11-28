@@ -9,6 +9,8 @@ import EmbedFrames from '@/components/EmbedFrames.vue'
 import McpRequestDialog from '@/components/mcp/McpRequestDialog.vue'
 import McpToasts from '@/components/mcp/McpToasts.vue'
 import SecretPromptDialog from '@/components/SecretPromptDialog.vue'
+import SidebarFrame from '@/components/SidebarFrame.vue'
+import SidebarToggle from '@/components/SidebarToggle.vue'
 import commandRunsStore from '@/stores/command-runs'
 import configStore from '@/stores/config'
 import layoutStore from '@/stores/layout'
@@ -58,13 +60,35 @@ onMounted(() => {
     v-else
     class="flex h-full w-full overflow-hidden"
   >
-    <AppSidebar
-      v-show="layoutStore.isVisible('left')"
-      class="h-full w-80 shrink-0 border-r"
-    />
-    <main class="min-w-0 flex-1 overflow-hidden">
-      <RouterView />
-    </main>
+    <SidebarFrame
+      side="left"
+      class="w-80 border-r bg-card"
+    >
+      <AppSidebar class="min-w-0 flex-1" />
+    </SidebarFrame>
+    <div
+      class="flex min-w-0 flex-1 flex-col"
+      :inert="layoutStore.covers('left')"
+    >
+      <header
+        v-if="layoutStore.narrow.value"
+        class="flex h-11 shrink-0 items-center gap-2 border-b bg-card px-2"
+        :inert="layoutStore.opened.value !== null"
+      >
+        <SidebarToggle
+          side="left"
+          in-bar
+        />
+        <span class="min-w-0 flex-1 truncate text-sm font-medium">{{ configStore.displayName.value }}</span>
+        <SidebarToggle
+          side="right"
+          in-bar
+        />
+      </header>
+      <main class="min-h-0 flex-1 overflow-hidden">
+        <RouterView />
+      </main>
+    </div>
     <EmbedFrames />
     <CommandDialog
       v-if="commandRunsStore.current.value"

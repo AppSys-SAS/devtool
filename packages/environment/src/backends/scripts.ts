@@ -1,17 +1,18 @@
 import { spawn } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import fs from 'node:fs/promises'
-import os from 'node:os'
 import path from 'node:path'
 import type { Readable } from 'node:stream'
-import { type BackendContext, type BackendProblem, type BackendSettings, type BackendType, type EnvironmentBackend, lineReader, readText, type RemoteFile, type TransferOptions } from './backend.js'
+import { scratchPath } from '../directory.js'
+import { type BackendContext, type BackendProblem, type BackendSettings, type BackendType, type EnvironmentBackend, knownSize, lineReader, readText, type RemoteFile, type TransferOptions } from './backend.js'
 
 const OPERATIONS = ['list', 'download', 'upload', 'remove'] as const
 const ABSENT_EXIT_CODE = 2
 const STDERR_TAIL_LENGTH = 2000
 const PROGRESS_POLL_MS = 250
 const STOP_GRACE_MS = 5000
+const STDIO_GRACE_MS = 1000
+const STOP_SIGNALS = ['SIGINT', 'SIGTERM', 'SIGHUP'] as const
 const PROGRESS_LINE = /^progress: (\d+)$/
 
 type Operation = typeof OPERATIONS[number]
@@ -28,8 +29,14 @@ interface RunOptions {
   allowAbsent?: boolean
   /** Told the bytes of each `progress: <bytes>` line of the error output. */
   onReported?: (bytes: number) => void
-  /** Stops the command and every process it started, the command then running in a process group of its own. */
+  /** Stops the command and every process it started in its process group. */
   signal?: AbortSignal
+}
+
+/** The commands and the environment variables of the backend, their value blocks read. */
+interface ResolvedValues {
+  commands: Record<Operation, string[] | null>
+  env: Record<string, string>
 }
 
 /** Settings of a backend made of your own commands. */
@@ -67,6 +74,81 @@ function signalGroup (pid: number | undefined, name: NodeJS.Signals): boolean {
 }
 
 /**
+ * The process groups of the commands running in sessions of their own, which no terminal reaches:
+ * the stop signals of the current process are passed on to them, and they are killed when nothing
+ * else handles such a signal or when the current process exits.
+ */
+class StopGroups {
+  private readonly _groups = new Set<number>()
+  private _watching = false
+
+  /**
+   * Passes a stop signal on to every group; when nothing else handles it, kills them all and lets
+   * the current process stop as it would have.
+   * @param stopSignal The signal.
+   */
+  private readonly passOn = (stopSignal: NodeJS.Signals): void => {
+    for (const pid of this._groups) {
+      signalGroup(pid, stopSignal)
+    }
+    this.stopWatching()
+    if (process.listenerCount(stopSignal) === 0) {
+      this.killAll()
+      process.kill(process.pid, stopSignal)
+    }
+  }
+
+  /**
+   * Kills every group.
+   */
+  private readonly killAll = (): void => {
+    for (const pid of this._groups) {
+      signalGroup(pid, 'SIGKILL')
+    }
+  }
+
+  /**
+   * Starts following a group.
+   * @param pid The process leading the group.
+   */
+  follow (pid: number): void {
+    if (this._groups.size === 0) {
+      process.on('exit', this.killAll)
+    }
+    if (!this._watching) {
+      for (const stopSignal of STOP_SIGNALS) {
+        process.prependListener(stopSignal, this.passOn)
+      }
+      this._watching = true
+    }
+    this._groups.add(pid)
+  }
+
+  /**
+   * Stops following a group once its command ended.
+   * @param pid The process leading the group.
+   */
+  forget (pid: number): void {
+    if (this._groups.delete(pid) && this._groups.size === 0) {
+      this.stopWatching()
+      process.off('exit', this.killAll)
+    }
+  }
+
+  /**
+   * Stops listening to the stop signals of the current process.
+   */
+  private stopWatching (): void {
+    for (const stopSignal of STOP_SIGNALS) {
+      process.off(stopSignal, this.passOn)
+    }
+    this._watching = false
+  }
+}
+
+const stopGroups = new StopGroups()
+
+/**
  * Reads a command: a non-empty list of texts or numbers.
  * @param value The raw setting.
  * @returns The command, null when the setting is not one.
@@ -76,7 +158,8 @@ function readCommand (value: unknown): string[] | null {
 }
 
 /**
- * Reads the files a `list` command printed, `{ "files": [ { "path", "size", "updatedAt", "version" } ] }`.
+ * Reads the files a `list` command printed, `{ "files": [ { "path", "size", "updatedAt", "version" } ] }`,
+ * a missing or null size standing for one the storage does not give.
  * @param output The standard output of the command.
  * @returns The files.
  */
@@ -94,10 +177,11 @@ function parseListing (output: string): RemoteFile[] {
   return files.map((file: unknown) => {
     const entry = (typeof file === 'object' && file !== null ? file : {}) as Record<string, unknown>
     const updatedAt = typeof entry.updatedAt === 'string' ? new Date(entry.updatedAt) : null
-    if (typeof entry.path !== 'string' || typeof entry.size !== 'number' || updatedAt === null || Number.isNaN(updatedAt.getTime())) {
-      throw new Error(`the list command printed an invalid file: ${JSON.stringify(file)}, expected { "path", "size", "updatedAt" }`)
+    const size = entry.size ?? null
+    if (typeof entry.path !== 'string' || (size !== null && typeof size !== 'number') || updatedAt === null || Number.isNaN(updatedAt.getTime())) {
+      throw new Error(`the list command printed an invalid file: ${JSON.stringify(file)}, expected { "path", "updatedAt" } and a numeric "size" when known`)
     }
-    return { path: entry.path, size: entry.size, updatedAt, version: typeof entry.version === 'string' ? entry.version : updatedAt.toISOString() }
+    return { path: entry.path, size: knownSize(size), updatedAt, version: typeof entry.version === 'string' ? entry.version : updatedAt.toISOString() }
   })
 }
 
@@ -105,6 +189,8 @@ function parseListing (output: string): RemoteFile[] {
  * A backend running your own commands for each operation.
  */
 class ScriptsBackend implements EnvironmentBackend {
+  private _values: Promise<ResolvedValues> | null = null
+
   /**
    * @param _settings The settings of the backend.
    * @param _context What the devtool provides.
@@ -122,34 +208,40 @@ class ScriptsBackend implements EnvironmentBackend {
   }
 
   /**
-   * Opens a stored file, written by the `download` command to a temporary file removed once read.
+   * Opens a stored file, written by the `download` command to a temporary file removed once read,
+   * or left to the next process when it cannot be removed.
    * @param filePath The path of the file.
-   * @param options Follows the size of the temporary file while the command writes it, and stops the command.
+   * @param options Follows the size of the temporary file while the command writes it, or the bytes
+   * it reports with `progress: <bytes>` lines on its error output, and stops the command.
    * @returns Its content, or null when the command exits with code 2.
    */
   async download (filePath: string, { onProgress, signal }: TransferOptions = {}): Promise<Readable | null> {
-    const temporary = path.join(os.tmpdir(), `devtool-download-${randomUUID()}`)
+    const temporary = await scratchPath(this._context.cacheDir, 'download')
     let running = true
+    /**
+     * Tells the bytes the command moved while it runs.
+     * @param bytes The bytes moved.
+     */
+    const moved = (bytes: number): void => {
+      if (running) {
+        onProgress?.(bytes, null)
+      }
+    }
     const poll = setInterval(() => {
-      fs.stat(temporary).then(({ size }) => {
-        if (running) {
-          onProgress?.(size, null)
-        }
-      }, () => undefined)
+      fs.stat(temporary).then(({ size }) => moved(size), () => undefined)
     }, PROGRESS_POLL_MS)
     try {
-      const { code } = await this.run('download', filePath, temporary, { allowAbsent: true, signal }).finally(() => {
+      const { code } = await this.run('download', filePath, temporary, { allowAbsent: true, onReported: moved, signal }).finally(() => {
         running = false
       })
       if (code === ABSENT_EXIT_CODE) {
         await fs.rm(temporary, { force: true })
         return null
       }
-      const { size } = await fs.stat(temporary)
-      onProgress?.(size, size)
+      onProgress?.((await fs.stat(temporary)).size, null)
       const content = createReadStream(temporary)
       content.on('close', () => {
-        void fs.rm(temporary, { force: true })
+        fs.rm(temporary, { force: true }).catch(() => undefined)
       })
       return content
     } catch (error) {
@@ -166,12 +258,12 @@ class ScriptsBackend implements EnvironmentBackend {
    * @param filePath The path of the file in the backend.
    * @param localFile The local file.
    * @param _mediaType Unused, the command choosing how the file is stored.
-   * @param options Follows the bytes the command reports, the size of the file standing for the total.
+   * @param options Follows the bytes the command reports, the size of the file standing for the
+   * total, and stops the command with the processes it started.
    */
-  async upload (filePath: string, localFile: string, _mediaType: string, { onProgress }: TransferOptions = {}): Promise<void> {
+  async upload (filePath: string, localFile: string, _mediaType: string, { onProgress, signal }: TransferOptions = {}): Promise<void> {
     const { size } = await fs.stat(localFile)
-    await this.run('upload', filePath, localFile, { onReported: bytes => onProgress?.(Math.min(bytes, size), size) })
-    onProgress?.(size, size)
+    await this.run('upload', filePath, localFile, { onReported: bytes => onProgress?.(bytes, size), signal })
   }
 
   /**
@@ -190,7 +282,47 @@ class ScriptsBackend implements EnvironmentBackend {
   }
 
   /**
-   * Runs the command of an operation, its value blocks read and `%{ADT:PATH}` and `%{ADT:FILE}` replaced.
+   * Reads the value blocks of the commands and of their environment, which may ask the developer
+   * to approve their reading.
+   */
+  async prepare (): Promise<void> {
+    await this.values()
+  }
+
+  /**
+   * Gives the commands and the environment variables, their value blocks read once.
+   * @returns The command of each operation, null when undeclared, and the variables.
+   */
+  private async values (): Promise<ResolvedValues> {
+    this._values ??= this.resolveValues().catch((error: unknown) => {
+      this._values = null
+      throw error
+    })
+    return this._values
+  }
+
+  /**
+   * Reads the value blocks of the commands and of their environment.
+   * @returns The command of each operation, null when undeclared, and the variables.
+   */
+  private async resolveValues (): Promise<ResolvedValues> {
+    const commands = Object.fromEntries(await Promise.all(OPERATIONS.map(async operation => {
+      const command = this._settings[operation]
+      return [operation, command && await Promise.all(command.map(async arg => this._context.resolve(arg)))] as const
+    }))) as Record<Operation, string[] | null>
+    const env: Record<string, string> = {}
+    for (const [key, value] of Object.entries(this._settings.env)) {
+      env[key] = await this._context.resolve(value)
+    }
+    return { commands, env }
+  }
+
+  /**
+   * Runs the command of an operation, its value blocks read and `%{ADT:PATH}` and `%{ADT:FILE}`
+   * replaced, in a process group of its own that the stop signals of the current process reach. A
+   * command ends once its process exits, at once when stopped, else once its output is read or a
+   * short delay later, whatever processes outside its group still hold; the processes it left in
+   * its group are then killed.
    * @param operation The operation.
    * @param filePath The path of the file in the backend.
    * @param localFile The local file the command reads or writes.
@@ -198,32 +330,69 @@ class ScriptsBackend implements EnvironmentBackend {
    * @returns What the command printed and its exit code.
    */
   private async run (operation: Operation, filePath: string, localFile: string, { allowAbsent = false, onReported, signal }: RunOptions = {}): Promise<CommandResult> {
-    const command = this._settings[operation]
+    const { commands, env: values } = await this.values()
+    const command = commands[operation]
     if (command === null) {
       throw new Error(`${this._settings.slug} declares no ${operation} command`)
     }
-    const args = await Promise.all(command.map(async arg =>
-      (await this._context.resolve(arg)).replaceAll('%{ADT:PATH}', filePath).replaceAll('%{ADT:FILE}', localFile)))
-    const env: Record<string, string> = { ...process.env as Record<string, string> }
-    for (const [key, value] of Object.entries(this._settings.env)) {
-      env[key] = await this._context.resolve(value)
-    }
+    const args = command.map(arg => arg.replaceAll('%{ADT:PATH}', filePath).replaceAll('%{ADT:FILE}', localFile))
+    const env: Record<string, string> = { ...process.env as Record<string, string>, ...values }
     const cwd = path.resolve(this._context.configFolder, this._settings.cwd)
     const result = await new Promise<CommandResult & { stderr: string }>((resolve, reject) => {
       signal?.throwIfAborted()
-      const child = spawn(args[0], args.slice(1), { cwd, env, detached: signal !== undefined, stdio: ['ignore', 'pipe', 'pipe'] })
+      const child = spawn(args[0], args.slice(1), { cwd, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] })
+      const stdout: Buffer[] = []
+      const stderr: Buffer[] = []
+      let settled = false
+      let exited = false
+      let exitCode: number | null = null
+      let stopped = false
       let forced: NodeJS.Timeout | undefined
+      let drained: NodeJS.Timeout | undefined
       /**
-       * Stops the process group of the command, killing it when it outlives a grace delay.
+       * Ends the command once, killing what it left in its process group, with what it printed, or
+       * as stopped when it was stopped before it exited.
+       * @param code The exit code of the command.
+       */
+      const settle = (code: number | null): void => {
+        if (settled) {
+          return
+        }
+        settled = true
+        clearTimeout(drained)
+        clearTimeout(forced)
+        signal?.removeEventListener('abort', stop)
+        signalGroup(child.pid, 'SIGKILL')
+        if (child.pid !== undefined) {
+          stopGroups.forget(child.pid)
+        }
+        const result = { code: code ?? 1, stdout: Buffer.concat(stdout).toString('utf8'), stderr: Buffer.concat(stderr).toString('utf8') }
+        child.stdout.destroy()
+        child.stderr.destroy()
+        if (stopped) {
+          reject(new Error(`${operation} of ${this._settings.slug} stopped`))
+          return
+        }
+        resolve(result)
+      }
+      /**
+       * Stops the process group of the command, killing it when it outlives a grace delay, or ends
+       * the command at once with its exit code when its process already exited.
        */
       const stop = (): void => {
+        if (exited) {
+          settle(exitCode)
+          return
+        }
+        stopped = true
         if (signalGroup(child.pid, 'SIGTERM')) {
           forced = setTimeout(() => signalGroup(child.pid, 'SIGKILL'), STOP_GRACE_MS)
         }
       }
+      if (child.pid !== undefined) {
+        stopGroups.follow(child.pid)
+      }
       signal?.addEventListener('abort', stop, { once: true })
-      const stdout: Buffer[] = []
-      const stderr: Buffer[] = []
       const readLine = lineReader(line => {
         const reported = PROGRESS_LINE.exec(line.trim())
         if (reported) {
@@ -236,19 +405,19 @@ class ScriptsBackend implements EnvironmentBackend {
         readLine(chunk.toString('utf8'))
       })
       child.on('error', error => {
+        if (settled) {
+          return
+        }
+        settled = true
         signal?.removeEventListener('abort', stop)
         reject(new Error(`${operation} of ${this._settings.slug}: cannot run ${args[0]}: ${error.message}`))
       })
-      child.on('close', code => {
-        signal?.removeEventListener('abort', stop)
-        clearTimeout(forced)
-        if (signal?.aborted) {
-          signalGroup(child.pid, 'SIGKILL')
-          reject(new Error(`${operation} of ${this._settings.slug} stopped`))
-          return
-        }
-        resolve({ code: code ?? 1, stdout: Buffer.concat(stdout).toString('utf8'), stderr: Buffer.concat(stderr).toString('utf8') })
+      child.on('exit', code => {
+        exited = true
+        exitCode = code
+        drained = setTimeout(() => settle(code), stopped ? 0 : STDIO_GRACE_MS)
       })
+      child.on('close', code => settle(code))
     })
     if (result.code !== 0 && !(allowAbsent && result.code === ABSENT_EXIT_CODE)) {
       const messages = result.stderr.split('\n').filter(line => !PROGRESS_LINE.test(line.trim())).join('\n')

@@ -6,7 +6,7 @@ backends (cdn, s3, sftp, git) do not reach.
 | Script | Stores the files | Needs |
 |---|---|---|
 | `folder.sh` | in a folder: a shared or mounted folder (NFS, SMB, a synchronized drive), given by `ROOT` | bash, coreutils |
-| `rclone.sh` | on any storage rclone reaches (Google Drive, Dropbox, OneDrive, WebDAV, B2...), given by `REMOTE` | [rclone](https://rclone.org), configured with `rclone config`, and [jq](https://jqlang.org) |
+| `rclone.sh` | on any storage rclone reaches (Google Drive, Dropbox, OneDrive, WebDAV, B2...), given by `REMOTE` | [rclone](https://rclone.org) 1.63 or later, configured with `rclone config`, and [jq](https://jqlang.org) |
 
 ## Use one
 
@@ -42,7 +42,7 @@ local file to read or to write.
 
 | Operation | Must |
 |---|---|
-| `list` | print on its standard output `{ "files": [ { "path", "size", "updatedAt", "version" } ] }`: the path relative to the storage, the size in bytes, the last change as an ISO 8601 date, and optionally a `version` that changes whenever the file is written (the date by default) |
+| `list` | print on its standard output `{ "files": [ { "path", "size", "updatedAt", "version" } ] }`: the path relative to the storage, the size in bytes (left out when the storage cannot give it), the last change as an ISO 8601 date, and optionally a `version` that changes whenever the file is written (the date by default) |
 | `download` | write the stored file to `%{ADT:FILE}`, or exit with code `2` when the path does not exist |
 | `upload` | store `%{ADT:FILE}` at `%{ADT:PATH}`, replacing the stored file |
 | `remove` | delete the stored file; a missing file counts as deleted |

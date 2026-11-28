@@ -3,7 +3,8 @@ import { createReadStream, createWriteStream } from 'node:fs'
 import fs from 'node:fs/promises'
 import { pipeline as streamPipeline, Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
-import type { BackendContext, BackendProblem, EnvironmentBackend, RemoteFile, TransferOptions } from './backend.js'
+import { temporaryPathOf } from '../directory.js'
+import type { BackendContext, BackendProblem, EnvironmentBackend, RemoteFile, TransferOptions, TransferProgress } from './backend.js'
 
 const MAGIC = Buffer.from('ADTE')
 const VERSION = 1
@@ -74,6 +75,27 @@ export function plainLengthOf (sealedSize: number): number | null {
   }
   const chunks = Math.ceil(body / SEALED_CHUNK_LENGTH)
   return body - (chunks - 1) * SEALED_CHUNK_LENGTH >= TAG_LENGTH ? body - chunks * TAG_LENGTH : null
+}
+
+/**
+ * Gives how much content the first bytes of an encrypted file carry, the header and the tags left
+ * out; for the whole file, its size once decrypted.
+ * @param sealedBytes The bytes of the encrypted file.
+ * @returns The bytes of content they carry.
+ */
+export function plainBytesOf (sealedBytes: number): number {
+  const body = Math.max(0, sealedBytes - HEADER_LENGTH)
+  const chunks = Math.floor(body / SEALED_CHUNK_LENGTH)
+  return chunks * CHUNK_LENGTH + Math.max(0, body - chunks * SEALED_CHUNK_LENGTH - TAG_LENGTH)
+}
+
+/**
+ * Turns the progress of an encrypted file into the progress of its content.
+ * @param onProgress Told the progress of the content.
+ * @returns Takes the progress of the encrypted file.
+ */
+function plainProgress (onProgress: TransferProgress | undefined): TransferProgress | undefined {
+  return onProgress && ((done, total) => onProgress(plainBytesOf(done), total === null ? null : plainBytesOf(total)))
 }
 
 /**
@@ -245,7 +267,8 @@ export class EncryptionSecret {
 
 /**
  * Wraps a backend so the files are encrypted before they reach it and decrypted when they come back,
- * the progress of a transfer counting the encrypted bytes the backend moves. A decrypted content
+ * the progress of a transfer counting the bytes of content the encrypted bytes moved carry, as the
+ * listed sizes and the local files do. A decrypted content
  * closed early closes the stored file, and the secret is forgotten only when it does not open a file.
  * @param backend The backend storing the encrypted files.
  * @param secret The secret of the files.
@@ -253,6 +276,8 @@ export class EncryptionSecret {
  */
 export function encrypted (backend: EnvironmentBackend, secret: EncryptionSecret): EnvironmentBackend {
   return {
+    boundsItself: backend.boundsItself,
+
     /**
      * Lists the stored files with their plain size.
      * @param signal Abandons the listing.
@@ -260,12 +285,18 @@ export function encrypted (backend: EnvironmentBackend, secret: EncryptionSecret
      */
     async list (signal?: AbortSignal): Promise<RemoteFile[] | null> {
       const files = await backend.list(signal)
-      return files?.map(file => ({ ...file, size: plainLengthOf(file.size) ?? file.size })) ?? null
+      return files?.map(file => ({ ...file, size: file.size === null ? null : plainLengthOf(file.size) ?? file.size })) ?? null
     },
 
-    async download (path: string, options?: TransferOptions): Promise<Readable | null> {
+    /**
+     * Opens a stored file decrypted, its progress counted in bytes of content.
+     * @param path The path of the file.
+     * @param options Follows the bytes received, and abandons the download.
+     * @returns Its content, or null when the file does not exist.
+     */
+    async download (path: string, options: TransferOptions = {}): Promise<Readable | null> {
       const fileKey = await secret.fileKey()
-      const content = await backend.download(path, options)
+      const content = await backend.download(path, { ...options, onProgress: plainProgress(options.onProgress) })
       if (!content) {
         return null
       }
@@ -280,12 +311,19 @@ export function encrypted (backend: EnvironmentBackend, secret: EncryptionSecret
       return plain
     },
 
-    async upload (path: string, localFile: string, _mediaType: string, options?: TransferOptions): Promise<void> {
+    /**
+     * Encrypts a local file and stores it, its progress counted in bytes of content.
+     * @param path The path of the file in the backend.
+     * @param localFile The local file.
+     * @param _mediaType Unused, an encrypted file being stored as bytes.
+     * @param options Follows the bytes sent.
+     */
+    async upload (path: string, localFile: string, _mediaType: string, options: TransferOptions = {}): Promise<void> {
       const fileKey = await secret.fileKey()
-      const sealedFile = `${localFile}.sealed`
+      const sealedFile = temporaryPathOf(localFile, 'sealed')
       try {
         await pipeline(Readable.from(encrypt(createReadStream(localFile), fileKey, path)), createWriteStream(sealedFile, { mode: 0o600 }))
-        await backend.upload(path, sealedFile, 'application/octet-stream', options)
+        await backend.upload(path, sealedFile, 'application/octet-stream', { ...options, onProgress: plainProgress(options.onProgress) })
       } finally {
         await fs.rm(sealedFile, { force: true })
       }
@@ -297,6 +335,15 @@ export function encrypted (backend: EnvironmentBackend, secret: EncryptionSecret
 
     async close (): Promise<void> {
       await backend.close()
+    },
+
+    /**
+     * Gets the secret of the files, asking the developer for it when it is typed, then what the
+     * encrypted backend needs from the developer.
+     */
+    async prepare (): Promise<void> {
+      await secret.fileKey()
+      await backend.prepare?.()
     }
   }
 }

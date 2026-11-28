@@ -735,8 +735,11 @@ export interface AuthSessionPayload {
 
 /** Size and last change of a copy of an environment item, the date in ISO format. */
 export interface EnvironmentCopyPayload {
-  size: number
+  /** Its size in bytes, null when its backend does not give it. */
+  size: number | null
   updatedAt: string
+  /** For the copy of a backend, what changes whenever it is written; null for a local copy. */
+  version: string | null
 }
 
 /** An item of the development environment with its local copy and its copy on its backend. */
@@ -817,6 +820,8 @@ export type EnvironmentAction = 'pull' | 'push' | 'restore' | 'remove'
 
 /** A run over environment items, running or finished. */
 export interface EnvironmentRunPayload {
+  /** Identifies the run, so that a request about it never reaches another one. */
+  id: string
   action: EnvironmentAction
   steps: EnvironmentStepPayload[]
   finished: boolean
@@ -842,6 +847,8 @@ export interface EnvironmentPayload {
   items: EnvironmentItemPayload[]
   /** Why the copies of a backend are unknown, by backend, or why the environment could not be read. */
   error: string | null
+  /** Whether the items are being described again, their copies on the backends listed again. */
+  refreshing: boolean
   run: EnvironmentRunPayload | null
 }
 

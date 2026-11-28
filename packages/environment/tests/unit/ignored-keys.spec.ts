@@ -103,7 +103,7 @@ describe('a configuration file with ignored keys', () => {
 
     expect(await flaky.pull({ item: ITEM, tables: null })).toEqual({
       done: true,
-      detail: 'keys merged: 1 from memory, 0 kept local, not recorded as synchronized: the copy of memory could not be listed before the pull: pull again'
+      detail: 'keys merged: 1 from memory, 0 kept local, not recorded as synchronized: the copy of memory could not be listed before the pull (listing failed): pull again'
     })
     expect(await localValue()).toEqual({ version: 1, connections: [{ id: 'dev', url: 'pg://new', lastUsedAt: 99 }] })
   })
@@ -120,5 +120,46 @@ describe('a configuration file with ignored keys', () => {
 
     expect(await environment.push({ item: ITEM, tables: null })).toMatchObject({ done: true })
     expect(JSON.parse(files.get(ITEM.path)!.content.toString())).toMatchObject({ connections: [{ lastUsedAt: 99 }] })
+  })
+
+  it('keeps the ignored values of both copies on a backend that cannot list its files', async () => {
+    const backend = { ...memoryBackend(), list: async () => null }
+    const context: BackendContext = { resolve: async text => text, askSecret: async () => '', cacheDir: folder, configFolder: folder, auth: null }
+    const unlisted = new Environment(
+      new Map([['memory', backend]]),
+      { folder: path.join(folder, 'env'), backends: [], defaultBackend: 'memory', items: [ITEM], configFiles: [], autoPulls: [], sections: { by: 'folder', names: new Map() }, s3: null },
+      context
+    )
+    files.set(ITEM.path, { content: Buffer.from(connections('pg://new', 1)), version: 2 })
+
+    expect(await unlisted.pull({ item: ITEM, tables: null })).toMatchObject({ done: true })
+    expect(await localValue()).toEqual({ version: 1, connections: [{ id: 'dev', url: 'pg://new', lastUsedAt: 99 }] })
+
+    await fs.writeFile(path.join(folder, 'env', ITEM.path), connections('pg://mine', 99))
+    expect(await unlisted.push({ item: ITEM, tables: null })).toMatchObject({ done: true })
+    expect(JSON.parse(files.get(ITEM.path)!.content.toString())).toEqual({ version: 1, connections: [{ id: 'dev', url: 'pg://mine', lastUsedAt: 1 }] })
+
+    files.clear()
+    expect(await unlisted.push({ item: ITEM, tables: null })).toMatchObject({ done: true })
+    expect(JSON.parse(files.get(ITEM.path)!.content.toString())).toMatchObject({ connections: [{ lastUsedAt: 99 }] })
+  })
+
+  it('is described at once while another process holds the synchronization journal', async () => {
+    await fs.mkdir(path.join(folder, 'config'), { recursive: true })
+    await fs.writeFile(path.join(folder, 'config', 'sync.json.lock'), String(process.ppid))
+    const started = Date.now()
+
+    const { items: [described] } = await environment.describe()
+    expect(described.synced).toMatchObject({ remoteVersion: '1', backend: 'memory' })
+    expect(Date.now() - started).toBeLessThan(2000)
+  })
+
+  it('is described as synchronized though its synchronization journal cannot be read', async () => {
+    await fs.mkdir(path.join(folder, 'config'), { recursive: true })
+    await fs.writeFile(path.join(folder, 'config', 'sync.json'), '{ "db/connections.json": ')
+
+    const { items: [described] } = await environment.describe()
+    expect(described.synced).toMatchObject({ remoteVersion: '1', backend: 'memory' })
+    expect(await fs.readFile(path.join(folder, 'config', 'sync.json'), 'utf-8')).toBe('{ "db/connections.json": ')
   })
 })

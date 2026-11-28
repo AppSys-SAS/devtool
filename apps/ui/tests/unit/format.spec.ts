@@ -31,7 +31,7 @@ describe('progressPercent', () => {
     [4 * MB, 4 * MB, 100],
     [5 * MB, 4 * MB, 100],
     [MB, null, null],
-    [0, 0, null]
+    [0, 0, 100]
   ])('gives %i of %s as %s', (done, total, expected) => {
     expect(progressPercent(done, total)).toBe(expected)
   })
@@ -42,8 +42,18 @@ describe('formatProgress', () => {
     expect(formatProgress(1.5 * MB, 3 * MB)).toBe('1.5 MB / 3.0 MB · 50%')
   })
 
-  it('shows only the bytes moved when the size is unknown', () => {
-    expect(formatProgress(12 * KB, null)).toBe('12 KB')
+  it('says the size is unknown, with the bytes moved once some are', () => {
+    expect(formatProgress(12 * KB, null)).toBe('12 KB / size unknown')
+    expect(formatProgress(0, null)).toBe('size unknown')
+  })
+
+  it('shows an empty file as complete', () => {
+    expect(formatProgress(0, 0)).toBe('0 B / 0 B · 100%')
+  })
+
+  it('adds the speed when it is known, the size known or not', () => {
+    expect(formatProgress(1.5 * MB, 3 * MB, 2 * MB)).toBe('1.5 MB / 3.0 MB · 50% · 2.0 MB/s')
+    expect(formatProgress(12 * KB, null, 512 * KB)).toBe('12 KB / size unknown · 512 KB/s')
   })
 })
 

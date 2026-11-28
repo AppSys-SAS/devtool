@@ -156,11 +156,11 @@ export type ConnectionMessage
   }
   | {
     type: 'envCancel'
-    data: { index: number | null }
+    data: { run: string, index: number | null }
   }
   | {
     type: 'envDismissRun'
-    data: Record<string, never>
+    data: { run: string }
   }
   | {
     type: 'filesList'

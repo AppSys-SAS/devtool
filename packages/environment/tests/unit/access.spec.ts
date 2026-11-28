@@ -128,6 +128,7 @@ describe('Environment groups', () => {
     const { environment, item } = environmentWith({ pull: ['developers'], push: null })
 
     expect(await environment.pull({ item, tables: null })).toEqual({ done: false, detail: 'absent from team' })
-    expect(backend.download).toHaveBeenCalledWith('api/config.yml', { onProgress: undefined, signal: undefined })
+    const [[filePath]] = vi.mocked(backend.download).mock.calls
+    expect(filePath).toBe('api/config.yml')
   })
 })

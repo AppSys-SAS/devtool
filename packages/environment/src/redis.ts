@@ -147,9 +147,9 @@ export async function snapshotRedis (url: string, archive: ArchiveWriter, groups
  * @param url - The database.
  * @param records - The key records of a Redis snapshot.
  * @param groups - The key groups to restore, or null for the whole database.
- * @returns The number of keys restored and their groups.
+ * @returns The number of keys restored.
  */
-export async function restoreRedis (url: string, records: AsyncIterable<ArchiveRecord>, groups: string[] | null): Promise<{ count: number, groups: Set<string> }> {
+export async function restoreRedis (url: string, records: AsyncIterable<ArchiveRecord>, groups: string[] | null): Promise<number> {
   return withRedis(url, async client => {
     if (groups === null) {
       await client.flushdb()
@@ -161,7 +161,6 @@ export async function restoreRedis (url: string, records: AsyncIterable<ArchiveR
       }
     }
 
-    const restored = new Set<string>()
     let count = 0
     for await (const { header, body } of records) {
       const group = redisRecordGroup(header)
@@ -171,10 +170,9 @@ export async function restoreRedis (url: string, records: AsyncIterable<ArchiveR
 
       if (groups === null || groups.includes(group)) {
         await client.restore(Buffer.from(header.key as string, 'base64'), header.ttl, await bytesOf(body), 'REPLACE')
-        restored.add(group)
         count += 1
       }
     }
-    return { count, groups: restored }
+    return count
   })
 }

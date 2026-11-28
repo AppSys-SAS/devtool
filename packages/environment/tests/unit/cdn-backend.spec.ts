@@ -5,6 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import type { Readable } from 'node:stream'
 import { setTimeout as delay } from 'node:timers/promises'
+import { gzipSync } from 'node:zlib'
 import type { AuthOptions } from '@appsys-sas/devtool-auth'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BackendSettings, EnvironmentBackend } from '../../src/backends/backend.js'
@@ -49,6 +50,11 @@ beforeAll(async () => {
       const body = stored.get(key)
       if (body === undefined) {
         response.writeHead(404, { 'Content-Type': 'application/json' }).end('{"message":"not found"}')
+        return
+      }
+      if (key.endsWith('.json')) {
+        const compressed = gzipSync(body)
+        response.writeHead(200, { 'Content-Encoding': 'gzip', 'Content-Length': String(compressed.length) }).end(compressed)
         return
       }
       response.writeHead(200, { 'Content-Length': String(body.length) }).end(body)
@@ -103,6 +109,25 @@ describe('cdn backend', () => {
     setTimeout(() => cancel.abort(new Error('cancelled')), 100)
     await expect(backendOf().download('api/never-answered.gz', { signal: cancel.signal })).rejects.toThrow('cancelled')
   }, 10_000)
+
+  it('abandons an upload its signal cancels before the server answers, storing nothing', async () => {
+    const localFile = path.join(folder, 'db.gz')
+    await fs.writeFile(localFile, progressContent())
+    const cancel = new AbortController()
+    setTimeout(() => cancel.abort(new Error('cancelled')), 100)
+    await expect(backendOf().upload('api/never-answered.gz', localFile, 'application/gzip', { signal: cancel.signal })).rejects.toThrow()
+    expect(stored.has('/devtool/api/never-answered.gz')).toBe(false)
+  }, 10_000)
+
+  it('reads a compressed answer whole, counting its bytes without the compressed size as total', async () => {
+    const content = Buffer.from(JSON.stringify({ values: Array.from({ length: 2000 }, (_, index) => `value-${index}`) }))
+    stored.set('/devtool/api/config.json', content)
+    const received = progressRecorder()
+
+    expect((await bytesOf(await backendOf().download('api/config.json', { onProgress: received.onProgress }))).equals(content)).toBe(true)
+    expect(received.reports.every(([, total]) => total === null)).toBe(true)
+    expect(received.reports.at(-1)?.[0]).toBe(content.length)
+  })
 
   it('closes the local file when an upload fails before reaching the server', async () => {
     const localFile = path.join(folder, 'db.gz')

@@ -1,14 +1,14 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import type { S3Client } from '@aws-sdk/client-s3'
 import { mergeTransferGroups, OPEN_ACCESS, type TransferAccess, type TransferDirection, TransferGate, readTransferGroups } from './access.js'
 import { ArchiveWriter, readArchive, type RecordHeader } from './archive.js'
-import { type BackendContext, type BackendOptions, encrypted, EncryptionSecret, type EncryptionSettings, type EnvironmentBackend, readBackends, readEncryption, type RemoteFile, type TransferOptions, type TransferProgress } from './backends/index.js'
+import { BACKEND_IDLE_MS, DEVELOPER_ANSWER_MS, type BackendContext, type BackendOptions, encrypted, EncryptionSecret, type EncryptionSettings, type EnvironmentBackend, readBackends, readEncryption, type RemoteFile, type TransferOptions, type TransferProgress } from './backends/index.js'
 import { plainLengthOf } from './backends/encryption.js'
 import { checkTar, createS3Client, objectsOfArchive, objectsOfTar, restoreBucket, type S3Options, snapshotBucket, snapshotBucketTar } from './buckets.js'
-import { defaultEnvironmentFolder, localPathOf, withFileLock, writeLocalFile } from './directory.js'
+import { defaultEnvironmentFolder, localPathOf, scratchPath, TEMPORARY_SUFFIX, temporaryPathOf, withFileLock, writeLocalFile } from './directory.js'
 import { databaseEngine, type DatabaseEngineName, isDatabaseEngineName } from './engines.js'
 import { listRedisGroups, redisDatabaseName, redisRecordGroup, restoreRedis, snapshotRedis } from './redis.js'
 import { readSyncJournal, type SyncRecord, writeSyncRecord } from './sync-journal.js'
@@ -28,14 +28,14 @@ const MEDIA_TYPES: Record<string, string> = {
   '.gz': 'application/gzip'
 }
 
-/** Raised when a pull is cancelled while its archive downloads, nothing of the item being changed. */
+/** Raised when a transfer is cancelled while its file moves, nothing of the item being changed. */
 export class TransferCancelledError extends Error {
   /**
    * @param itemPath - The path of the item.
-   * @param options - The error that ended the download, if any.
+   * @param options - The error that ended the transfer, if any.
    */
   constructor (itemPath: string, options?: ErrorOptions) {
-    super(`${itemPath}: pull cancelled`, options)
+    super(`${itemPath}: transfer cancelled`, options)
     this.name = 'TransferCancelledError'
   }
 }
@@ -120,7 +120,10 @@ export interface EnvironmentSelection {
   keys?: KeyChoice[] | null
   /** Told the bytes of the item the backend moved, as it moves them. */
   onProgress?: TransferProgress
-  /** Abandons a pull while its archive downloads; once the archive is complete, the restore always runs to its end. */
+  /**
+   * Abandons a pull or a push while its file moves, leaving the item as it was; once a pulled
+   * archive is complete its restore runs to its end, and once a pushed file is stored the push ends.
+   */
   signal?: AbortSignal
 }
 
@@ -132,7 +135,8 @@ export interface TransferResult {
 
 /** Size and last change of a copy of an item. */
 export interface CopyInfo {
-  size: number
+  /** Its size in bytes, null when its backend does not give it; a local copy always has one. */
+  size: number | null
   updatedAt: Date
   /** For the copy of a backend, what changes whenever it is written. */
   version?: string
@@ -233,10 +237,16 @@ function readFormat (itemPath: string, value: unknown): ArchiveFormat {
  * @returns The grouping, by folder with no name replaced when the setting is missing.
  */
 function readSections (value: unknown): EnvironmentSections {
-  const { by = 'folder', names = {} } = recordOf(value)
+  const record = recordOf(value)
+  const { by = 'folder', names = {} } = record
   const entries = Object.entries(recordOf(names))
-  if ((value !== undefined && recordOf(value) !== value) || !SECTION_MODES.includes(by as EnvironmentSections['by']) || recordOf(names) !== names || !entries.every(([, name]) => typeof name === 'string' && name.trim() !== '')) {
-    throw new Error(`invalid sections in the environment: ${JSON.stringify(value)}, by must be ${SECTION_MODES.join(' or ')} and names map a folder or a kind of item to a name`)
+  const invalid = (value !== undefined && record !== value)
+    || Object.keys(record).some(key => key !== 'by' && key !== 'names')
+    || !SECTION_MODES.includes(by as EnvironmentSections['by'])
+    || recordOf(names) !== names
+    || !entries.every(([, name]) => typeof name === 'string' && name.trim() !== '')
+  if (invalid) {
+    throw new Error(`invalid sections in the environment: ${JSON.stringify(value)}, only by and names are read, by must be ${SECTION_MODES.join(' or ')} and names map a folder or a kind of item to a name`)
   }
   return { by: by as EnvironmentSections['by'], names: new Map(entries as [string, string][]) }
 }
@@ -558,6 +568,70 @@ function assertWholeNative (item: EnvironmentItem, tables: string[] | null, acti
 }
 
 /**
+ * Follows the progress of one transfer for a listener: the bytes never go back and stay below the
+ * total until the transfer ends, a total the backend does not give is the size it listed, an empty
+ * file is told only once transferred, and nothing is told once the transfer is abandoned. Bytes
+ * moving forward count as activity of the backend, which rests once it moved the whole file.
+ */
+class ProgressRelay {
+  private _done = 0
+  private _reported = 0
+
+  /**
+   * @param _onProgress - Told the progress.
+   * @param _listedSize - The size the backend listed for the file, standing for a total it does not give.
+   * @param _watch - Stops the transfer and is told the activity of the backend.
+   */
+  constructor (
+    private readonly _onProgress: TransferProgress | undefined,
+    private readonly _listedSize: number | null | undefined,
+    private readonly _watch: ExchangeWatch
+  ) {}
+
+  /**
+   * Takes a report of the backend.
+   * @param done - The bytes moved.
+   * @param total - The size of the file, null when the backend does not know it.
+   */
+  readonly report: TransferProgress = (done, total) => {
+    if (this._watch.signal.aborted) {
+      return
+    }
+    if (done > this._reported) {
+      this._reported = done
+      this._watch.touch()
+    }
+    if (total !== null && done >= total) {
+      this._watch.rest()
+    }
+    const size = total ?? this._listedSize ?? null
+    if (!this._onProgress || size === 0) {
+      return
+    }
+    this._done = Math.max(this._done, size === null ? done : Math.min(done, size - 1))
+    this._onProgress(this._done, size)
+  }
+
+  /**
+   * Tells that the transfer ended.
+   * @param size - The size of the file transferred.
+   */
+  end (size: number): void {
+    if (!this._onProgress || this._watch.signal.aborted) {
+      return
+    }
+    const whole = Math.max(size, this._done)
+    this._onProgress(whole, whole)
+  }
+}
+
+/** How a pull downloads the copy of an item. */
+interface PullTransfer extends TransferOptions {
+  /** The size the backend listed for the file, standing for the total when the backend does not know it. */
+  listedSize?: number | null
+}
+
+/**
  * Waits for what a backend gives during a pull, giving up as soon as the pull is cancelled; what it
  * gives after that is released.
  *
@@ -589,15 +663,130 @@ async function settledUnlessCancelled<T> (itemPath: string, pending: Promise<T>,
   })
 }
 
+/** Stops an exchange with a backend and tells when it shows activity. */
+interface ExchangeWatch {
+  /** Stops the exchange, when its caller cancels it or the backend shows no activity for too long. */
+  signal: AbortSignal
+  /** Tells that the backend showed activity, starting the watch when it is not started yet. */
+  touch: () => void
+  /** Tells that the backend moved the whole file, its silence while it ends the exchange then stopping nothing. */
+  rest: () => void
+}
+
+/**
+ * Runs an exchange with a backend, stopping it when the backend shows no activity for a minute, unless
+ * it bounds its exchanges itself, or when its caller cancels it. What the backend needs from the
+ * developer, such as a password, is got first, outside any watch, within a few minutes. An exchange
+ * that does not stop when told is abandoned, unless it must end before its caller goes on.
+ *
+ * @param backend - The backend.
+ * @param itemPath - The item the exchange is for.
+ * @param signal - Cancels the exchange.
+ * @param exchange - The exchange, given its watch.
+ * @param options - How the exchange is watched.
+ * @param options.prepare - Whether the backend gets what it needs from the developer first.
+ * @param options.watchAtOnce - Whether the watch starts at once rather than on the first activity.
+ * @param options.abandon - Whether the exchange is abandoned once told to stop, rather than awaited.
+ * @returns What the exchange gives.
+ * @throws {TransferCancelledError} When the caller cancels the exchange first.
+ * @throws {Error} When the exchange fails or the backend shows no activity for a minute.
+ */
+async function watched<T> (
+  backend: EnvironmentBackend,
+  itemPath: string,
+  signal: AbortSignal | undefined,
+  exchange: (watch: ExchangeWatch) => Promise<T>,
+  { prepare = false, watchAtOnce = true, abandon = true }: { prepare?: boolean, watchAtOnce?: boolean, abandon?: boolean } = {}
+): Promise<T> {
+  if (prepare) {
+    const answer = new AbortController()
+    const late = setTimeout(() => {
+      answer.abort(new Error('no answer'))
+    }, DEVELOPER_ANSWER_MS)
+    await settledUnlessCancelled(itemPath, backend.prepare?.() ?? Promise.resolve(), signal ? AbortSignal.any([signal, answer.signal]) : answer.signal).catch((error: unknown) => {
+      throw !signal?.aborted && answer.signal.aborted ? new Error(`the backend did not get what it needs from the developer within ${DEVELOPER_ANSWER_MS / 60_000} minutes`, { cause: error }) : error
+    }).finally(() => {
+      clearTimeout(late)
+    })
+  }
+  const idle = new AbortController()
+  let timer: NodeJS.Timeout | undefined
+  /**
+   * Restarts the time the backend has to show activity, unless it bounds its exchanges itself.
+   */
+  const touch = (): void => {
+    clearTimeout(timer)
+    if (backend.boundsItself) {
+      return
+    }
+    timer = setTimeout(() => {
+      idle.abort(new Error('no activity'))
+    }, BACKEND_IDLE_MS)
+  }
+  /**
+   * Stops timing the backend until its next activity.
+   */
+  const rest = (): void => {
+    clearTimeout(timer)
+  }
+  if (watchAtOnce) {
+    touch()
+  }
+  const stop = signal ? AbortSignal.any([signal, idle.signal]) : idle.signal
+  try {
+    const running = exchange({ signal: stop, touch, rest })
+    return await (abandon ? settledUnlessCancelled(itemPath, running, stop) : running)
+  } catch (error) {
+    if (signal?.aborted) {
+      throw error instanceof TransferCancelledError ? error : new TransferCancelledError(itemPath, { cause: error })
+    }
+    throw idle.signal.aborted ? new Error(`the backend showed no activity for ${BACKEND_IDLE_MS / 1000} s`, { cause: error }) : error
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/**
+ * Removes the temporary files transfers of an item write next to its local copy, which an earlier
+ * transfer left when its process was stopped abruptly; only transfers of the item, holding its
+ * lock, write them, under names holding a unique identifier that no other file takes.
+ *
+ * @param localPath - The local copy of the item.
+ */
+async function removeLeftovers (localPath: string): Promise<void> {
+  const folder = path.dirname(localPath)
+  const base = path.basename(localPath)
+  const names = await fs.readdir(folder).catch(() => [])
+  await Promise.all(names
+    .filter(name => name.startsWith(base) && TEMPORARY_SUFFIX.test(name.slice(base.length)))
+    .map(async name => fs.rm(path.join(folder, name), { force: true })))
+}
+
+/**
+ * Lists the files of a backend, once it got what it needs from the developer, giving up when it
+ * shows no activity for a minute or when its caller cancels the listing.
+ *
+ * @param backend - The backend.
+ * @param itemPath - The item the listing is for.
+ * @param signal - Cancels the listing.
+ * @returns The files, or null when the backend cannot list them.
+ * @throws {TransferCancelledError} When the caller cancels the listing first.
+ * @throws {Error} When the backend fails or does not answer in time.
+ */
+async function listWatched (backend: EnvironmentBackend, itemPath: string, signal?: AbortSignal): Promise<RemoteFile[] | null> {
+  return watched(backend, itemPath, signal, async ({ signal: stop }) => backend.list(stop), { prepare: true })
+}
+
 /**
  * Gives an item whose local data lives apart from its local copy: a database, a bucket or a Redis database.
  *
  * @param item - The item.
+ * @param action - Restores the local data from the local copy, or removes that copy.
  * @returns The item.
  */
-function holdingLocalData (item: EnvironmentItem): Exclude<EnvironmentItem, { kind: 'file' }> {
+function holdingLocalData (item: EnvironmentItem, action: 'restore' | 'remove'): Exclude<EnvironmentItem, { kind: 'file' }> {
   if (item.kind === 'file') {
-    throw new Error(`${item.path} is a file: its local copy is its data, pull it instead`)
+    throw new Error(`${item.path} is a file: its local copy is its data, ${action === 'restore' ? 'pull it instead' : 'there is no copy to remove apart from it'}`)
   }
   return item
 }
@@ -666,7 +855,8 @@ export class Environment {
 
   /**
    * Describes every item with its local copy and its copy on its backend. The local copies are
-   * described even when a backend cannot be reached, which only hides the copies it stores.
+   * described even when a backend cannot be reached or does not answer within a minute, which only
+   * hides the copies it stores.
    *
    * @returns The items, in their declaration order, and why the copies of a backend are unknown, by backend.
    */
@@ -675,7 +865,7 @@ export class Environment {
     const listings = new Map<string | null, Map<string, CopyInfo> | null>()
     await Promise.all([...new Set(this._options.items.map(item => item.backend))].map(async slug => {
       try {
-        const files = await this.backendOf(slug).list()
+        const files = await listWatched(this.backendOf(slug), slug ?? 'environment')
         listings.set(slug, files && new Map(files.map(file => [file.path, { size: file.size, updatedAt: file.updatedAt, version: file.version }])))
       } catch (error) {
         errors[slug ?? 'environment'] = error instanceof Error ? error.message : String(error)
@@ -693,7 +883,7 @@ export class Environment {
         return {
           item,
           local: stat?.isFile() ? { size: stat.size, updatedAt: stat.mtime } : null,
-          remote: listing ? remote && { ...remote, size: item.encryption ? plainLengthOf(remote.size) ?? remote.size : remote.size } : ('unknown' as const),
+          remote: listing ? remote && { ...remote, size: item.encryption && remote.size !== null ? plainLengthOf(remote.size) ?? remote.size : remote.size } : ('unknown' as const),
           synced: synced?.backend === undefined || synced.backend === item.backend ? synced : null
         }
       })
@@ -706,7 +896,8 @@ export class Environment {
 
   /**
    * Records as synchronized a configuration file whose copies changed since their last
-   * synchronization but differ only by its ignored keys.
+   * synchronization but differ only by its ignored keys. The new record is given even when the
+   * journal cannot be written at once, the next description trying again.
    *
    * @param described - The item with its copies.
    * @returns Its synchronization record, the new one when both copies are found equal.
@@ -725,7 +916,7 @@ export class Environment {
     }
 
     const record = { localUpdatedAt: local.updatedAt, remoteUpdatedAt: remote.updatedAt, backend: item.backend ?? undefined, remoteVersion }
-    await writeSyncRecord(item.path, record)
+    await writeSyncRecord(item.path, record, 0).catch(() => undefined)
     return record
   }
 
@@ -746,8 +937,9 @@ export class Environment {
 
   /**
    * Sends the local copy of an item to its backend, after dumping the local data it holds. For some
-   * tables of a database, only their rows are replaced in the stored archive. One transfer of an
-   * item runs at a time, across processes.
+   * tables of a database, only their rows are replaced in the stored archive. A push cancelled before
+   * its file is stored leaves the copy of the backend and the local copy as they were. One transfer
+   * of an item runs at a time, across processes.
    *
    * @param selection - The item, the tables or key groups to dump, or the keys to send for a configuration file.
    * @returns What was done.
@@ -766,7 +958,7 @@ export class Environment {
    */
   async restoreLocal (selection: EnvironmentSelection): Promise<TransferResult> {
     const { tables } = selection
-    const item = holdingLocalData(selection.item)
+    const item = holdingLocalData(selection.item, 'restore')
     assertWholeNative(item, tables, 'restore')
     return this.locked(item, async () => {
       const localPath = localPathOf(this._options.folder, item.path)
@@ -786,7 +978,7 @@ export class Environment {
    * @returns What was done.
    */
   async removeLocalCopy (selection: EnvironmentSelection): Promise<TransferResult> {
-    const item = holdingLocalData(selection.item)
+    const item = holdingLocalData(selection.item, 'remove')
     return this.locked(item, async () => {
       const localPath = localPathOf(this._options.folder, item.path)
       await fs.rm(localPath, { force: true })
@@ -797,7 +989,8 @@ export class Environment {
   /**
    * Runs a transfer of an item while no other transfer of it runs, in any process using the same
    * environment folder; the lock lives in that folder, named after the folded path of the item, so
-   * spellings a store takes for one file share it.
+   * spellings a store takes for one file share it. The temporary files an earlier transfer of the
+   * item left, when its process was stopped abruptly, are removed first.
    *
    * @param item - The item.
    * @param transfer - The transfer.
@@ -805,7 +998,10 @@ export class Environment {
    */
   private async locked (item: EnvironmentItem, transfer: () => Promise<TransferResult>): Promise<TransferResult> {
     const key = createHash('sha256').update(foldedPath(item.path)).digest('hex')
-    return withFileLock(path.join(this._options.folder, LOCKS_FOLDER, `${key}.lock`), item.path, transfer)
+    return withFileLock(path.join(this._options.folder, LOCKS_FOLDER, `${key}.lock`), item.path, async () => {
+      await removeLeftovers(localPathOf(this._options.folder, item.path))
+      return transfer()
+    })
   }
 
   /**
@@ -818,62 +1014,79 @@ export class Environment {
     const { item, tables, onProgress, signal } = selection
     const localPath = localPathOf(this._options.folder, item.path)
     assertWholeNative(item, tables, 'pull')
-    const files = await settledUnlessCancelled(item.path, this.backendFor(item).list(signal), signal).catch((error: unknown) => {
+    let listingError: string | undefined
+    const files = await listWatched(this.backendFor(item), item.path, signal).catch((error: unknown) => {
       if (error instanceof TransferCancelledError) {
         throw error
       }
+      listingError = error instanceof Error ? error.message : String(error)
       return undefined
     })
     const pulled = files && (files.find(file => file.path === item.path) ?? undefined)
+    const transfer = { onProgress, signal, listedSize: pulled?.size }
     if (item.kind === 'file') {
-      if (selection.keys || await this.mergesWhole(item, files === undefined ? undefined : Boolean(pulled), signal)) {
-        return this.pullKeys(item, selection.keys ?? null, pulled, { onProgress, signal })
+      if (selection.keys || await this.mergesWhole(item, files, signal)) {
+        return this.pullKeys(item, selection.keys ?? null, pulled, transfer, listingError)
       }
-      if (!(await this.download(item, localPath, { onProgress, signal }))) {
+      if (!(await this.download(item, localPath, transfer))) {
         return { done: false, detail: `absent from ${item.backend}` }
       }
-      return this.recorded(item, { done: true, detail: localPath }, pulled)
+      return this.completed({ done: true, detail: localPath }, async () => this.recordPulled(item, pulled, listingError))
     }
 
-    const pulledPath = `${localPath}.${randomUUID()}.pull`
+    const pulledPath = temporaryPathOf(localPath, 'pull')
     try {
-      if (!(await this.download(item, pulledPath, { onProgress, signal }))) {
+      if (!(await this.download(item, pulledPath, transfer))) {
         return { done: false, detail: `absent from ${item.backend}` }
       }
       if (signal?.aborted) {
         throw new TransferCancelledError(item.path)
       }
       const result = await this.restoreArchive(item, pulledPath, tables)
-      await fs.rename(pulledPath, localPath)
-      return await this.recorded(item, result, pulled)
+      return await this.completed(result, async () => {
+        await fs.rename(pulledPath, localPath)
+        await this.recordPulled(item, pulled, listingError)
+      })
     } finally {
       await fs.rm(pulledPath, { force: true })
     }
   }
 
   /**
-   * Records a pulled item as synchronized when the copy of its backend listed before the pull is
-   * known and still the same, reporting in the result of the pull why it is not recorded.
+   * Ends a transfer whose file is already stored or restored: what fails then is told in its
+   * result, which stays done, the item being left unrecorded as synchronized.
    *
-   * @param item - The item.
-   * @param result - What the pull did.
-   * @param pulled - The copy of the backend listed before the pull, null when the backend lists
-   * nothing, undefined when the listing failed or did not hold the item.
-   * @returns What the pull did.
+   * @param result - What the transfer did.
+   * @param bookkeeping - What follows the transfer, such as recording it as synchronized.
+   * @returns What the transfer did.
    */
-  private async recorded (item: EnvironmentItem, result: TransferResult, pulled: RemoteFile | null | undefined): Promise<TransferResult> {
-    if (pulled === null) {
-      return result
-    }
+  private async completed (result: TransferResult, bookkeeping: () => Promise<void>): Promise<TransferResult> {
     try {
-      if (pulled === undefined) {
-        throw new Error(`the copy of ${item.backend} could not be listed before the pull: pull again`)
-      }
-      await this.recordSync(item, pulled)
+      await bookkeeping()
       return result
     } catch (error) {
       return { ...result, detail: `${result.detail}, not recorded as synchronized: ${error instanceof Error ? error.message : String(error)}` }
     }
+  }
+
+  /**
+   * Records a pulled item as synchronized when the copy of its backend listed before the pull is
+   * known and still the same; a backend listing nothing records nothing.
+   *
+   * @param item - The item.
+   * @param pulled - The copy of the backend listed before the pull, null when the backend lists
+   * nothing, undefined when the listing failed or did not hold the item.
+   * @param listingError - Why the listing failed, when it did.
+   * @throws {Error} When the copy listed before the pull is unknown or changed since.
+   */
+  private async recordPulled (item: EnvironmentItem, pulled: RemoteFile | null | undefined, listingError?: string): Promise<void> {
+    if (pulled === null) {
+      return
+    }
+    if (pulled === undefined) {
+      throw new Error(`the copy of ${item.backend} could not be listed before the pull${listingError === undefined ? '' : ` (${listingError})`}: pull again`)
+    }
+    await this.recordSync(item, pulled)
   }
 
   /**
@@ -883,12 +1096,13 @@ export class Environment {
    * @returns The copy, undefined when the backend lists none.
    */
   private async remoteCopy (item: EnvironmentItem): Promise<RemoteFile | undefined> {
-    return (await this.backendFor(item).list())?.find(file => file.path === item.path)
+    return (await listWatched(this.backendFor(item), item.path))?.find(file => file.path === item.path)
   }
 
   /**
    * Replaces the local data of an item by an archive of it. An archive of the devtool is read whole
-   * first, so a truncated or corrupted one changes nothing.
+   * first, so a truncated or corrupted one, or one missing a requested table or key group, changes
+   * nothing.
    *
    * @param item - The database, bucket or Redis item.
    * @param archivePath - The archive, which nothing else reads or writes.
@@ -896,11 +1110,25 @@ export class Environment {
    * @returns What was done.
    */
   private async restoreArchive (item: Exclude<EnvironmentItem, { kind: 'file' }>, archivePath: string, tables: string[] | null): Promise<TransferResult> {
-    if (item.kind === 'redis' || item.format === 'devtool') {
-      for await (const { body } of item.kind === 'bucket' ? objectsOfArchive(readArchive(archivePath)) : readArchive(archivePath)) {
+    if (item.kind === 'bucket' && item.format === 'devtool') {
+      for await (const { body } of objectsOfArchive(readArchive(archivePath))) {
         for await (const chunk of body) {
           void chunk
         }
+      }
+    } else if (item.kind === 'redis' || item.format === 'devtool') {
+      const archived = new Set<string>()
+      for await (const { header, body } of readArchive(archivePath)) {
+        const part = item.kind === 'redis' ? redisRecordGroup(header) : header.type === 'table' && typeof header.name === 'string' ? header.name : null
+        if (part !== null) {
+          archived.add(part)
+        }
+        for await (const chunk of body) {
+          void chunk
+        }
+      }
+      if (tables !== null) {
+        assertKnownTables(tables, archived, item.path, item.kind === 'redis' ? 'key groups' : 'tables')
       }
     }
     if (item.kind === 'bucket' && item.format === 'native') {
@@ -919,13 +1147,10 @@ export class Environment {
         throw new Error(`${item.path} is not a Redis archive`)
       }
 
-      const restored = await restoreRedis(item.url, records, tables)
-      if (tables !== null) {
-        assertKnownTables(tables, restored.groups, item.path, 'key groups')
-      }
+      const count = await restoreRedis(item.url, records, tables)
       return {
         done: true,
-        detail: tables === null ? `${restored.count} keys restored in Redis ${redisDatabaseName(item.url)}` : `key groups restored: ${tables.join(', ')} (${restored.count} keys)`
+        detail: tables === null ? `${count} keys restored in Redis ${redisDatabaseName(item.url)}` : `key groups restored: ${tables.join(', ')} (${count} keys)`
       }
     }
 
@@ -979,9 +1204,6 @@ export class Environment {
         restored.push(header.name)
       }
     }
-    if (tables !== null) {
-      assertKnownTables(tables, restored, item.path)
-    }
     await engine.finish(item)
 
     return { done: true, detail: tables === null ? `database restored (${restored.length} tables)` : `tables restored: ${restored.join(', ')}` }
@@ -1009,40 +1231,67 @@ export class Environment {
   }
 
   /**
-   * Pushes an item, once its transfer is locked.
+   * Pushes an item, once its transfer is locked; the dump of its local data replaces its local copy
+   * only once sent, so a push that fails leaves the local copy as it was.
    *
    * @param selection - The item, the tables or key groups to dump, or the keys to send for a configuration file.
    * @returns What was done.
    */
   private async pushItem (selection: EnvironmentSelection): Promise<TransferResult> {
-    const { item, tables } = selection
-    if (item.kind === 'file' && (selection.keys || await this.mergesWhole(item))) {
-      return this.pushKeys(item, selection.keys ?? null, selection.onProgress)
-    }
-
+    const { item, tables, onProgress, signal } = selection
     const localPath = localPathOf(this._options.folder, item.path)
-    let detail = localPath
-    if (item.kind === 'database' && item.format === 'native') {
-      if (tables !== null) {
-        throw new Error(`${item.path} is a native archive: push the whole database, its tables cannot be replaced one by one`)
+    if (item.kind === 'file') {
+      const merged = selection.keys || await this.mergesWhole(item, undefined, signal) ? await this.pushKeys(item, selection.keys ?? null, onProgress, signal) : null
+      if (merged) {
+        return merged
       }
-      await writeLocalFile(localPath, databaseEngine(item.engine).dumpNative(item))
-      detail = `database dumped from ${databaseNameOf(item)}`
-    } else if (item.kind === 'database') {
-      detail = await this.writeLocal(localPath, archive => this.dumpDatabase(item, tables, archive))
-    } else if (item.kind === 'bucket' && item.format === 'native') {
-      detail = `${await snapshotBucketTar(this.s3(), item.bucket, localPath)} objects of ${item.bucket}`
-    } else if (item.kind === 'bucket') {
-      detail = await this.writeLocal(localPath, async archive => `${await snapshotBucket(this.s3(), item.bucket, archive)} objects of ${item.bucket}`)
-    } else if (item.kind === 'redis') {
-      detail = await this.writeLocal(localPath, archive => this.dumpRedis(item, tables, archive))
-    } else if (!(await fs.stat(localPath).then(stat => stat.isFile(), () => false))) {
-      return { done: false, detail: `no local file ${localPath}` }
+      if (!(await fs.stat(localPath).then(stat => stat.isFile(), () => false))) {
+        return { done: false, detail: `no local file ${localPath}` }
+      }
+      await this.upload(item, localPath, onProgress, signal)
+      return this.completed({ done: true, detail: localPath }, async () => this.recordSync(item))
+    }
+    if (item.kind === 'database' && item.format === 'native' && tables !== null) {
+      throw new Error(`${item.path} is a native archive: push the whole database, its tables cannot be replaced one by one`)
     }
 
-    await this.backendFor(item).upload(item.path, localPath, mediaTypeOf(item.path), { onProgress: selection.onProgress })
-    await this.recordSync(item)
-    return { done: true, detail }
+    const pushedPath = temporaryPathOf(localPath, 'push')
+    try {
+      const detail = await this.dumpLocalData(item, tables, pushedPath, signal)
+      await this.upload(item, pushedPath, onProgress, signal)
+      return await this.completed({ done: true, detail }, async () => {
+        await fs.rename(pushedPath, localPath)
+        await this.recordSync(item)
+      })
+    } finally {
+      await fs.rm(pushedPath, { force: true })
+    }
+  }
+
+  /**
+   * Dumps the local data of an item into an archive.
+   *
+   * @param item - The database, bucket or Redis item.
+   * @param tables - The tables or key groups to dump, or null for the whole item.
+   * @param archivePath - The archive to write.
+   * @param signal - Cancels the download of the copy of the backend some tables or key groups replace.
+   * @returns What was dumped.
+   */
+  private async dumpLocalData (item: Exclude<EnvironmentItem, { kind: 'file' }>, tables: string[] | null, archivePath: string, signal?: AbortSignal): Promise<string> {
+    if (item.kind === 'database' && item.format === 'native') {
+      await writeLocalFile(archivePath, databaseEngine(item.engine).dumpNative(item))
+      return `database dumped from ${databaseNameOf(item)}`
+    }
+    if (item.kind === 'database') {
+      return this.writeLocal(archivePath, archive => this.dumpDatabase(item, tables, archive, signal))
+    }
+    if (item.kind === 'bucket' && item.format === 'native') {
+      return `${await snapshotBucketTar(this.s3(), item.bucket, archivePath)} objects of ${item.bucket}`
+    }
+    if (item.kind === 'bucket') {
+      return this.writeLocal(archivePath, async archive => `${await snapshotBucket(this.s3(), item.bucket, archive)} objects of ${item.bucket}`)
+    }
+    return this.writeLocal(archivePath, archive => this.dumpRedis(item, tables, archive, signal))
   }
 
   /**
@@ -1052,24 +1301,29 @@ export class Environment {
    * @returns The differing keys.
    */
   async diffKeys (item: EnvironmentItem): Promise<KeyDifference[]> {
-    const { format, local, remote } = await this.readBothCopies(item)
-    return diffConfig(format, local, remote, ignoredKeysOf(item))
+    const copies = await this.readBothCopies(item)
+    if (!copies) {
+      throw new Error(`${item.path} is not on ${item.backend}`)
+    }
+    return diffConfig(copies.format, copies.local, copies.remote, ignoredKeysOf(item))
   }
 
   /**
    * Tells whether a whole configuration file is transferred key by key, to keep the values of its
-   * ignored keys: when it ignores some and both copies exist.
+   * ignored keys: when it ignores some, has a local copy, and its backend lists a copy of it or
+   * cannot list its files.
    *
    * @param item - The file item.
-   * @param stored - Whether its backend holds a copy, listed when not given.
-   * @param signal - Cancels the pull waiting for that listing.
+   * @param files - The files its backend listed, null when it cannot list them, listed when not given.
+   * @param signal - Cancels the transfer waiting for that listing.
    * @returns True when it is merged key by key.
    */
-  private async mergesWhole (item: EnvironmentItem, stored?: boolean, signal?: AbortSignal): Promise<boolean> {
+  private async mergesWhole (item: EnvironmentItem, files?: RemoteFile[] | null, signal?: AbortSignal): Promise<boolean> {
     if (!ignoredKeysOf(item) || !(await fs.stat(localPathOf(this._options.folder, item.path)).then(stat => stat.isFile(), () => false))) {
       return false
     }
-    return stored ?? (await settledUnlessCancelled(item.path, this.backendFor(item).list(signal), signal))?.some(file => file.path === item.path) ?? false
+    const listed = files === undefined ? await listWatched(this.backendFor(item), item.path, signal) : files
+    return listed === null || listed.some(file => file.path === item.path)
   }
 
   /**
@@ -1080,20 +1334,28 @@ export class Environment {
    * @param keys - The value to keep for each differing key, null to take every value of the backend.
    * @param pulled - The copy of the backend listed before it was read, null when the backend lists
    * nothing, undefined when the listing failed or did not hold the item.
-   * @param options - Follows the download of the copy of the backend, and abandons it.
-   * @returns What was done.
+   * @param options - Follows the download of the copy of the backend, and abandons the pull, the
+   * local copy then left as it was.
+   * @param listingError - Why the listing before the pull failed, when it did.
+   * @returns What was done, not done when the backend holds no copy.
    */
-  private async pullKeys (item: EnvironmentItem, keys: KeyChoice[] | null, pulled: RemoteFile | null | undefined, options: TransferOptions): Promise<TransferResult> {
-    const { format, local, remote } = await this.readBothCopies(item, options)
+  private async pullKeys (item: EnvironmentItem, keys: KeyChoice[] | null, pulled: RemoteFile | null | undefined, options: PullTransfer, listingError?: string): Promise<TransferResult> {
+    const copies = await this.readBothCopies(item, options)
+    if (!copies) {
+      return { done: false, detail: `absent from ${item.backend}` }
+    }
+    const { format, local, remote } = copies
     const ignored = ignoredKeysOf(item)
     const differences = diffConfig(format, local, remote, ignored)
     const choices = keys ?? differences.map(difference => ({ path: difference.path, side: 'remote' as const }))
     const merged = mergeConfig(format, local, 'local', differences, choices, ignored)
-    await writeLocalFile(localPathOf(this._options.folder, item.path), merged)
+    await writeLocalFile(localPathOf(this._options.folder, item.path), merged, options.signal).catch((error: unknown) => {
+      throw options.signal?.aborted ? new TransferCancelledError(item.path, { cause: error }) : error
+    })
 
     const counts = countChoices(differences, choices, 'local')
     const result = { done: true, detail: `keys merged: ${counts.remote} from ${item.backend}, ${counts.local} kept local` }
-    return diffConfig(format, merged, remote, ignored).length === 0 ? this.recorded(item, result, pulled) : result
+    return diffConfig(format, merged, remote, ignored).length === 0 ? this.completed(result, async () => this.recordPulled(item, pulled, listingError)) : result
   }
 
   /**
@@ -1104,47 +1366,51 @@ export class Environment {
    * @param item - The file item.
    * @param keys - The value to keep for each differing key, null to send every local value.
    * @param onProgress - Told the bytes of the merged copy sent to the backend.
-   * @returns What was done.
+   * @param signal - Cancels the push until the merged copy is stored.
+   * @returns What was done, null when the backend holds no copy to merge with.
    */
-  private async pushKeys (item: EnvironmentItem, keys: KeyChoice[] | null, onProgress?: TransferProgress): Promise<TransferResult> {
-    const { format, local, remote } = await this.readBothCopies(item)
+  private async pushKeys (item: EnvironmentItem, keys: KeyChoice[] | null, onProgress?: TransferProgress, signal?: AbortSignal): Promise<TransferResult | null> {
+    const copies = await this.readBothCopies(item, { signal })
+    if (!copies) {
+      return null
+    }
+    const { format, local, remote } = copies
     const ignored = ignoredKeysOf(item)
     const differences = diffConfig(format, local, remote, ignored)
     const choices = keys ?? differences.map(difference => ({ path: difference.path, side: 'local' as const }))
     const merged = mergeConfig(format, remote, 'remote', differences, choices, ignored)
-    const mergedPath = `${localPathOf(this._options.folder, item.path)}.merged`
+    const mergedPath = temporaryPathOf(localPathOf(this._options.folder, item.path), 'merged')
     try {
       await fs.writeFile(mergedPath, merged, { mode: 0o600 })
-      await this.backendFor(item).upload(item.path, mergedPath, mediaTypeOf(item.path), { onProgress })
+      await this.upload(item, mergedPath, onProgress, signal)
     } finally {
       await fs.rm(mergedPath, { force: true })
     }
-    if (diffConfig(format, local, merged, ignored).length === 0) {
-      await this.recordSync(item)
-    }
 
     const counts = countChoices(differences, choices, 'remote')
-    return { done: true, detail: `keys merged: ${counts.local} from local, ${counts.remote} kept on ${item.backend}` }
+    const result = { done: true, detail: `keys merged: ${counts.local} from local, ${counts.remote} kept on ${item.backend}` }
+    return diffConfig(format, local, merged, ignored).length === 0 ? this.completed(result, async () => this.recordSync(item)) : result
   }
 
   /**
-   * Reads the local copy of a configuration file and the copy of its backend, without replacing the local one.
+   * Reads the local copy of a configuration file and the copy of its backend, without replacing the
+   * local one; a backend that sends nothing of its copy for a minute fails the reading.
    *
    * @param item - The file item.
    * @param options - Follows the download of the copy of the backend, and abandons it.
-   * @returns Its format and both texts.
+   * @returns Its format and both texts, null when the backend holds no copy.
    */
-  private async readBothCopies (item: EnvironmentItem, options: TransferOptions = {}): Promise<{ format: ConfigFormat, local: string, remote: string }> {
+  private async readBothCopies (item: EnvironmentItem, options: PullTransfer = {}): Promise<{ format: ConfigFormat, local: string, remote: string } | null> {
     const format = configFormatOf(item.path)
     if (!format) {
       throw new Error(`${item.path} cannot be merged key by key: YAML, JSON, TOML, XML and .env files only`)
     }
 
     const localPath = localPathOf(this._options.folder, item.path)
-    const remotePath = `${localPath}.remote`
+    const remotePath = await scratchPath(this._context.cacheDir, 'remote')
     try {
       if (!(await this.download(item, remotePath, options))) {
-        throw new Error(`${item.path} is not on ${item.backend}`)
+        return null
       }
 
       const local = await fs.readFile(localPath, 'utf-8').catch(() => {
@@ -1182,9 +1448,10 @@ export class Environment {
    * @param item - The database item.
    * @param tables - The tables to dump, or null for the whole database.
    * @param archive - The archive being written.
+   * @param signal - Cancels the download of the stored archive.
    * @returns What was dumped.
    */
-  private async dumpDatabase (item: Extract<EnvironmentItem, { kind: 'database' }>, tables: string[] | null, archive: ArchiveWriter): Promise<string> {
+  private async dumpDatabase (item: Extract<EnvironmentItem, { kind: 'database' }>, tables: string[] | null, archive: ArchiveWriter, signal?: AbortSignal): Promise<string> {
     const engine = databaseEngine(item.engine)
     const localTables = await engine.listTables(item)
     if (tables === null) {
@@ -1197,7 +1464,7 @@ export class Environment {
     }
 
     assertKnownTables(tables, localTables, databaseNameOf(item))
-    await this.copyBase(item, archive, header => header.type !== 'table' || typeof header.name !== 'string' || !tables.includes(header.name))
+    await this.copyBase(item, archive, header => header.type !== 'table' || typeof header.name !== 'string' || !tables.includes(header.name), signal)
     for (const table of tables) {
       await archive.add({ type: 'table', name: table }, engine.dumpTable(item, table))
     }
@@ -1212,9 +1479,10 @@ export class Environment {
    * @param item - The Redis item.
    * @param groups - The key groups to dump, or null for the whole database.
    * @param archive - The archive being written.
+   * @param signal - Cancels the download of the stored archive.
    * @returns What was dumped.
    */
-  private async dumpRedis (item: Extract<EnvironmentItem, { kind: 'redis' }>, groups: string[] | null, archive: ArchiveWriter): Promise<string> {
+  private async dumpRedis (item: Extract<EnvironmentItem, { kind: 'redis' }>, groups: string[] | null, archive: ArchiveWriter, signal?: AbortSignal): Promise<string> {
     if (groups === null) {
       await archive.add({ type: 'redis' })
       return `${await snapshotRedis(item.url, archive, null)} keys of Redis ${redisDatabaseName(item.url)}`
@@ -1224,7 +1492,7 @@ export class Environment {
     await this.copyBase(item, archive, header => {
       const group = redisRecordGroup(header)
       return group === null || !groups.includes(group)
-    })
+    }, signal)
     const count = await snapshotRedis(item.url, archive, groups)
 
     return `key groups dumped: ${groups.join(', ')} (${count} keys)`
@@ -1236,11 +1504,12 @@ export class Environment {
    * @param item - The item.
    * @param archive - The archive being written.
    * @param keep - Tells whether a record of the copy of the backend is kept.
+   * @param signal - Cancels the download of the copy of the backend.
    */
-  private async copyBase (item: EnvironmentItem, archive: ArchiveWriter, keep: (header: RecordHeader) => boolean): Promise<void> {
-    const basePath = `${localPathOf(this._options.folder, item.path)}.base`
+  private async copyBase (item: EnvironmentItem, archive: ArchiveWriter, keep: (header: RecordHeader) => boolean, signal?: AbortSignal): Promise<void> {
+    const basePath = temporaryPathOf(localPathOf(this._options.folder, item.path), 'base')
     try {
-      if (!(await this.download(item, basePath))) {
+      if (!(await this.download(item, basePath, { signal }))) {
         throw new Error(`${item.path} is not on ${item.backend} yet: push the whole item first`)
       }
 
@@ -1263,7 +1532,7 @@ export class Environment {
    */
   private async writeLocal (localPath: string, fill: (archive: ArchiveWriter) => Promise<string>): Promise<string> {
     await fs.mkdir(path.dirname(localPath), { recursive: true, mode: 0o700 })
-    const partialPath = `${localPath}.part`
+    const partialPath = temporaryPathOf(localPath, 'part')
     const archive = new ArchiveWriter(partialPath)
     try {
       const detail = await fill(archive)
@@ -1284,14 +1553,18 @@ export class Environment {
    *
    * @param item - The item.
    * @param localPath - The local file, its mirror in the environment directory by default.
-   * @param options - Follows the bytes received, told the whole file once written, and abandons the
-   * download, the local file left as it was and a {@link TransferCancelledError} raised.
+   * @param options - Follows the bytes received, the whole file being told only once written (see
+   * {@link ProgressRelay}), and abandons the download, the local file left as it was and a
+   * {@link TransferCancelledError} raised. The download stops when the backend sends nothing for a
+   * minute.
    * @returns False when the backend has no such file.
    */
-  private async download (item: EnvironmentItem, localPath = localPathOf(this._options.folder, item.path), { onProgress, signal }: TransferOptions = {}): Promise<boolean> {
+  private async download (item: EnvironmentItem, localPath = localPathOf(this._options.folder, item.path), { onProgress, signal, listedSize }: PullTransfer = {}): Promise<boolean> {
     await this.assertAllowed(item, 'pull')
-    try {
-      const content = await settledUnlessCancelled(item.path, this.backendFor(item).download(item.path, { onProgress, signal }), signal, opened => opened?.destroy())
+    const backend = this.backendFor(item)
+    return watched(backend, item.path, signal, async watch => {
+      const progress = new ProgressRelay(onProgress, listedSize, watch)
+      const content = await settledUnlessCancelled(item.path, backend.download(item.path, { onProgress: progress.report, signal: watch.signal }), watch.signal, opened => opened?.destroy())
       if (!content) {
         return false
       }
@@ -1301,21 +1574,37 @@ export class Environment {
       const stop = (): void => {
         content.destroy()
       }
-      signal?.addEventListener('abort', stop, { once: true })
+      watch.signal.addEventListener('abort', stop, { once: true })
       try {
-        if (signal?.aborted) {
+        if (watch.signal.aborted) {
           stop()
         }
-        await writeLocalFile(localPath, content)
+        await writeLocalFile(localPath, content, watch.signal)
       } finally {
-        signal?.removeEventListener('abort', stop)
+        watch.signal.removeEventListener('abort', stop)
       }
-    } catch (error) {
-      throw signal?.aborted ? new TransferCancelledError(item.path, { cause: error }) : error
-    }
-    const { size } = await fs.stat(localPath)
-    onProgress?.(size, size)
-    return true
+      progress.end((await fs.stat(localPath)).size)
+      return true
+    }, { prepare: true, abandon: false })
+  }
+
+  /**
+   * Sends a local file of an item to its backend, the whole file being told only once stored (see
+   * {@link ProgressRelay}). The upload stops, the stored file left as it was, when it is cancelled
+   * or when the backend, once it told some progress, tells none for a minute.
+   *
+   * @param item - The item.
+   * @param localFile - The local file.
+   * @param onProgress - Told the bytes sent.
+   * @param signal - Cancels the upload.
+   */
+  private async upload (item: EnvironmentItem, localFile: string, onProgress: TransferProgress | undefined, signal?: AbortSignal): Promise<void> {
+    const backend = this.backendFor(item)
+    await watched(backend, item.path, signal, async watch => {
+      const progress = new ProgressRelay(onProgress, undefined, watch)
+      await backend.upload(item.path, localFile, mediaTypeOf(item.path), { onProgress: progress.report, signal: watch.signal })
+      progress.end((await fs.stat(localFile)).size)
+    }, { prepare: true, watchAtOnce: false, abandon: false })
   }
 
   /**

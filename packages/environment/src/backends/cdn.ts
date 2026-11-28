@@ -3,7 +3,7 @@ import fs from 'node:fs/promises'
 import { pipeline, Readable } from 'node:stream'
 import type { ReadableStream as WebReadableStream } from 'node:stream/web'
 import { accessToken, type AuthOptions } from '@appsys-sas/devtool-auth'
-import { type BackendSettings, type BackendType, byteCounter, type EnvironmentBackend, readText, type RemoteFile, type TransferOptions } from './backend.js'
+import { type BackendSettings, type BackendType, byteCounter, type EnvironmentBackend, knownSize, readText, type RemoteFile, type TransferOptions } from './backend.js'
 
 /** Settings of a CDN serving the devtool files API under `<url>/devtool`. */
 export interface CdnSettings extends BackendSettings {
@@ -46,12 +46,13 @@ class CdnBackend implements EnvironmentBackend {
       return null
     }
     await this.assertOk(response)
-    const { files } = (await response.json()) as { files: { path: string, size: number, updatedAt: string }[] }
-    return files.map(file => ({ path: file.path, size: file.size, updatedAt: new Date(file.updatedAt), version: new Date(file.updatedAt).toISOString() }))
+    const { files } = (await response.json()) as { files: { path: string, size?: unknown, updatedAt: string }[] }
+    return files.map(file => ({ path: file.path, size: knownSize(file.size), updatedAt: new Date(file.updatedAt), version: new Date(file.updatedAt).toISOString() }))
   }
 
   /**
-   * Opens a file; the stream fails when the file arrives incomplete.
+   * Opens a file; the stream fails when the file arrives incomplete. The size of a compressed answer
+   * is the size of its compressed bytes, so the bytes of such a file are counted without total.
    * @param path The path of the file.
    * @param options Follows the bytes received, and abandons the request.
    * @returns The content, or null when the file does not exist.
@@ -64,7 +65,8 @@ class CdnBackend implements EnvironmentBackend {
     }
     await this.assertOk(response)
     const length = response.headers.get('content-length')
-    return pipeline(Readable.fromWeb(response.body as WebReadableStream<Uint8Array>), byteCounter(length === null ? null : Number(length), onProgress), () => undefined)
+    const encoded = (response.headers.get('content-encoding') ?? 'identity') !== 'identity'
+    return pipeline(Readable.fromWeb(response.body as WebReadableStream<Uint8Array>), byteCounter(length === null || encoded ? null : knownSize(Number(length)), onProgress), () => undefined)
   }
 
   /**
@@ -72,16 +74,17 @@ class CdnBackend implements EnvironmentBackend {
    * @param path The path of the file on the CDN.
    * @param localFile The local file.
    * @param mediaType The media type served with the file.
-   * @param options Follows the bytes sent.
+   * @param options Follows the bytes sent, and cancels the request.
    */
-  async upload (path: string, localFile: string, mediaType: string, { onProgress }: TransferOptions = {}): Promise<void> {
+  async upload (path: string, localFile: string, mediaType: string, { onProgress, signal }: TransferOptions = {}): Promise<void> {
     const { size } = await fs.stat(localFile)
     const source = createReadStream(localFile)
     try {
       await this.assertOk(await this.request('PUT', path, {
         headers: { 'Content-Type': mediaType, 'Content-Length': String(size) },
         body: Readable.toWeb(pipeline(source, byteCounter(size, onProgress), () => undefined)) as ReadableStream<Uint8Array>,
-        duplex: 'half'
+        duplex: 'half',
+        signal
       }))
     } finally {
       source.destroy()

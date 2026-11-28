@@ -35,7 +35,15 @@ folder), without a shell, with the environment variables of the devtool plus `en
 - `%{ADT:FILE}` is a local file: the one to write for `download`, the one to read for `upload`.
 
 The arguments and the values of `env` read value blocks, so a script can receive a token from your
-password manager.
+password manager; they are read once, before the first transfer, and the time you take to approve
+their reading is not counted. A command never waits for input: its standard input reads `/dev/null`.
+Every command runs in a session of its own, without terminal, so that stopping one stops every
+process it started: when a transfer is cancelled, when the command shows no activity for a minute
+(see [Progress](#progress)), and when devtool itself is stopped. A command ends once its own process
+exits, even when a process it detached, such as a persistent SSH connection, still holds its output;
+the processes it left running in its session are then stopped, so a command must wait for its work. `upload` must therefore
+replace the stored file only once it is complete, such as by writing a temporary file renamed at the
+end.
 
 | Operation | Must | Output |
 |---|---|---|
@@ -54,9 +62,10 @@ password manager.
 }
 ```
 
-`path`, `size` (bytes) and `updatedAt` (ISO 8601) are required. `version` must change whenever the file
-is written, and only then: the devtool compares it to know whether a file changed since the last sync.
-Without it, `updatedAt` is the version.
+`path` and `updatedAt` (ISO 8601) are required. `size` (bytes) is left out, or `null`, when the storage
+cannot give it: the Environment page then shows the size as unknown, and a pull shows the bytes received
+without a total. `version` must change whenever the file is written, and only then: the devtool compares
+it to know whether a file changed since the last sync. Without it, `updatedAt` is the version.
 
 Any exit code other than `0`, and `2` for `download`, is a failure: the devtool reports
 `upload of shared failed (exit 1): ` followed by the end of what the command wrote on its standard
@@ -69,9 +78,13 @@ a half written file behind.
 
 ### Progress
 
-While `download` runs, the devtool shows the size `%{ADT:FILE}` has reached. `upload` reports its own
-progress by printing lines `progress: <bytes sent>` on its standard error, such as `progress: 1048576`;
-without them, the upload shows its end only.
+While `download` runs, the devtool shows the size `%{ADT:FILE}` has reached, and stops the command
+when that size does not grow for a minute. A tool that writes elsewhere first, then renames its file
+at the end, reports what it received with lines `progress: <bytes received>` on its standard error
+instead. `list` must answer within a minute. `upload` reports its own progress the same way, with
+lines `progress: <bytes sent>`, such as `progress: 1048576`; once it printed one, the devtool stops it
+when no new one comes for a minute, until it reported the whole file. Without them, the upload shows
+its end only and is never stopped for being silent.
 
 ## Read-only storage
 

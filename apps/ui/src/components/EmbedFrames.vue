@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { useElementBounding } from '@vueuse/core'
 import embedStore from '@/stores/embeds'
+import layoutStore from '@/stores/layout'
 
 const bounds = useElementBounding(computed(() => embedStore.shown.value?.element ?? null))
 const style = computed(() => ({
@@ -20,6 +21,7 @@ const style = computed(() => ({
     :src="embed.url"
     :title="embed.title"
     :style="style"
+    :inert="layoutStore.covers('left') || layoutStore.covers('right')"
     class="fixed border-0"
   />
 </template>

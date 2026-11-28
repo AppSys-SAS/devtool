@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -6,6 +6,7 @@ import { PassThrough, Readable } from 'node:stream'
 import { gzipSync } from 'node:zlib'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ArchiveWriter } from '../../src/archive.js'
+import { IgnoredKeys } from '../../src/config-merge.js'
 import type { BackendContext, EnvironmentBackend, RemoteFile } from '../../src/backends/backend.js'
 import { Environment, type EnvironmentItem, TransferCancelledError } from '../../src/environment.js'
 import { readSyncJournal, type SyncRecord, writeSyncRecord } from '../../src/sync-journal.js'
@@ -50,6 +51,38 @@ function environmentOf (item: EnvironmentItem, archive: Buffer | Readable, listi
   const context: BackendContext = { resolve: async text => text, askSecret: async () => '', cacheDir, configFolder: folder, auth: null }
   const options = { folder: path.join(folder, 'env'), backends: [], defaultBackend: 'team', items: [item], configFiles: [], autoPulls: [], sections: { by: 'folder' as const, names: new Map<string, string>() }, s3: null }
   return new Environment(new Map([['team', backend]]), options, context)
+}
+
+/**
+ * Builds an environment of some items on one backend.
+ * @param backend - The backend.
+ * @param items - The items.
+ * @returns The environment.
+ */
+function environmentWith (backend: Partial<EnvironmentBackend>, items: EnvironmentItem[] = [postgresItem]): Environment {
+  const whole: EnvironmentBackend = {
+    list: async () => [],
+    download: async () => null,
+    upload: async () => undefined,
+    remove: async () => undefined,
+    close: async () => undefined,
+    ...backend
+  }
+  const context: BackendContext = { resolve: async text => text, askSecret: async () => '', cacheDir: folder, configFolder: folder, auth: null }
+  const options = { folder: path.join(folder, 'env'), backends: [], defaultBackend: 'team', items, configFiles: [], autoPulls: [], sections: { by: 'folder' as const, names: new Map<string, string>() }, s3: null }
+  return new Environment(new Map([['team', whole]]), options, context)
+}
+
+/**
+ * Lets the pending work of the event loop run until a condition holds, timers being faked.
+ * @param condition - The condition.
+ */
+async function settle (condition: () => boolean): Promise<void> {
+  while (!condition()) {
+    await new Promise(resolve => {
+      setImmediate(resolve)
+    })
+  }
 }
 
 /**
@@ -146,15 +179,15 @@ describe('pull of an item holding local data', () => {
     expect((await readSyncJournal()).get(ITEM_PATH)).toEqual(PREVIOUS_RECORD)
   })
 
-  it.each<[string, () => Promise<RemoteFile[]>]>([
-    ['failed', async () => Promise.reject(new Error('backend unreachable'))],
-    ['did not hold the item', async () => []]
-  ])('does not record as synchronized a pull whose listing before the download %s, whatever the listing after', async (_case, before) => {
+  it.each<[string, () => Promise<RemoteFile[]>, string]>([
+    ['failed', async () => Promise.reject(new Error('backend unreachable')), ' (backend unreachable)'],
+    ['did not hold the item', async () => [], '']
+  ])('does not record as synchronized a pull whose listing before the download %s, whatever the listing after, telling why', async (_case, before, reason) => {
     const listings = [before, async (): Promise<RemoteFile[]> => [{ path: ITEM_PATH, size: 11, updatedAt: UPDATED_AT, version: 'v3' }]]
     const listing = async (): Promise<RemoteFile[]> => (listings.length > 1 ? listings.shift()! : listings[0])()
     const result = await environmentOf(postgresItem, Buffer.from('new archive'), listing).pull({ item: postgresItem, tables: null })
 
-    expect(result).toEqual({ done: true, detail: 'database restored in db, not recorded as synchronized: the copy of team could not be listed before the pull: pull again' })
+    expect(result).toEqual({ done: true, detail: `database restored in db, not recorded as synchronized: the copy of team could not be listed before the pull${reason}: pull again` })
     expect((await readSyncJournal()).get(ITEM_PATH)).toEqual(PREVIOUS_RECORD)
   })
 
@@ -206,9 +239,9 @@ describe('pull of an item holding local data', () => {
     })
 
     const second = environmentOf(postgresItem, Buffer.from('new archive'), undefined, path.join(folder, 'cache-b'))
-    await expect(second.pull({ item: postgresItem, tables: null })).rejects.toThrow('api/db.dump is being transferred')
+    await expect(second.pull({ item: postgresItem, tables: null })).rejects.toThrow('api/db.dump is in use: try again once it ends')
     const spelled: EnvironmentItem = { ...postgresItem, path: 'API/db.dump' }
-    await expect(environmentOf(spelled, Buffer.from('new archive')).pull({ item: spelled, tables: null })).rejects.toThrow('API/db.dump is being transferred')
+    await expect(environmentOf(spelled, Buffer.from('new archive')).pull({ item: spelled, tables: null })).rejects.toThrow('API/db.dump is in use: try again once it ends')
     open()
     expect(await first).toEqual({ done: true, detail: 'database restored in db' })
   })
@@ -221,14 +254,430 @@ describe('pull of an item holding local data', () => {
   })
 })
 
+describe('watch of a backend', () => {
+  const notes: EnvironmentItem = { kind: 'file', path: 'api/notes.txt', ...open, ignore: null }
+
+  beforeEach(async () => {
+    await fs.writeFile(path.join(folder, 'env', 'api', 'notes.txt'), 'local notes')
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('stops a download whose backend stops sending, leaving the local copy as it was', async () => {
+    let opened = false
+    const pull = environmentWith({
+      download: async (_path, { onProgress } = {}) => {
+        opened = true
+        onProgress?.(10, 100)
+        return new PassThrough()
+      }
+    }).pull({ item: postgresItem, tables: null })
+    const failure = expect(pull).rejects.toThrow('the backend showed no activity for 60 s')
+    await settle(() => opened)
+    await vi.advanceTimersByTimeAsync(60_000)
+
+    await failure
+    expect(await localState()).toEqual({ files: ['db.dump', 'notes.txt'], copy: 'previous copy' })
+  })
+
+  it('never stops a download that keeps sending, however long it takes', async () => {
+    const chunks = 10
+    let opened = false
+    const pull = environmentWith({
+      list: async () => [{ path: notes.path, size: chunks, updatedAt: UPDATED_AT, version: 'v2' }],
+      download: async (_path, { onProgress } = {}) => {
+        opened = true
+        const body = new PassThrough()
+        let sent = 0
+        /**
+         * Sends one more byte, well within the tolerated silence.
+         */
+        const next = (): void => {
+          sent += 1
+          body.write('x')
+          onProgress?.(sent, chunks)
+          if (sent === chunks) {
+            body.end()
+          } else {
+            setTimeout(next, 50_000)
+          }
+        }
+        setTimeout(next, 50_000)
+        return body
+      }
+    }, [notes]).pull({ item: notes, tables: null })
+    await settle(() => opened)
+    await vi.advanceTimersByTimeAsync(chunks * 50_000)
+
+    expect(await pull).toMatchObject({ done: true })
+    expect(await fs.readFile(path.join(folder, 'env', 'api', 'notes.txt'), 'utf-8')).toBe('x'.repeat(chunks))
+  })
+
+  it('never times a backend that bounds its exchanges itself', async () => {
+    let opened = false
+    const pull = environmentWith({
+      boundsItself: true,
+      list: async () => [{ path: notes.path, size: 12, updatedAt: UPDATED_AT, version: 'v2' }],
+      download: async () => {
+        opened = true
+        await new Promise(resolve => {
+          setTimeout(resolve, 180_000)
+        })
+        return Readable.from([Buffer.from('pulled notes')])
+      }
+    }, [notes]).pull({ item: notes, tables: null })
+    await settle(() => opened)
+    await vi.advanceTimersByTimeAsync(180_000)
+
+    expect(await pull).toMatchObject({ done: true })
+    expect(await fs.readFile(path.join(folder, 'env', 'api', 'notes.txt'), 'utf-8')).toBe('pulled notes')
+  })
+
+  it('never stops a silent upload, nor one that sent its whole file and waits for its backend', async () => {
+    let waiting = false
+    /**
+     * Waits two minutes, as a backend storing a file does.
+     */
+    const store = async (): Promise<void> => {
+      await new Promise(resolve => {
+        waiting = true
+        setTimeout(resolve, 120_000)
+      })
+    }
+    const silent = environmentWith({ upload: store }, [notes]).push({ item: notes, tables: null })
+    await settle(() => waiting)
+    await vi.advanceTimersByTimeAsync(120_000)
+    expect(await silent).toMatchObject({ done: true })
+
+    waiting = false
+    const sent = environmentWith({
+      upload: async (_path, localFile, _mediaType, { onProgress } = {}) => {
+        const { size } = await fs.stat(localFile)
+        onProgress?.(size, size)
+        await store()
+      }
+    }, [notes]).push({ item: notes, tables: null })
+    await settle(() => waiting)
+    await vi.advanceTimersByTimeAsync(120_000)
+    expect(await sent).toMatchObject({ done: true })
+  })
+
+  it('stops an upload whose backend stops telling its progress before the end of the file', async () => {
+    let started = false
+    const push = environmentWith({
+      upload: async (_path, _localFile, _mediaType, { onProgress, signal } = {}) => {
+        started = true
+        onProgress?.(1, 100)
+        await new Promise((_resolve, reject) => {
+          signal?.addEventListener('abort', () => {
+            reject(new Error('upload stopped'))
+          })
+        })
+      }
+    }, [notes]).push({ item: notes, tables: null })
+    const failure = expect(push).rejects.toThrow('the backend showed no activity for 60 s')
+    await settle(() => started)
+    await vi.advanceTimersByTimeAsync(60_000)
+
+    await failure
+  })
+
+  it('does not count the time the developer takes to give what the backend needs', async () => {
+    let asking = false
+    let given: Promise<void> | null = null
+    const pull = environmentWith({
+      prepare: async () => {
+        given ??= new Promise(resolve => {
+          asking = true
+          setTimeout(resolve, 90_000)
+        })
+        return given
+      },
+      list: async () => [{ path: notes.path, size: 12, updatedAt: UPDATED_AT, version: 'v2' }],
+      download: async () => Readable.from([Buffer.from('pulled notes')])
+    }, [notes]).pull({ item: notes, tables: null })
+    await settle(() => asking)
+    await vi.advanceTimersByTimeAsync(90_000)
+
+    expect(await pull).toMatchObject({ done: true })
+    expect(await fs.readFile(path.join(folder, 'env', 'api', 'notes.txt'), 'utf-8')).toBe('pulled notes')
+  })
+
+  it('gives up a transfer whose backend never gets what it needs from the developer, after a few minutes', async () => {
+    let asking = false
+    const pull = environmentWith({
+      prepare: async () => new Promise(() => {
+        asking = true
+      })
+    }, [notes]).pull({ item: notes, tables: null })
+    const failure = pull.catch((error: unknown) => error)
+    await settle(() => asking)
+    await vi.advanceTimersByTimeAsync(10 * 60_000)
+
+    expect(await failure).toMatchObject({ message: expect.stringContaining('did not get what it needs from the developer within 5 minutes') as unknown })
+    expect(await fs.readFile(path.join(folder, 'env', 'api', 'notes.txt'), 'utf-8')).toBe('local notes')
+  })
+
+  it('does not count the time the developer takes to approve what a listing needs', async () => {
+    let approval: Promise<void> | null = null
+    let asking = false
+    /**
+     * Waits for the developer to approve the reading of a secret, once.
+     * @returns Once approved.
+     */
+    const approve = async (): Promise<void> => {
+      approval ??= new Promise(resolve => {
+        asking = true
+        setTimeout(resolve, 90_000)
+      })
+      return approval
+    }
+    const described = environmentWith({
+      prepare: approve,
+      list: async () => {
+        await approve()
+        return [{ path: notes.path, size: 12, updatedAt: UPDATED_AT, version: 'v2' }]
+      }
+    }, [notes]).describe()
+    await settle(() => asking)
+    await vi.advanceTimersByTimeAsync(90_000)
+
+    const { items: [item], errors } = await described
+    expect(errors).toEqual({})
+    expect(item.remote).toMatchObject({ version: 'v2' })
+  })
+})
+
+describe('cancel and end of a push', () => {
+  it('leaves both copies as they were when cancelled while its dump uploads', async () => {
+    await fakeDocker('printf "fresh dump"')
+    let uploading = false
+    let stored = false
+    const cancel = new AbortController()
+    const push = environmentWith({
+      upload: async (_path, _localFile, _mediaType, { signal } = {}) => {
+        uploading = true
+        await new Promise((resolve, reject) => {
+          signal?.addEventListener('abort', () => {
+            reject(new Error('upload stopped'))
+          })
+        })
+        stored = true
+      }
+    }).push({ item: postgresItem, tables: null, signal: cancel.signal })
+    await vi.waitFor(() => expect(uploading).toBe(true))
+    cancel.abort(new Error('cancelled'))
+
+    await expect(push).rejects.toBeInstanceOf(TransferCancelledError)
+    expect(stored).toBe(false)
+    expect(await localState()).toEqual({ files: ['db.dump'], copy: 'previous copy' })
+  })
+
+  it('tells a push whose dump is stored as done, though its synchronization cannot be recorded', async () => {
+    await fakeDocker('printf "fresh dump"')
+    const result = await environmentWith({
+      list: async () => {
+        throw new Error('listing refused')
+      }
+    }).push({ item: postgresItem, tables: null })
+
+    expect(result).toEqual({ done: true, detail: 'database dumped from db, not recorded as synchronized: listing refused' })
+    expect(await localState()).toEqual({ files: ['db.dump'], copy: 'fresh dump' })
+  })
+})
+
+describe('leftovers of an interrupted transfer', () => {
+  it('removes the temporary files of the item before transferring it, never another file named after it', async () => {
+    const other: EnvironmentItem = { kind: 'file', path: 'api/db.dump.merged', ...open, ignore: null }
+    const api = path.join(folder, 'env', 'api')
+    await fs.writeFile(path.join(api, `db.dump.${randomUUID()}.pull`), 'half an archive')
+    await fs.writeFile(path.join(api, `db.dump.${randomUUID()}.push.${randomUUID()}.sealed`), 'half a sealed dump')
+    await fs.writeFile(path.join(api, `db.dump.${randomUUID()}.part`), 'half a copy')
+    await fs.writeFile(path.join(api, 'db.dump.merged'), 'another item')
+    await fs.writeFile(path.join(api, 'db.dump.part'), 'a file of the developer')
+    await fs.writeFile(path.join(api, 'db.dump.base'), 'another file of the developer')
+
+    expect(await environmentWith({}, [postgresItem, other]).restoreLocal({ item: postgresItem, tables: null })).toMatchObject({ done: true })
+    expect((await fs.readdir(api)).sort()).toEqual(['db.dump', 'db.dump.base', 'db.dump.merged', 'db.dump.part'])
+  })
+
+  it('never writes a transfer of an item over another item named after it', async () => {
+    const config: EnvironmentItem = { kind: 'file', path: 'api/app.yml', ...open, ignore: null }
+    const neighbour: EnvironmentItem = { kind: 'file', path: 'api/app.yml.part', ...open, ignore: null }
+    const api = path.join(folder, 'env', 'api')
+    await fs.writeFile(path.join(api, 'app.yml.part'), 'the other item')
+
+    const environment = environmentWith({
+      list: async () => [{ path: 'api/app.yml', size: 10, updatedAt: UPDATED_AT, version: 'v2' }],
+      download: async () => Readable.from([Buffer.from('port: 3000')])
+    }, [config, neighbour])
+    expect(await environment.pull({ item: config, tables: null })).toMatchObject({ done: true })
+    expect(await fs.readFile(path.join(api, 'app.yml'), 'utf-8')).toBe('port: 3000')
+    expect(await fs.readFile(path.join(api, 'app.yml.part'), 'utf-8')).toBe('the other item')
+  })
+})
+
+describe('description of the items', () => {
+  it('describes the local copies when a backend does not answer, telling it after a minute', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      const described = environmentOf(postgresItem, Buffer.alloc(0), async () => new Promise(() => {})).describe()
+      await vi.advanceTimersByTimeAsync(60_000)
+      const { items: [item], errors } = await described
+
+      expect(errors).toEqual({ team: 'the backend showed no activity for 60 s' })
+      expect(item.local).toMatchObject({ size: 'previous copy'.length })
+      expect(item.remote).toBe('unknown')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+describe('description of a configuration file ignoring keys', () => {
+  it('describes it when its backend lists it but never gives its copy, after a minute', async () => {
+    const item: EnvironmentItem = { kind: 'file', path: 'api/app.yml', ...open, ignore: new IgnoredKeys(['secret']) }
+    await fs.writeFile(path.join(folder, 'env', 'api', 'app.yml'), 'port: 1\n')
+    downloadGate = new Promise(() => {})
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      const described = environmentOf(item, Buffer.from('port: 2\n')).describe()
+      while (downloads < 1) {
+        await new Promise(resolve => {
+          setImmediate(resolve)
+        })
+      }
+      await vi.advanceTimersByTimeAsync(60_000)
+
+      const { items: [description] } = await described
+      expect(description.remote).toMatchObject({ version: 'v2' })
+      expect(await fs.readdir(path.join(folder, 'env', 'api'))).toEqual(['app.yml', 'db.dump'])
+    } finally {
+      vi.useRealTimers()
+    }
+  }, 10_000)
+})
+
+describe('push of an item holding local data', () => {
+  it('leaves the local copy as it was when the backend refuses the dump', async () => {
+    await fakeDocker('printf "fresh dump"')
+    const backend: EnvironmentBackend = {
+      list: async () => [],
+      download: async () => null,
+      upload: async () => {
+        throw new Error('storage full')
+      },
+      remove: async () => undefined,
+      close: async () => undefined
+    }
+    const context: BackendContext = { resolve: async text => text, askSecret: async () => '', cacheDir: folder, configFolder: folder, auth: null }
+    const options = { folder: path.join(folder, 'env'), backends: [], defaultBackend: 'team', items: [postgresItem], configFiles: [], autoPulls: [], sections: { by: 'folder' as const, names: new Map<string, string>() }, s3: null }
+
+    await expect(new Environment(new Map([['team', backend]]), options, context).push({ item: postgresItem, tables: null })).rejects.toThrow('storage full')
+    expect(await localState()).toEqual({ files: ['db.dump'], copy: 'previous copy' })
+  })
+})
+
+describe('synchronization journal', () => {
+  it('never replaces a journal it cannot read', async () => {
+    const journal = path.join(folder, 'sync.json')
+    await fs.writeFile(journal, '{ "api/db.dump": ')
+
+    await expect(writeSyncRecord('api/notes.txt', PREVIOUS_RECORD)).rejects.toThrow(`the synchronization journal ${journal} cannot be read`)
+    expect(await fs.readFile(journal, 'utf-8')).toBe('{ "api/db.dump": ')
+  })
+
+  it('keeps every record written at the same time', async () => {
+    const paths = Array.from({ length: 20 }, (_, index) => `api/file-${index}.txt`)
+    await Promise.all(paths.map(async itemPath => writeSyncRecord(itemPath, PREVIOUS_RECORD)))
+
+    const journal = await readSyncJournal()
+    expect(paths.filter(itemPath => journal.has(itemPath))).toEqual(paths)
+    expect((await fs.readdir(folder)).filter(name => name.endsWith('.part'))).toEqual([])
+  })
+
+  it('removes the partial journals a stopped process left', async () => {
+    const leftover = path.join(folder, `sync.json.${randomUUID()}.part`)
+    await fs.writeFile(leftover, '{}')
+
+    await writeSyncRecord('api/notes.txt', PREVIOUS_RECORD)
+    await expect(fs.access(leftover)).rejects.toThrow()
+  })
+
+  it('waits for another process writing the journal, keeping its record', async () => {
+    const journal = path.join(folder, 'sync.json')
+    const lock = `${journal}.lock`
+    await fs.writeFile(lock, String(process.ppid))
+    const seen = await fs.readFile(journal, 'utf-8')
+
+    const writing = writeSyncRecord('api/mine.txt', PREVIOUS_RECORD)
+    await new Promise(resolve => {
+      setTimeout(resolve, 200)
+    })
+    const theirs = { ...JSON.parse(seen) as Record<string, unknown>, 'api/theirs.txt': JSON.parse(JSON.stringify(PREVIOUS_RECORD)) as unknown }
+    await fs.writeFile(journal, JSON.stringify(theirs))
+    await fs.rm(lock)
+    await writing
+
+    expect([...(await readSyncJournal()).keys()].sort()).toEqual(['api/db.dump', 'api/mine.txt', 'api/theirs.txt'])
+  })
+})
+
+describe('listings after a transfer', () => {
+  it('ends a pull whose backend no longer answers once the data is restored, not recording it as synchronized', async () => {
+    let listings = 0
+    /**
+     * Lists the archive of the item, the backend never answering after the first listing.
+     * @returns The files of the backend.
+     */
+    const listing = async (): Promise<RemoteFile[]> => {
+      listings += 1
+      return listings === 1 ? [{ path: ITEM_PATH, size: 11, updatedAt: UPDATED_AT, version: 'v2' }] : new Promise(() => {})
+    }
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      const pull = environmentOf(postgresItem, Buffer.from('new archive'), listing).pull({ item: postgresItem, tables: null })
+      while (listings < 2) {
+        await new Promise(resolve => {
+          setImmediate(resolve)
+        })
+      }
+      await vi.advanceTimersByTimeAsync(60_000)
+
+      expect(await pull).toEqual({ done: true, detail: 'database restored in db, not recorded as synchronized: the backend showed no activity for 60 s' })
+      expect((await readSyncJournal()).get(ITEM_PATH)).toEqual(PREVIOUS_RECORD)
+    } finally {
+      vi.useRealTimers()
+    }
+  }, 10_000)
+})
+
 describe('restore and removal of a local copy', () => {
   it('restores the local data from the local copy without reaching the backend', async () => {
-    expect(await environmentOf(postgresItem, Buffer.from('new archive')).restoreLocal({ item: postgresItem, tables: null })).toEqual({ done: true, detail: 'database restored in db' })
+    const listing = vi.fn(async () => [])
+    expect(await environmentOf(postgresItem, Buffer.from('new archive'), listing).restoreLocal({ item: postgresItem, tables: null })).toEqual({ done: true, detail: 'database restored in db' })
 
+    expect(listing).not.toHaveBeenCalled()
     expect(downloads).toBe(0)
     expect(await fs.readFile(path.join(folder, 'seen'), 'utf-8')).toBe('previous copy')
     expect(await localState()).toEqual({ files: ['db.dump'], copy: 'previous copy' })
     expect((await readSyncJournal()).get(ITEM_PATH)).toEqual(PREVIOUS_RECORD)
+  })
+
+  it('refuses tables its archive lacks before changing the database', async () => {
+    const item: EnvironmentItem = { ...postgresItem, format: 'devtool' }
+    const writer = new ArchiveWriter(path.join(folder, 'env', 'api', 'db.dump'))
+    await writer.add({ type: 'database', engine: 'postgres' })
+    await writer.add({ type: 'table', name: 'public.t' }, Readable.from([Buffer.from('rows of t')]))
+    await writer.close()
+    const calls = path.join(folder, 'docker-calls')
+    await fs.writeFile(path.join(folder, 'bin', 'docker'), `#!/bin/sh\nscript="$* $(cat)"\necho call >> "${calls}"\ncase "$script" in *pg_class*) printf 'public.t\\npublic.u\\n' ;; esac\n`, { mode: 0o755 })
+
+    await expect(environmentOf(item, Buffer.alloc(0)).restoreLocal({ item, tables: ['public.t', 'public.u'] })).rejects.toThrow('unknown tables in api/db.dump: public.u')
+    await expect(fs.access(calls)).rejects.toThrow()
   })
 
   it('reports an item without local copy, and refuses a file or tables of a native mariadb archive', async () => {
@@ -238,7 +687,7 @@ describe('restore and removal of a local copy', () => {
 
     const file: EnvironmentItem = { kind: 'file', path: 'api/notes.txt', ...open, ignore: null }
     await expect(environment.restoreLocal({ item: file, tables: null })).rejects.toThrow('api/notes.txt is a file: its local copy is its data, pull it instead')
-    await expect(environment.removeLocalCopy({ item: file, tables: null })).rejects.toThrow('api/notes.txt is a file')
+    await expect(environment.removeLocalCopy({ item: file, tables: null })).rejects.toThrow('api/notes.txt is a file: its local copy is its data, there is no copy to remove apart from it')
     await expect(environmentOf(mariadbItem, Buffer.alloc(0)).restoreLocal({ item: mariadbItem, tables: ['users'] })).rejects.toThrow('api/db.dump is a native mariadb archive: restore the whole database')
   })
 
@@ -321,6 +770,70 @@ describe('cancel of a pull', () => {
     expect(await localState()).toEqual({ files: ['db.dump'], copy: 'previous copy' })
   }, 5_000)
 
+  it('keeps a file as it was when cancelled once downloaded but before it is replaced', async () => {
+    const item: EnvironmentItem = { kind: 'file', path: 'api/notes.txt', ...open, ignore: null }
+    const notes = path.join(folder, 'env', 'api', 'notes.txt')
+    await fs.writeFile(notes, 'local notes')
+    const cancel = new AbortController()
+    const content = Readable.from([Buffer.from('pulled notes')])
+    content.on('end', () => {
+      cancel.abort(new Error('cancelled'))
+    })
+
+    await expect(environmentOf(item, content).pull({ item, tables: null, signal: cancel.signal })).rejects.toBeInstanceOf(TransferCancelledError)
+    expect(await fs.readFile(notes, 'utf-8')).toBe('local notes')
+    expect((await fs.readdir(path.join(folder, 'env', 'api'))).sort()).toEqual(['db.dump', 'notes.txt'])
+  })
+
+  it('keeps a configuration file merged key by key as it was when cancelled once its copy is downloaded', async () => {
+    const item: EnvironmentItem = { kind: 'file', path: 'api/app.yml', ...open, ignore: null }
+    const config = path.join(folder, 'env', 'api', 'app.yml')
+    await fs.writeFile(config, 'port: 1\n')
+    const cancel = new AbortController()
+    const content = Readable.from([Buffer.from('port: 2\n')])
+    content.on('end', () => {
+      cancel.abort(new Error('cancelled'))
+    })
+
+    await expect(environmentOf(item, content).pull({ item, tables: null, keys: [{ path: ['port'], side: 'remote' }], signal: cancel.signal })).rejects.toBeInstanceOf(TransferCancelledError)
+    expect(await fs.readFile(config, 'utf-8')).toBe('port: 1\n')
+    expect((await fs.readdir(path.join(folder, 'env', 'api'))).sort()).toEqual(['app.yml', 'db.dump'])
+  })
+
+  it('relays nothing a backend reports once its download is cancelled', async () => {
+    let report: ((done: number, total: number | null) => void) | undefined
+    const backend: EnvironmentBackend = {
+      list: async () => [{ path: ITEM_PATH, size: 100, updatedAt: UPDATED_AT, version: 'v2' }],
+      download: async (_path, { onProgress } = {}) => {
+        report = onProgress
+        onProgress?.(10, 100)
+        return new PassThrough()
+      },
+      upload: async () => undefined,
+      remove: async () => undefined,
+      close: async () => undefined
+    }
+    const context: BackendContext = { resolve: async text => text, askSecret: async () => '', cacheDir: folder, configFolder: folder, auth: null }
+    const options = { folder: path.join(folder, 'env'), backends: [], defaultBackend: 'team', items: [postgresItem], configFiles: [], autoPulls: [], sections: { by: 'folder' as const, names: new Map<string, string>() }, s3: null }
+    const reports: [number, number | null][] = []
+    const cancel = new AbortController()
+    const pull = new Environment(new Map([['team', backend]]), options, context).pull({
+      item: postgresItem,
+      tables: null,
+      signal: cancel.signal,
+      onProgress: (done, total) => {
+        reports.push([done, total])
+      }
+    })
+    await vi.waitFor(() => expect(reports).toEqual([[10, 100]]))
+    cancel.abort(new Error('cancelled'))
+    report?.(20, 100)
+
+    await expect(pull).rejects.toBeInstanceOf(TransferCancelledError)
+    report?.(30, 100)
+    expect(reports).toEqual([[10, 100]])
+  }, 5_000)
+
   it('restores to its end once the archive is complete, the download reported whole first', async () => {
     const started = path.join(folder, 'restore-started')
     const released = path.join(folder, 'restore-released')
@@ -362,7 +875,116 @@ describe('progress of a transfer', () => {
     await environment.pull({ item, tables: null, onProgress })
     await fs.writeFile(path.join(folder, 'env', 'api', 'notes.txt'), 'local')
     await environment.push({ item, tables: null, onProgress })
-    expect(reports).toEqual([[12, 12], [12, 12], [5, 5]])
+    expect(reports).toEqual([[11, 12], [12, 12], [4, 5], [5, 5]])
+  })
+
+  it('completes a progress whose backend does not know the size with the size it listed, reaching it once written', async () => {
+    const item: EnvironmentItem = { kind: 'file', path: 'api/notes.txt', ...open, ignore: null }
+    const backend: EnvironmentBackend = {
+      list: async () => [{ path: item.path, size: 12, updatedAt: UPDATED_AT, version: 'v2' }],
+      download: async (_path, { onProgress } = {}) => {
+        onProgress?.(5, null)
+        onProgress?.(14, null)
+        return Readable.from([Buffer.from('pulled notes')])
+      },
+      upload: async () => undefined,
+      remove: async () => undefined,
+      close: async () => undefined
+    }
+    const context: BackendContext = { resolve: async text => text, askSecret: async () => '', cacheDir: folder, configFolder: folder, auth: null }
+    const options = { folder: path.join(folder, 'env'), backends: [], defaultBackend: 'team', items: [item], configFiles: [], autoPulls: [], sections: { by: 'folder' as const, names: new Map<string, string>() }, s3: null }
+    const reports: [number, number | null][] = []
+
+    await new Environment(new Map([['team', backend]]), options, context).pull({
+      item,
+      tables: null,
+      onProgress: (done, total) => {
+        reports.push([done, total])
+      }
+    })
+    expect(reports).toEqual([[5, 12], [11, 12], [12, 12]])
+  })
+
+  it('leaves the total unknown when neither the backend nor its listing knows the size', async () => {
+    const item: EnvironmentItem = { kind: 'file', path: 'api/notes.txt', ...open, ignore: null }
+    const backend: EnvironmentBackend = {
+      list: async () => [{ path: item.path, size: null, updatedAt: UPDATED_AT, version: 'v2' }],
+      download: async (_path, { onProgress } = {}) => {
+        onProgress?.(5, null)
+        return Readable.from([Buffer.from('pulled notes')])
+      },
+      upload: async () => undefined,
+      remove: async () => undefined,
+      close: async () => undefined
+    }
+    const context: BackendContext = { resolve: async text => text, askSecret: async () => '', cacheDir: folder, configFolder: folder, auth: null }
+    const options = { folder: path.join(folder, 'env'), backends: [], defaultBackend: 'team', items: [item], configFiles: [], autoPulls: [], sections: { by: 'folder' as const, names: new Map<string, string>() }, s3: null }
+    const environment = new Environment(new Map([['team', backend]]), options, context)
+    const reports: [number, number | null][] = []
+
+    await environment.pull({
+      item,
+      tables: null,
+      onProgress: (done, total) => {
+        reports.push([done, total])
+      }
+    })
+    expect(reports).toEqual([[5, null], [12, 12]])
+    expect((await environment.describe()).items[0].remote).toMatchObject({ size: null })
+  })
+
+  it('tells an empty file only once it is transferred, whatever its backend reports meanwhile', async () => {
+    const item: EnvironmentItem = { kind: 'file', path: 'api/notes.txt', ...open, ignore: null }
+    await fs.writeFile(path.join(folder, 'env', 'api', 'notes.txt'), '')
+    const backend: EnvironmentBackend = {
+      list: async () => [],
+      download: async () => null,
+      upload: async (_path, _localFile, _mediaType, { onProgress } = {}) => {
+        onProgress?.(255, 0)
+      },
+      remove: async () => undefined,
+      close: async () => undefined
+    }
+    const context: BackendContext = { resolve: async text => text, askSecret: async () => '', cacheDir: folder, configFolder: folder, auth: null }
+    const options = { folder: path.join(folder, 'env'), backends: [], defaultBackend: 'team', items: [item], configFiles: [], autoPulls: [], sections: { by: 'folder' as const, names: new Map<string, string>() }, s3: null }
+    const reports: [number, number | null][] = []
+
+    await new Environment(new Map([['team', backend]]), options, context).push({
+      item,
+      tables: null,
+      onProgress: (done, total) => {
+        reports.push([done, total])
+      }
+    })
+    expect(reports).toEqual([[0, 0]])
+  })
+
+  it('never moves a progress back nor to its total before the file is written', async () => {
+    const item: EnvironmentItem = { kind: 'file', path: 'api/notes.txt', ...open, ignore: null }
+    const backend: EnvironmentBackend = {
+      list: async () => [{ path: item.path, size: 12, updatedAt: UPDATED_AT, version: 'v2' }],
+      download: async (_path, { onProgress } = {}) => {
+        onProgress?.(7, 12)
+        onProgress?.(3, 12)
+        onProgress?.(12, 12)
+        return Readable.from([Buffer.from('pulled notes')])
+      },
+      upload: async () => undefined,
+      remove: async () => undefined,
+      close: async () => undefined
+    }
+    const context: BackendContext = { resolve: async text => text, askSecret: async () => '', cacheDir: folder, configFolder: folder, auth: null }
+    const options = { folder: path.join(folder, 'env'), backends: [], defaultBackend: 'team', items: [item], configFiles: [], autoPulls: [], sections: { by: 'folder' as const, names: new Map<string, string>() }, s3: null }
+    const reports: [number, number | null][] = []
+
+    await new Environment(new Map([['team', backend]]), options, context).pull({
+      item,
+      tables: null,
+      onProgress: (done, total) => {
+        reports.push([done, total])
+      }
+    })
+    expect(reports).toEqual([[7, 12], [7, 12], [11, 12], [12, 12]])
   })
 
   it('relays the progress of a configuration file pushed key by key', async () => {
@@ -377,6 +999,6 @@ describe('progress of a transfer', () => {
         reports.push([done, total])
       }
     })
-    expect(reports).toEqual([[8, 8]])
+    expect(reports).toEqual([[7, 8], [8, 8]])
   })
 })

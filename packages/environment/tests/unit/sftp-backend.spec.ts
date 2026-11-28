@@ -1,16 +1,18 @@
 import { generateKeyPairSync } from 'node:crypto'
 import fs from 'node:fs/promises'
-import type { AddressInfo } from 'node:net'
+import { type AddressInfo, connect, createServer, type Server as TcpServer } from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 import type { Readable } from 'node:stream'
 import { setTimeout as delay } from 'node:timers/promises'
 import ssh2 from 'ssh2'
 import type { Attributes, FileEntry, SFTPWrapper } from 'ssh2'
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BackendContext, BackendSettings, EnvironmentBackend } from '../../src/backends/backend.js'
 import { sftp } from '../../src/backends/sftp.js'
 import { expectCompleteProgress, openDescriptors, progressContent, progressRecorder } from './progress-fixtures.js'
+
+vi.mock('../../src/backends/backend.js', async original => ({ ...await original<typeof import('../../src/backends/backend.js')>(), BACKEND_IDLE_MS: 2_000 }))
 
 const { Server, utils } = ssh2
 const { STATUS_CODE } = utils.sftp
@@ -20,8 +22,14 @@ const PASSWORD = 'secret-password'
 let root: string
 let server: InstanceType<typeof Server>
 let port: number
+let proxy: TcpServer
+let proxyPort: number
+let frozen = false
+let refusedRenames = 0
+let refusedOpens = false
 let backend: EnvironmentBackend
 let local: string
+let context: BackendContext
 
 /**
  * Describes a local file the way an SFTP server does.
@@ -64,6 +72,10 @@ function serveFiles (channel: SFTPWrapper): void {
     file?.stat().then(stats => channel.attrs(reqid, attributesOf(stats)), (error: unknown) => fail(reqid, error))
   })
   channel.on('OPEN', (reqid, filename, flags) => {
+    if (refusedOpens && filename.endsWith('.part')) {
+      channel.status(reqid, STATUS_CODE.FAILURE)
+      return
+    }
     const mode = utils.sftp.flagsToString(flags) ?? 'r'
     fs.open(filename, mode).then(file => channel.handle(reqid, handleOf({ file })), (error: unknown) => fail(reqid, error))
   })
@@ -114,6 +126,11 @@ function serveFiles (channel: SFTPWrapper): void {
     fs.unlink(target).then(() => channel.status(reqid, STATUS_CODE.OK), (error: unknown) => fail(reqid, error))
   })
   channel.on('RENAME', (reqid, from, to) => {
+    if (refusedRenames > 0 && from.endsWith('.part')) {
+      refusedRenames -= 1
+      channel.status(reqid, STATUS_CODE.FAILURE)
+      return
+    }
     fs.access(to).then(() => channel.status(reqid, STATUS_CODE.FAILURE), () => {
       fs.rename(from, to).then(() => channel.status(reqid, STATUS_CODE.OK), (error: unknown) => fail(reqid, error))
     })
@@ -173,31 +190,59 @@ beforeAll(async () => {
     server.listen(0, '127.0.0.1', resolve)
   })
   port = (server.address() as AddressInfo).port
+  proxy = createServer(downstream => {
+    const upstream = connect(port, '127.0.0.1')
+    downstream.on('data', (chunk: Buffer) => frozen || upstream.write(chunk))
+    upstream.on('data', (chunk: Buffer) => frozen || downstream.write(chunk))
+    downstream.on('error', () => upstream.destroy())
+    upstream.on('error', () => downstream.destroy())
+    downstream.on('close', () => upstream.destroy())
+    upstream.on('close', () => downstream.destroy())
+  })
+  await new Promise<void>(resolve => {
+    proxy.listen(0, '127.0.0.1', resolve)
+  })
+  proxyPort = (proxy.address() as AddressInfo).port
 })
 
 afterAll(async () => {
+  await new Promise<void>(resolve => {
+    proxy.close(() => resolve())
+  })
   await new Promise<void>(resolve => {
     server.close(() => resolve())
   })
 })
 
+/**
+ * Creates a backend on the test server.
+ * @param serverPort - The port it connects to.
+ * @returns The backend.
+ */
+function backendOn (serverPort: number): EnvironmentBackend {
+  const shared: BackendSettings = { type: 'sftp', slug: 'nas', default: true, encryption: null, groups: { pull: null, push: null } }
+  const { options, problems } = sftp.readOptions({ host: '127.0.0.1', port: serverPort, username: USER, path: root, password: '{{ op://dev/nas/password }}' }, shared, 'environment.backends.nas')
+  expect(problems).toEqual([])
+  return sftp.create(options!, context)
+}
+
 beforeEach(async () => {
   await backend?.close()
+  frozen = false
+  refusedRenames = 0
+  refusedOpens = false
   const base = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'devtool-sftp-')))
   root = path.join(base, 'remote', 'environment')
   local = path.join(base, 'local')
   await fs.mkdir(local, { recursive: true })
-  const shared: BackendSettings = { type: 'sftp', slug: 'nas', default: true, encryption: null, groups: { pull: null, push: null } }
-  const { options, problems } = sftp.readOptions({ host: '127.0.0.1', port, username: USER, path: root, password: '{{ op://dev/nas/password }}' }, shared, 'environment.backends.nas')
-  expect(problems).toEqual([])
-  const context: BackendContext = {
+  context = {
     resolve: async text => text.replace('{{ op://dev/nas/password }}', PASSWORD),
     askSecret: async () => '',
     cacheDir: base,
     configFolder: base,
     auth: null
   }
-  backend = sftp.create(options!, context)
+  backend = backendOn(port)
 })
 
 describe('sftp backend', { timeout: 30_000 }, () => {
@@ -254,13 +299,25 @@ describe('sftp backend', { timeout: 30_000 }, () => {
   it('closes the local file when the server refuses an upload', async () => {
     const file = path.join(local, 'db.gz')
     await fs.writeFile(file, progressContent())
-    await fs.mkdir(path.join(root, 'api', 'db.gz.part'), { recursive: true })
+    refusedOpens = true
     const before = openDescriptors()
     for (let attempt = 0; attempt < 10; attempt++) {
       await expect(backend.upload('api/db.gz', file, 'application/gzip')).rejects.toThrow()
     }
     await delay(100)
     expect(openDescriptors() - before).toBeLessThan(3)
+    await backend.close()
+  })
+
+  it('cancels an upload once it started, leaving the stored file as it was and no partial file', async () => {
+    await backend.upload('api/db.gz', await localFile('first.gz', 'stored'), 'application/gzip')
+    const file = path.join(local, 'big.gz')
+    await fs.writeFile(file, Buffer.alloc(8 * 1024 * 1024, 7))
+    const cancel = new AbortController()
+
+    await expect(backend.upload('api/db.gz', file, 'application/gzip', { signal: cancel.signal, onProgress: () => cancel.abort(new Error('cancelled')) })).rejects.toThrow()
+    expect(await textOf(await backend.download('api/db.gz'))).toBe('stored')
+    expect(await fs.readdir(path.join(root, 'api'))).toEqual(['db.gz'])
     await backend.close()
   })
 
@@ -277,5 +334,49 @@ describe('sftp backend', { timeout: 30_000 }, () => {
     await backend.close()
     expect((await backend.list())?.map(file => file.path)).toEqual(['a.txt'])
     await backend.close()
+  })
+
+  it('keeps the stored file when the new one cannot take its place', async () => {
+    await backend.upload('api/db.gz', await localFile('first.gz', 'stored'), 'application/gzip')
+    refusedRenames = 1
+
+    await expect(backend.upload('api/db.gz', await localFile('second.gz', 'replacement'), 'application/gzip')).rejects.toThrow()
+    expect(await textOf(await backend.download('api/db.gz'))).toBe('stored')
+    expect(await fs.readdir(path.join(root, 'api'))).toEqual(['db.gz'])
+    await backend.close()
+  })
+
+  it('never touches the partial file of another upload of the same file', async () => {
+    await fs.mkdir(path.join(root, 'api'), { recursive: true })
+    await fs.writeFile(path.join(root, 'api', 'db.gz.part'), 'another upload')
+    const cancel = new AbortController()
+    const file = path.join(local, 'big.gz')
+    await fs.writeFile(file, Buffer.alloc(8 * 1024 * 1024, 7))
+
+    await expect(backend.upload('api/db.gz', file, 'application/gzip', { signal: cancel.signal, onProgress: () => cancel.abort(new Error('cancelled')) })).rejects.toThrow()
+    expect(await fs.readFile(path.join(root, 'api', 'db.gz.part'), 'utf-8')).toBe('another upload')
+    await backend.close()
+  })
+
+  it('reads its password once, opening the connection again without asking for it', async () => {
+    const resolve = vi.spyOn(context, 'resolve')
+    await backend.upload('a.txt', await localFile('a.txt', 'a'), 'text/plain')
+    await backend.close()
+    expect((await backend.list())?.map(file => file.path)).toEqual(['a.txt'])
+    expect(resolve).toHaveBeenCalledTimes(1)
+    await backend.close()
+  })
+
+  it('fails what waits on a server that stops answering, then connects again', async () => {
+    const reached = backendOn(proxyPort)
+    await reached.upload('api/db.gz', await localFile('first.gz', 'stored'), 'application/gzip')
+    frozen = true
+
+    const started = Date.now()
+    await expect(reached.upload('api/db.gz', await localFile('second.gz', 'replacement'), 'application/gzip')).rejects.toThrow()
+    expect(Date.now() - started).toBeLessThan(10_000)
+    frozen = false
+    expect(await textOf(await reached.download('api/db.gz'))).toBe('stored')
+    await reached.close()
   })
 })
