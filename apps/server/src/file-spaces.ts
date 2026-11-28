@@ -1,7 +1,7 @@
 import { isUtf8 } from 'node:buffer'
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { defaultEnvironmentFolder, readEnvironmentOptions, readYaml, readYamlMap, SHARED_CONFIG_PATH, writeLocalFile } from '@appsys-sas/devtool-environment'
+import { defaultEnvironmentFolder, readEnvironmentOptions, readYaml, readYamlMap, SHARED_CONFIG_PATH, withItemLock, writeLocalFile } from '@appsys-sas/devtool-environment'
 import type { RawConfig } from '@appsys-sas/devtool-config'
 import { AGENT_SKILL_FILE, agentSkillFolderOf, type AgentSkillSummary, type FileEntryPayload, type FilePayload, type FileTreePayload, newAgentSkill, type ProjectDefinition, readAgentSkill } from '@appsys-sas/devtool-shared'
 
@@ -151,7 +151,8 @@ export abstract class FileSpace {
   }
 
   /**
-   * Replaces a file, unless it changed since it was read, it is binary or its content is refused.
+   * Replaces a file, unless it changed since it was read, it is binary, its content is refused, or
+   * something else holds it.
    *
    * @param filePath - The path of the file.
    * @param content - The new content.
@@ -159,6 +160,33 @@ export abstract class FileSpace {
    * @returns The file as it now stands, with whether it was replaced and why not.
    */
   async write (filePath: string, content: string, baseUpdatedAt: string | null): Promise<FilePayload> {
+    try {
+      return await this.holding(filePath, async () => this.replace(filePath, content, baseUpdatedAt))
+    } catch (error) {
+      return { ...(await this.read(filePath)), error: messageOf(error) }
+    }
+  }
+
+  /**
+   * Runs a task on a file while nothing else may change it; files of a space are not shared by default.
+   *
+   * @param _filePath - The path of the file.
+   * @param task - The task.
+   * @returns What the task returns.
+   */
+  protected async holding<T> (_filePath: string, task: () => Promise<T>): Promise<T> {
+    return task()
+  }
+
+  /**
+   * Replaces a file, unless it changed since it was read, it is binary or its content is refused.
+   *
+   * @param filePath - The path of the file.
+   * @param content - The new content.
+   * @param baseUpdatedAt - Last change of the file the content was edited from, null when it did not exist.
+   * @returns The file as it now stands, with whether it was replaced and why not.
+   */
+  private async replace (filePath: string, content: string, baseUpdatedAt: string | null): Promise<FilePayload> {
     const current = await this.read(filePath)
     if (current.error) {
       return current
@@ -303,6 +331,17 @@ export class ListedFileSpace extends FileSpace {
     if (YAML_EXTENSION.test(filePath)) {
       readYamlMap(content, filePath)
     }
+  }
+
+  /**
+   * Runs a task on a configuration file while no transfer of it as an item of the environment runs.
+   *
+   * @param filePath - The path of the file, its path in the environment.
+   * @param task - The task.
+   * @returns What the task returns.
+   */
+  protected async holding<T> (filePath: string, task: () => Promise<T>): Promise<T> {
+    return withItemLock(this.root, filePath, task)
   }
 
   /**

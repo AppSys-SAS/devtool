@@ -36,7 +36,8 @@ export {
   sharedConfigItem,
   TransferCancelledError,
   transfersParts,
-  type TransferResult
+  type TransferResult,
+  withItemLock
 } from './environment.js'
 export type { TransferDirection } from './access.js'
 export { redisDatabaseName } from './redis.js'

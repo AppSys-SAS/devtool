@@ -514,6 +514,22 @@ export function sharedConfigItem (options: EnvironmentOptions): EnvironmentItem 
 }
 
 /**
+ * Runs a task on the local copy of an item, such as a transfer or an edit, while no other task holds
+ * it, in any process using the same environment folder; another one is refused until it ends. The
+ * lock lives in that folder, named after the folded path of the item, so spellings a store takes for
+ * one file share it.
+ *
+ * @param folder - The folder of the environment.
+ * @param itemPath - The path of the item.
+ * @param task - The task.
+ * @returns What the task returns.
+ */
+export async function withItemLock<T> (folder: string, itemPath: string, task: () => Promise<T>): Promise<T> {
+  const key = createHash('sha256').update(foldedPath(itemPath)).digest('hex')
+  return withFileLock(path.join(folder, LOCKS_FOLDER, `${key}.lock`), itemPath, task)
+}
+
+/**
  * Lists the tables of the local database of an item, or the key groups of its local Redis database.
  *
  * @param item - The database or Redis item.
@@ -987,18 +1003,15 @@ export class Environment {
   }
 
   /**
-   * Runs a transfer of an item while no other transfer of it runs, in any process using the same
-   * environment folder; the lock lives in that folder, named after the folded path of the item, so
-   * spellings a store takes for one file share it. The temporary files an earlier transfer of the
-   * item left, when its process was stopped abruptly, are removed first.
+   * Runs a transfer of an item while nothing else holds it (see {@link withItemLock}), the temporary
+   * files an earlier transfer of the item left, when its process was stopped abruptly, removed first.
    *
    * @param item - The item.
    * @param transfer - The transfer.
    * @returns What the transfer did.
    */
   private async locked (item: EnvironmentItem, transfer: () => Promise<TransferResult>): Promise<TransferResult> {
-    const key = createHash('sha256').update(foldedPath(item.path)).digest('hex')
-    return withFileLock(path.join(this._options.folder, LOCKS_FOLDER, `${key}.lock`), item.path, async () => {
+    return withItemLock(this._options.folder, item.path, async () => {
       await removeLeftovers(localPathOf(this._options.folder, item.path))
       return transfer()
     })
