@@ -1,8 +1,9 @@
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
+import { withItemLock } from '@appsys-sas/devtool-environment'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { TreeFileSpace } from '../../src/file-spaces.js'
+import { ListedFileSpace, TreeFileSpace } from '../../src/file-spaces.js'
 
 let root: string
 
@@ -28,6 +29,20 @@ afterEach(async () => {
 async function pathsOf (space: TreeFileSpace): Promise<string[]> {
   return (await space.tree()).entries.map(entry => entry.path)
 }
+
+describe('ListedFileSpace', () => {
+  it('refuses to save a configuration file while a transfer of it runs, then saves it once the transfer ended', async () => {
+    const space = new ListedFileSpace('configs', root, ['app.yml'])
+    const opened = await space.read('app.yml')
+
+    const refused = await withItemLock(root, 'app.yml', async () => space.write('app.yml', 'port: 9090\n', opened.updatedAt))
+    expect(refused).toMatchObject({ error: 'app.yml is in use: try again once it ends' })
+    expect(await fs.readFile(path.join(root, 'app.yml'), 'utf-8')).toBe('port: 8080\n')
+
+    expect(await space.write('app.yml', 'port: 9090\n', opened.updatedAt)).toMatchObject({ saved: true })
+    expect(await fs.readFile(path.join(root, 'app.yml'), 'utf-8')).toBe('port: 9090\n')
+  })
+})
 
 describe('TreeFileSpace', () => {
   it('hides the files and folders whose name starts with a dot by default', async () => {

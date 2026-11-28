@@ -145,8 +145,8 @@ synchronized, only once its data is restored: after a restore that fails, the it
 its backend. A pull records an item as synchronized only when the copy of its backend was
 listed before it ran and did not change meanwhile; otherwise its result says so, and the item stays
 behind its backend. One transfer of an item runs at a time, whether from the CLI, the server or an
-agent: another one is refused until it ends, with `<path> is in use` from the same
-process, or `<path> is in use by another process`. That second message names the lock, a file of
+agent: another one, or saving the file in the Config tab, is refused until it ends, with
+`<path> is in use` from the same process, or `<path> is in use by another process`. That second message names the lock, a file of
 the `.devtool-locks` folder of the environment folder, which no item may use: remove it should a
 transfer stopped abruptly leave it behind.
 
