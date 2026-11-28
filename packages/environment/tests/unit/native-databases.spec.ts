@@ -5,8 +5,8 @@ import os from 'node:os'
 import path from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { gunzipSync, gzipSync } from 'node:zlib'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { databaseEngine, type DatabaseTarget } from '../../src/engines.js'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { databaseEngine, type DatabaseTarget, stopRun } from '../../src/engines.js'
 
 const hasDocker = ((): boolean => {
   try {
@@ -163,6 +163,52 @@ describe.skipIf(!hasDocker)('native archives of real databases', { timeout: TEST
 
     afterAll(() => {
       remove(target.container)
+    })
+
+    it('stops inside the container a dump its signal cancels while it waits on a lock, the other sessions of the server untouched', async () => {
+      const dumps = (): string => sqlIn('postgres', `SELECT count(*) FROM pg_stat_activity WHERE application_name = 'pg_dump'`)
+      const locks = (): string => sql(`SELECT count(*) FROM pg_locks WHERE mode = 'AccessExclusiveLock' AND relation = 'public.users'::regclass`)
+      const zombies = (): string => exec(target.container, ['sh', '-c', `grep -l '^State:[[:space:]]*Z' /proc/[0-9]*/status 2>/dev/null | wc -l`])
+      docker(['exec', '-d', target.container, 'psql', '-U', 'postgres', '-d', `dbname='sales=2026'`, '-c', 'BEGIN; LOCK TABLE public.users IN ACCESS EXCLUSIVE MODE; SELECT pg_sleep(60)'])
+      try {
+        await vi.waitFor(() => expect(locks()).toBe('1'), { timeout: 10_000 })
+        const cancel = new AbortController()
+        const dump = bytesOf(engine.dumpTable(target, 'public.users', cancel.signal))
+        await vi.waitFor(() => expect(dumps()).toBe('1'), { timeout: 10_000 })
+        cancel.abort(new Error('cancelled'))
+
+        await expect(dump).rejects.toThrow()
+        await vi.waitFor(() => expect(dumps()).toBe('0'), { timeout: 5000 })
+        expect(locks()).toBe('1')
+        await vi.waitFor(() => expect(zombies()).toBe('0'), { timeout: 5000 })
+      } finally {
+        sqlIn('postgres', `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE query LIKE '%pg_sleep%' AND pid <> pg_backend_pid()`)
+      }
+    })
+
+    it('stops a run whose shell keeps starting commands, each process reaped by its own parent', async () => {
+      const marked = (run: string): string => exec(target.container, ['sh', '-c', `for proc in /proc/[0-9]*; do tr '\\0' '\\n' 2>/dev/null < "$proc/environ" | grep -qx "ADT_RUN=$1" && echo; done | wc -l`, 'sh', run])
+      const states = (state: string): string => exec(target.container, ['sh', '-c', `grep -l '^State:[[:space:]]*${state}' /proc/[0-9]*/status 2>/dev/null | wc -l`])
+      const survivors = (): string => sqlIn('postgres', `SELECT count(*) FROM pg_stat_activity WHERE application_name = 'survivor'`)
+      const idle = randomUUID()
+      docker(['exec', '-d', '-e', `ADT_RUN=${idle}`, target.container, 'sh', '-c', 'for i in $(seq 300); do sleep 600 & done; wait'])
+      docker(['exec', '-d', '-e', 'PGAPPNAME=survivor', target.container, 'psql', '-U', 'postgres', '-c', 'SELECT pg_sleep(600)'])
+      try {
+        await vi.waitFor(() => expect(survivors()).toBe('1'), { timeout: 10_000 })
+        for (let offset = 0; offset <= 300; offset += 25) {
+          const run = randomUUID()
+          docker(['exec', '-d', '-e', `ADT_RUN=${run}`, target.container, 'sh', '-c', 'x=$(sleep 0.3); sleep 60'])
+          await sleep(offset)
+          await stopRun(target.container, run)
+
+          expect(marked(run)).toBe('0')
+          expect(survivors()).toBe('1')
+          await vi.waitFor(() => expect(states('[TZ]')).toBe('0'), { timeout: 3000 })
+        }
+      } finally {
+        await stopRun(target.container, idle)
+        sqlIn('postgres', `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name = 'survivor'`)
+      }
     })
 
     it('lists the tables holding rows of a database whose name libpq would read as a connection string, partitioned tables left out', async () => {
