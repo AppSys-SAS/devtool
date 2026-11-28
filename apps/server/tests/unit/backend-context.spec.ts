@@ -4,7 +4,7 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createBackendContext } from '../../src/environment.js'
 
-vi.mock('@appsys-sas/devtool-environment', async original => ({ ...await original<typeof import('@appsys-sas/devtool-environment')>(), DEVELOPER_ANSWER_MS: 300 }))
+vi.mock('@appsys-sas/devtool-environment', async original => ({ ...await original<typeof import('@appsys-sas/devtool-environment')>(), DEVELOPER_ANSWER_MS: 2000, STDIO_GRACE_MS: 100 }))
 
 let folder: string
 
@@ -28,14 +28,17 @@ describe('createBackendContext', () => {
     expect(Date.now() - started).toBeLessThan(3000)
   })
 
-  it('gives the value of a command by the time the developer has, though a process it detached keeps its output open', async () => {
+  it('gives the value of a command once it ended, leaving alone a process it left running with its output open', async () => {
     const context = createBackendContext({}, async () => '')
     const pidFile = path.join(folder, 'detached')
     const started = Date.now()
 
     try {
       expect(await context.resolve(`{{ $(sleep 30 & echo $! > "${pidFile}"; echo value) }}`)).toBe('value')
-      expect(Date.now() - started).toBeLessThan(3000)
+      expect(Date.now() - started).toBeLessThan(1500)
+      const pid = Number((await fs.readFile(pidFile, 'utf-8')).trim())
+      expect(pid).toBeGreaterThan(0)
+      expect(() => process.kill(pid, 0)).not.toThrow()
     } finally {
       const pid = Number((await fs.readFile(pidFile, 'utf-8').catch(() => '')).trim())
       if (Number.isInteger(pid) && pid > 0) {

@@ -420,9 +420,10 @@ describe('sftp backend', { timeout: 30_000 }, () => {
     await backend.close()
   })
 
-  it('cancels at once an upload whose file the server never ends writing, removing its partial file meanwhile', async () => {
+  it('cancels at once an upload whose file the server never ends writing, removing its partial file, then ending the write', async () => {
     await backend.upload('api/db.gz', await localFile('first.gz', 'stored'), 'application/gzip')
     heldCloses = []
+    const closed = closedSessions
     const cancel = new AbortController()
     const upload = backend.upload('api/db.gz', await localFile('second.gz', 'another upload'), 'application/gzip', { signal: cancel.signal })
     await vi.waitFor(() => expect(heldCloses).toHaveLength(1))
@@ -431,12 +432,9 @@ describe('sftp backend', { timeout: 30_000 }, () => {
     await expect(upload).rejects.toThrow('cancelled')
     expect(await fs.readFile(path.join(root, 'api', 'db.gz'), 'utf-8')).toBe('stored')
     await vi.waitFor(async () => expect(await fs.readdir(path.join(root, 'api'))).toEqual(['db.gz']))
-    expect(heldCloses).toHaveLength(1)
-    const held = heldCloses
+    await vi.waitFor(() => expect(closedSessions).toBeGreaterThan(closed), { timeout: 6000 })
     heldCloses = null
-    for (const close of held) {
-      close()
-    }
+    expect(await textOf(await backend.download('api/db.gz'))).toBe('stored')
   })
 
   it('closes the connection when the server does not answer the removal of the partial file of a cancelled upload', async () => {
