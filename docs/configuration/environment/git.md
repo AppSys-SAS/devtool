@@ -18,7 +18,8 @@ environment:
 ```
 
 The devtool keeps a working copy of the repository in its cache folder
-(`<adt.cacheDir>/environment/git/<name>`) and brings it to the remote branch before each operation.
+(`<adt.cacheDir>/environment/git/`, in a folder named after a hash of the backend name, one process
+using it at a time) and brings it to the remote branch before each operation.
 Each push makes one commit, `devtool: push api/config.yml`, and pushes it; when the remote refuses it
 because someone pushed meanwhile, the devtool rebases once and pushes again. A file that did not
 change makes no commit. The branch is created by the first push when the repository does not have it.

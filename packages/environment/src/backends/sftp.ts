@@ -1,12 +1,27 @@
+import { randomUUID } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { pipeline, type Readable } from 'node:stream'
 import SftpClient from 'ssh2-sftp-client'
-import { type BackendContext, type BackendProblem, type BackendSettings, type BackendType, byteCounter, type EnvironmentBackend, readText, type RemoteFile, type TransferOptions } from './backend.js'
+import { BACKEND_IDLE_MS, type BackendContext, type BackendProblem, type BackendSettings, type BackendType, byteCounter, type EnvironmentBackend, readText, type RemoteFile, type TransferOptions } from './backend.js'
 
 const PARTIAL_SUFFIX = '.part'
+const KEEPALIVE_TRIES = 4
+
+/**
+ * Removes the partial file of a failed upload.
+ * @param client The connected client.
+ * @param partialPath The partial file.
+ * @param error Why the upload failed.
+ * @returns The error to raise, telling also when the partial file could not be removed.
+ */
+async function withoutPartial (client: SftpClient, partialPath: string, error: unknown): Promise<Error> {
+  const failure = await client.delete(partialPath, true).then(() => null, (cause: unknown) => cause)
+  const reason = error instanceof Error ? error : new Error(String(error))
+  return failure === null ? reason : new Error(`${reason.message}; the partial file ${partialPath} could not be removed`, { cause: error })
+}
 
 /** Settings of an SFTP server storing the files under a folder. */
 export interface SftpSettings extends BackendSettings {
@@ -31,6 +46,7 @@ export interface SftpSettings extends BackendSettings {
 class SftpBackend implements EnvironmentBackend {
   private _client: Promise<SftpClient> | null = null
   private readonly _downloads = new Set<Readable>()
+  private readonly _secrets = new Map<string, Promise<string>>()
 
   /**
    * @param _settings The server, its folder and how to sign in.
@@ -81,29 +97,73 @@ class SftpBackend implements EnvironmentBackend {
   }
 
   /**
-   * Stores a local file, written next to its place then renamed, so a cut upload never replaces the stored file.
+   * Stores a local file, written next to its place then renamed, so a cut upload never replaces the
+   * stored file. A server without atomic rename gets the stored file moved aside, never deleted,
+   * until the new one takes its place.
    * @param filePath The path of the file.
    * @param localFile The local file.
    * @param _mediaType Unused, a file of the server having no media type.
-   * @param options Follows the bytes sent.
+   * @param options Follows the bytes sent, and cancels the upload before the stored file is
+   * replaced, the partial file then removed.
    */
-  async upload (filePath: string, localFile: string, _mediaType: string, { onProgress }: TransferOptions = {}): Promise<void> {
+  async upload (filePath: string, localFile: string, _mediaType: string, { onProgress, signal }: TransferOptions = {}): Promise<void> {
     const client = await this.client()
     const remotePath = this.remotePath(filePath)
-    const partialPath = `${remotePath}${PARTIAL_SUFFIX}`
+    const partialPath = `${remotePath}.${randomUUID()}${PARTIAL_SUFFIX}`
     const { size } = await fs.stat(localFile)
     await client.mkdir(path.posix.dirname(remotePath), true)
+    signal?.throwIfAborted()
     const source = createReadStream(localFile)
+    /**
+     * Stops reading the local file once the upload is cancelled, which fails the transfer.
+     */
+    const cancel = (): void => {
+      source.destroy(new Error('upload cancelled'))
+    }
+    signal?.addEventListener('abort', cancel, { once: true })
     try {
+      if (signal?.aborted) {
+        cancel()
+      }
       await client.put(pipeline(source, byteCounter(size, onProgress), () => undefined), partialPath)
+      signal?.throwIfAborted()
+    } catch (error) {
+      throw await withoutPartial(client, partialPath, error)
     } finally {
+      signal?.removeEventListener('abort', cancel)
       source.destroy()
     }
+    await client.posixRename(partialPath, remotePath).catch(async () => this.replaceAside(client, partialPath, remotePath)).catch(async (error: unknown) => {
+      throw await withoutPartial(client, partialPath, error)
+    })
+  }
+
+  /**
+   * Replaces a stored file by another one with plain renames: the stored file is moved aside under
+   * a name the listing leaves out, put back when the new one cannot take its place, and deleted
+   * once it did, or left aside when it cannot be deleted.
+   * @param client The connected client.
+   * @param partialPath The new file.
+   * @param remotePath The stored file.
+   */
+  private async replaceAside (client: SftpClient, partialPath: string, remotePath: string): Promise<void> {
+    const asidePath = `${remotePath}.${randomUUID()}${PARTIAL_SUFFIX}`
+    const stored = await client.exists(remotePath) === '-'
+    if (stored) {
+      await client.rename(remotePath, asidePath)
+    }
     try {
-      await client.posixRename(partialPath, remotePath)
-    } catch {
-      await client.delete(remotePath, true)
       await client.rename(partialPath, remotePath)
+    } catch (error) {
+      if (stored) {
+        await client.rename(asidePath, remotePath).catch((failure: unknown) => {
+          throw new Error(`${error instanceof Error ? error.message : String(error)}; the stored file stays at ${asidePath}: ${failure instanceof Error ? failure.message : String(failure)}`, { cause: error })
+        })
+      }
+      throw error
+    }
+    if (stored) {
+      await client.delete(asidePath, true).catch(() => undefined)
     }
   }
 
@@ -142,42 +202,76 @@ class SftpBackend implements EnvironmentBackend {
   }
 
   /**
-   * Gives the connection to the server, opened on first use and after it dropped.
+   * Opens the connection, reading the secrets that sign in, which may ask the developer to approve their reading.
+   */
+  async prepare (): Promise<void> {
+    await this.client()
+  }
+
+  /**
+   * Gives the connection to the server, opened on first use and again once it failed or closed.
    * @returns The connected client.
    */
   private async client (): Promise<SftpClient> {
-    this._client ??= this.connect().catch((error: unknown) => {
-      this._client = null
-      throw error
-    })
+    if (this._client === null) {
+      const forget = (): void => {
+        if (this._client === connection) {
+          this._client = null
+        }
+      }
+      const connection: Promise<SftpClient> = this.connect(forget).catch((error: unknown) => {
+        forget()
+        throw error
+      })
+      this._client = connection
+    }
     return this._client
   }
 
   /**
    * Opens the connection, signing in with the private key, else the password, else the SSH agent.
+   * The connection closes, failing what waits on it, when it cannot be opened in time or the
+   * server stops answering its keepalive messages.
+   * @param forget Told once the connection failed or closed.
    * @returns The connected client.
    */
-  private async connect (): Promise<SftpClient> {
+  private async connect (forget: () => void): Promise<SftpClient> {
     const { host, port, username, privateKey, passphrase, password } = this._settings
-    const forget = (): void => {
-      this._client = null
-    }
     const client = new SftpClient('devtool', { error: forget, end: forget, close: forget })
+    for (const event of ['error', 'end', 'close']) {
+      client.on(event, forget)
+    }
     const auth: SftpClient.ConnectOptions = {}
     if (privateKey !== null) {
       auth.privateKey = await fs.readFile(privateKey.startsWith('~/') ? path.join(os.homedir(), privateKey.slice(2)) : privateKey)
       if (passphrase !== null) {
-        auth.passphrase = await this._context.resolve(passphrase)
+        auth.passphrase = await this.secret(passphrase)
       }
     } else if (password !== null) {
-      auth.password = await this._context.resolve(password)
+      auth.password = await this.secret(password)
     } else if (process.env.SSH_AUTH_SOCK) {
       auth.agent = process.env.SSH_AUTH_SOCK
     } else {
       throw new Error(`cannot sign in to ${host}: set privateKey or password on the sftp backend, or start an SSH agent`)
     }
-    await client.connect({ host, port, username, ...auth })
+    await client.connect({ host, port, username, ...auth, readyTimeout: BACKEND_IDLE_MS, keepaliveInterval: BACKEND_IDLE_MS / KEEPALIVE_TRIES, keepaliveCountMax: KEEPALIVE_TRIES - 1 })
     return client
+  }
+
+  /**
+   * Reads a secret that signs in, its value blocks read once, so that opening the connection again
+   * never asks the developer again.
+   * @param value The secret, value blocks not read yet.
+   * @returns The secret.
+   */
+  private async secret (value: string): Promise<string> {
+    let read = this._secrets.get(value)
+    if (!read) {
+      read = this._context.resolve(value)
+      this._secrets.set(value, read)
+      read.catch(() => this._secrets.delete(value))
+    }
+    return read
   }
 }
 

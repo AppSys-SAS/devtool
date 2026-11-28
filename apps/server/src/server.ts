@@ -362,12 +362,12 @@ export class DevtoolServer implements McpServerHost {
     }
 
     if (message.type === 'envCancel') {
-      this.environment.cancel(message.data.index)
+      this.environment.cancel(message.data.run, message.data.index)
       return
     }
 
     if (message.type === 'envDismissRun') {
-      await this.environment.dismissRun()
+      await this.environment.dismissRun(message.data.run)
       return
     }
 

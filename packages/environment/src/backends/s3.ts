@@ -2,7 +2,7 @@ import { createReadStream } from 'node:fs'
 import fs from 'node:fs/promises'
 import { PassThrough, pipeline, type Readable } from 'node:stream'
 import { DeleteObjectCommand, GetObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client, S3ServiceException } from '@aws-sdk/client-s3'
-import { type BackendContext, type BackendProblem, type BackendSettings, type BackendType, byteCounter, type EnvironmentBackend, readText, type RemoteFile, type TransferOptions } from './backend.js'
+import { BACKEND_IDLE_MS, type BackendContext, type BackendProblem, type BackendSettings, type BackendType, byteCounter, type EnvironmentBackend, knownSize, readText, type RemoteFile, type TransferOptions } from './backend.js'
 
 /** Settings of an S3 bucket storing the files, under a prefix. */
 export interface S3Settings extends BackendSettings {
@@ -49,7 +49,7 @@ class S3Backend implements EnvironmentBackend {
         }
         files.push({
           path: object.Key.slice(this._settings.prefix.length),
-          size: object.Size ?? 0,
+          size: knownSize(object.Size),
           updatedAt: object.LastModified ?? new Date(0),
           version: (object.ETag ?? '').replaceAll('"', '')
         })
@@ -80,16 +80,26 @@ class S3Backend implements EnvironmentBackend {
 
   /**
    * Stores a local file as an object, streamed, replacing the stored one; a file that cannot be read
-   * whole aborts the request.
+   * whole, or a cancel, aborts the request, the stored object then left as it was.
    * @param path The path of the file.
    * @param localFile The local file.
    * @param mediaType The media type of the object.
-   * @param options Follows the bytes sent.
+   * @param options Follows the bytes sent, and cancels the upload.
    */
-  async upload (path: string, localFile: string, mediaType: string, { onProgress }: TransferOptions = {}): Promise<void> {
+  async upload (path: string, localFile: string, mediaType: string, { onProgress, signal }: TransferOptions = {}): Promise<void> {
     const client = await this.client()
     const { size } = await fs.stat(localFile)
     const abort = new AbortController()
+    /**
+     * Abandons the request once the upload is cancelled.
+     */
+    const cancel = (): void => {
+      abort.abort(signal?.reason)
+    }
+    signal?.addEventListener('abort', cancel, { once: true })
+    if (signal?.aborted) {
+      cancel()
+    }
     const source = createReadStream(localFile)
     const body = pipeline(source, byteCounter(size, onProgress), error => {
       if (error) {
@@ -107,6 +117,7 @@ class S3Backend implements EnvironmentBackend {
     } catch (error) {
       throw abort.signal.aborted ? abort.signal.reason : error
     } finally {
+      signal?.removeEventListener('abort', cancel)
       source.destroy()
       body.destroy()
     }
@@ -133,6 +144,14 @@ class S3Backend implements EnvironmentBackend {
   }
 
   /**
+   * Reads the credentials of the service, those of the settings or the default ones of the machine,
+   * which may ask the developer to approve their reading or to sign in.
+   */
+  async prepare (): Promise<void> {
+    await (await this.client()).config.credentials()
+  }
+
+  /**
    * Gives the client of the service, its credentials read on first use.
    * @returns The client.
    */
@@ -145,7 +164,8 @@ class S3Backend implements EnvironmentBackend {
   }
 
   /**
-   * Creates the client of the service, reading the value blocks of the credentials.
+   * Creates the client of the service, reading the value blocks of the credentials. A request
+   * fails once its connection cannot be opened or its socket stays silent for too long.
    * @returns The client.
    */
   private async connect (): Promise<S3Client> {
@@ -153,7 +173,13 @@ class S3Backend implements EnvironmentBackend {
     const credentials = accessKeyId !== null && secretAccessKey !== null
       ? { accessKeyId: await this._context.resolve(accessKeyId), secretAccessKey: await this._context.resolve(secretAccessKey) }
       : undefined
-    return new S3Client({ endpoint: endpoint ?? undefined, region, forcePathStyle: pathStyle, credentials })
+    return new S3Client({
+      endpoint: endpoint ?? undefined,
+      region,
+      forcePathStyle: pathStyle,
+      credentials,
+      requestHandler: { connectionTimeout: BACKEND_IDLE_MS, socketTimeout: BACKEND_IDLE_MS }
+    })
   }
 }
 

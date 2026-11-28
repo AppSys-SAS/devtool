@@ -145,7 +145,7 @@ synchronized, only once its data is restored: after a restore that fails, the it
 its backend. A pull records an item as synchronized only when the copy of its backend was
 listed before it ran and did not change meanwhile; otherwise its result says so, and the item stays
 behind its backend. One transfer of an item runs at a time, whether from the CLI, the server or an
-agent: another one is refused until it ends, with `<path> is being transferred` from the same
+agent: another one is refused until it ends, with `<path> is in use` from the same
 process, or `<path> is in use by another process`. That second message names the lock, a file of
 the `.devtool-locks` folder of the environment folder, which no item may use: remove it should a
 transfer stopped abruptly leave it behind.
@@ -353,21 +353,37 @@ devtool env push -i                       # choose items and tables
 - `-i` chooses items, tables and key groups interactively.
 
 The Environment page shows the same actions, with the state of each item, its backend and whether it is
-encrypted. A checkbox on each group, and one next to Pull and Push, selects all its items at once. While
-a pull or a push runs, each item shows the bytes its backend moved, with the size of the file and the
-percentage when the backend knows it:
+encrypted. **Refresh** lists the copies of the backends again; a backend that fails, or does not answer
+within a minute, is named with the reason above the items, whose local copies stay shown. A checkbox
+on each group, and one next to the number of items selected, selects all its items at once. While a pull or a push runs, each item shows the bytes its backend moved and the speed, with the
+size of the file and the percentage when it is known; for an encrypted file, the bytes of its content:
 
 | Backend | Progress |
 |---|---|
 | `cdn`, `s3`, `sftp` | bytes sent and received, against the size of the file |
-| `git` | bytes `git push` reports as written; on pull, the file is fetched while the backend lists its files, so only the copy out of the working copy is counted |
-| `scripts` | on pull, the size of `%{ADT:FILE}` while the command writes it; on push, the `progress: <bytes>` lines of the command, see [Scripts](/configuration/environment/scripts#progress) |
+| `git` | bytes `git push` reports as written, compressed, so a file git compresses well moves fast to its end; on pull, the file is fetched while the backend lists its files, so only the copy out of the working copy is counted |
+| `scripts` | on pull, the size of `%{ADT:FILE}` while the command writes it, against the size the `list` command gave; on push, the `progress: <bytes>` lines of the command, see [Scripts](/configuration/environment/scripts#progress) |
 
-With [encryption](/configuration/environment/encryption), the bytes counted are the encrypted ones.
+When the size of a file is not known, the page shows the bytes received and the speed with a moving bar.
 
-A pull can be cancelled while it downloads, item by item or whole: the archive goes to a temporary
-file next to the local copy, so a cancelled item keeps its local data, its local copy and its
-synchronization record. Once an archive is complete, its restore always runs to its end.
+A pull or a push can be cancelled while its file moves, item by item or whole. A pulled archive goes
+to a temporary file next to the local copy, so a cancelled item keeps its local data, its local copy
+and its synchronization record; once an archive is complete, its restore always runs to its end. A
+pushed dump replaces the local copy only once stored, and every backend replaces its copy only once
+the whole file is stored, so a cancelled or failed push leaves both copies as they were.
+
+A transfer also stops when its backend shows no activity for a minute: a listing that does not
+answer, a download that sends nothing, an upload that, once it reported some progress, reports none
+before it sent the whole file. A transfer that keeps moving data is never stopped, however long it
+takes. Once the whole file is sent, the backend's own connection bounds the wait for its answer: S3
+and SFTP give up after a minute of silence and the CDN after five minutes. A git backend is bounded by
+git itself: an exchange that moves no data for a minute fails, its SSH connection must open and its
+server keep answering within a minute (unless you set your own SSH command), and what git or SSH asks
+you, such as approving a key or signing a commit, is never timed; cancel it to stop it.
+The time the developer takes to type a password or to approve the reading of a secret is not counted;
+it must be given within five minutes. A failed or interrupted transfer
+reports why; once the file is stored or restored, what fails afterwards, such as recording the item
+as synchronized, is told without failing the transfer.
 
 For databases, buckets and Redis databases, the page also offers:
 
@@ -376,7 +392,8 @@ For databases, buckets and Redis databases, the page also offers:
 - **Remove local copy**: deletes the local copy, whose data stays restored, to free the disk. The
   item stays up to date until the copy of its backend changes; a pull downloads a copy again.
 
-The page groups the items by the first folder of their path. `sections` groups them by type instead,
+The page groups the items by the first segment of their path: their first folder, or their file name
+for an item at the root of the environment. `sections` groups them by type instead,
 and renames groups:
 
 ```yaml
@@ -521,8 +538,8 @@ Environment page shows the error and `devtool env` stops.
 - `invalid ignore of <path> in the environment: must be a list of key paths, such as
   connections.*.lastUsedAt`, `... needs a YAML, JSON, TOML, XML or .env file`: see [Ignored keys](#ignored-keys).
 - `invalid format of <path> in the environment: must be devtool or native`
-- `invalid sections in the environment: ...`: `by` is `folder` or `type`, and `names` maps texts to
-  non-empty texts.
+- `invalid sections in the environment: ...`: `sections` takes only `by` and `names`; `by` is `folder`
+  or `type`, and `names` maps texts to texts that are not blank.
 - `invalid path of <path> in the environment: write it <canonical path>`: a path without `./`, leading
   `/` or `..` segments; `<path> is declared twice in the environment`: each item has its own path;
   `<path> and <path> differ only by letter case, Unicode form or path spelling`: a backend or a disk

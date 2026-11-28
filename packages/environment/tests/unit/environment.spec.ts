@@ -140,12 +140,13 @@ describe('readEnvironmentOptions', () => {
     })
 
     it('refuses an unknown grouping and names that are not texts', () => {
-      expect(() => read({ sections: { by: 'kind' } })).toThrow('invalid sections in the environment: {"by":"kind"}, by must be folder or type')
+      expect(() => read({ sections: { by: 'kind' } })).toThrow('invalid sections in the environment: {"by":"kind"}, only by and names are read, by must be folder or type')
       expect(() => read({ sections: { names: { api: '' } } })).toThrow('invalid sections in the environment')
       expect(() => read({ sections: { names: { api: 42 } } })).toThrow('invalid sections in the environment')
       expect(() => read({ sections: { names: ['api'] } })).toThrow('invalid sections in the environment')
       expect(() => read({ sections: { names: null } })).toThrow('invalid sections in the environment')
       expect(() => read({ sections: 'type' })).toThrow('invalid sections in the environment')
+      expect(() => read({ sections: { by: 'folder', nmes: {} } })).toThrow('invalid sections in the environment')
     })
   })
 

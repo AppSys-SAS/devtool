@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import fs from 'node:fs/promises'
 import { promisify } from 'node:util'
 import { authReaderOf, readAuthOptions } from '@appsys-sas/devtool-auth'
@@ -9,6 +10,7 @@ import {
   configFormatOf,
   type CopyInfo,
   createBackends,
+  DEVELOPER_ANSWER_MS,
   Environment,
   type EnvironmentBackend,
   type EnvironmentOptions,
@@ -43,7 +45,8 @@ const execFileAsync = promisify(execFile)
 
 /**
  * Builds what the backends of the environment need: value blocks read from the configuration folder,
- * the cache folder, the identity provider and a way to ask the developer for a secret.
+ * their commands stopped when they do not answer within the time the developer has to answer, the
+ * cache folder, the identity provider and a way to ask the developer for a secret.
  *
  * @param config - The raw configuration.
  * @param askSecret - Asks the developer for a secret.
@@ -55,7 +58,7 @@ export function createBackendContext (config: RawConfig, askSecret: (label: stri
   const secrets = new CommandSecrets({
     account: null,
     folder: configFolder,
-    runShell: async command => (await execFileAsync('/bin/sh', ['-c', command], { cwd: configFolder })).stdout,
+    runShell: async command => (await execFileAsync('/bin/sh', ['-c', command], { cwd: configFolder, timeout: DEVELOPER_ANSWER_MS })).stdout,
     readAuth: authReaderOf(auth)
   })
   return { resolve: async text => secrets.resolve(text), askSecret, cacheDir: resolveCacheFolder(config), configFolder, auth }
@@ -72,24 +75,25 @@ export interface EnvironmentTarget {
  * Converts a copy description for the interface.
  *
  * @param copy - The copy.
- * @returns Its size and ISO date.
+ * @returns Its size, ISO date and version.
  */
 function copyPayload (copy: CopyInfo): EnvironmentCopyPayload {
-  return { size: copy.size, updatedAt: copy.updatedAt.toISOString() }
+  return { size: copy.size, updatedAt: copy.updatedAt.toISOString(), version: copy.version ?? null }
 }
 
 const PEM_MAX_BYTES = 1024 * 1024
 const PROGRESS_PUBLISH_MS = 200
+const RUN_ACTIONS = new Set<string>(['pull', 'push', 'restore', 'remove'] satisfies EnvironmentAction[])
 
 /**
  * Tells what a local PEM file holds: its first certificate, with the end of its validity, or a private key.
  *
  * @param filePath - The local file.
- * @param size - Its size, larger files being left unread.
+ * @param size - Its size, larger or unknown sizes being left unread.
  * @returns What it holds, null when it is no PEM file or cannot be read.
  */
-async function readPem (filePath: string, size: number): Promise<EnvironmentPemPayload | null> {
-  if (size > PEM_MAX_BYTES) {
+async function readPem (filePath: string, size: number | null): Promise<EnvironmentPemPayload | null> {
+  if (size === null || size > PEM_MAX_BYTES) {
     return null
   }
   const content = await fs.readFile(filePath, 'utf-8').catch(() => '')
@@ -114,12 +118,37 @@ function targetName (target: EnvironmentTarget): string {
   return target.tables?.length ? `${target.path}:${target.tables.join(',')}` : target.path
 }
 
+/** The backends of a configuration, and how many operations use them. */
+interface BackendSet {
+  backends: Map<string, EnvironmentBackend>
+  users: number
+  /** Whether a newer configuration replaced them, so they close once unused. */
+  replaced: boolean
+}
+
+/** An environment an operation uses, and the release of its backends once the operation ends. */
+interface EnvironmentLease {
+  environment: Environment
+  release: () => void
+}
+
+/**
+ * Closes backends no longer used, logging those that cannot be closed.
+ *
+ * @param backends - The backends.
+ */
+function closeBackends (backends: Iterable<EnvironmentBackend>): void {
+  for (const backend of backends) {
+    backend.close().catch((error: unknown) => logger.warn('Environment', 'Backend', `Not closed: ${error instanceof Error ? error.message : String(error)}`))
+  }
+}
+
 /**
  * Development environment of the developer as the interface shows it: the items with their local
  * copies and the copies of their backends, and the pulls and pushes it starts, one at a time.
  */
 export class DevtoolEnvironment {
-  private _backends = new Map<string, EnvironmentBackend>()
+  private _backends: BackendSet = { backends: new Map(), users: 0, replaced: false }
   private _context: BackendContext | null = null
   private _options: EnvironmentOptions | null = null
   private _items: EnvironmentItemPayload[] = []
@@ -127,6 +156,8 @@ export class DevtoolEnvironment {
   private _run: EnvironmentRunPayload | null = null
   /** Cancels each step of the run in progress. */
   private _cancels: AbortController[] = []
+  /** Counts the refreshes not finished. */
+  private _refreshing = 0
   /** Counts the refreshes started. */
   private _refreshes = 0
   /** The latest refresh published, so an older one ending later never replaces its items. */
@@ -147,13 +178,17 @@ export class DevtoolEnvironment {
 
   /**
    * Takes the `auth` and `environment` sections of the configuration, connects the backends it
-   * declares, replacing the previous ones, and schedules the pulls it declares.
+   * declares, replacing the previous ones, closed once no operation uses them, and schedules the
+   * pulls it declares. A refresh started before never publishes its items.
    *
    * @param config - The raw configuration.
    */
   configure (config: RawConfig): void {
-    for (const backend of this._backends.values()) {
-      backend.close().catch((error: unknown) => logger.warn('Environment', 'Backend', `Not closed: ${error instanceof Error ? error.message : String(error)}`))
+    this._publishedRefresh = ++this._refreshes
+    const previous = this._backends
+    previous.replaced = true
+    if (previous.users === 0) {
+      closeBackends(previous.backends.values())
     }
     try {
       this._options = readEnvironmentOptions(config.environment)
@@ -163,7 +198,7 @@ export class DevtoolEnvironment {
       this._error = error instanceof Error ? error.message : String(error)
     }
     this._context = createBackendContext(config, this._askSecret)
-    this._backends = createBackends(this._options?.backends ?? [], this._context)
+    this._backends = { backends: createBackends(this._options?.backends ?? [], this._context), users: 0, replaced: false }
 
     for (const job of this._pullJobs) {
       job.stop()
@@ -192,7 +227,7 @@ export class DevtoolEnvironment {
   state (): EnvironmentPayload {
     const error = [this._error, ...this._scheduleErrors].filter(Boolean).join('; ') || null
     const backends = (this._options?.backends ?? []).map(backend => ({ name: backend.slug, type: backend.type, default: backend.slug === this._options?.defaultBackend, encrypted: backend.encryption !== null }))
-    return { configured: this._backends.size > 0, backends, items: this._items, error, run: this._run }
+    return { configured: this._backends.backends.size > 0, backends, items: this._items, error, refreshing: this._refreshing > 0, run: this._run }
   }
 
   /**
@@ -225,28 +260,32 @@ export class DevtoolEnvironment {
    * @param paths - The paths of the items.
    */
   async autoPull (paths: string[]): Promise<void> {
-    const environment = this.environment()
-    if (!environment || !paths.length || (this._run && !this._run.finished)) {
+    const lease = !paths.length || (this._run && !this._run.finished) ? null : this.lease()
+    if (!lease) {
       return
     }
 
     const targets: EnvironmentTarget[] = []
     const skipped: { path: string, detail: string }[] = []
-    const { items } = await environment.describe()
-    for (const { item, local, remote, synced } of items.filter(described => paths.includes(described.item.path))) {
-      if (remote === null || remote === 'unknown' || (synced && (synced.remoteVersion ?? synced.remoteUpdatedAt.toISOString()) === (remote.version ?? remote.updatedAt.toISOString()))) {
-        continue
+    try {
+      const { items } = await lease.environment.describe()
+      for (const { item, local, remote, synced } of items.filter(described => paths.includes(described.item.path))) {
+        if (remote === null || remote === 'unknown' || (synced && (synced.remoteVersion ?? synced.remoteUpdatedAt.toISOString()) === (remote.version ?? remote.updatedAt.toISOString()))) {
+          continue
+        }
+        if (local && local.updatedAt.getTime() !== synced?.localUpdatedAt.getTime()) {
+          skipped.push({ path: item.path, detail: synced ? 'local copy changed since the last sync, pull it by hand' : 'local copy never synchronized, pull it by hand' })
+          continue
+        }
+        const refusal = await lease.environment.refusal(item, 'pull')
+        if (refusal !== null) {
+          skipped.push({ path: item.path, detail: refusal })
+          continue
+        }
+        targets.push({ path: item.path, tables: null })
       }
-      if (local && local.updatedAt.getTime() !== synced?.localUpdatedAt.getTime()) {
-        skipped.push({ path: item.path, detail: synced ? 'local copy changed since the last sync, pull it by hand' : 'local copy never synchronized, pull it by hand' })
-        continue
-      }
-      const refusal = await environment.refusal(item, 'pull')
-      if (refusal !== null) {
-        skipped.push({ path: item.path, detail: refusal })
-        continue
-      }
-      targets.push({ path: item.path, tables: null })
+    } finally {
+      lease.release()
     }
     if (targets.length || skipped.length) {
       await this.run('pull', targets, skipped)
@@ -254,11 +293,51 @@ export class DevtoolEnvironment {
   }
 
   /**
-   * Describes the items again and publishes the state, unless a later refresh already published its own.
+   * Describes the items again, publishing that it does so, then the items unless a later refresh
+   * already published its own, or why they could not be described.
    */
   async refresh (): Promise<void> {
     const generation = ++this._refreshes
-    const environment = this.environment()
+    this._refreshing += 1
+    try {
+      await this._publish(this.state())
+      const { items, error } = await this.describeItems()
+      if (generation >= this._publishedRefresh) {
+        this._publishedRefresh = generation
+        this._error = error
+        this._items = items
+      }
+    } catch (error) {
+      if (generation >= this._publishedRefresh) {
+        this._error = `the environment could not be described: ${error instanceof Error ? error.message : String(error)}`
+      }
+    } finally {
+      this._refreshing -= 1
+    }
+    await this._publish(this.state())
+  }
+
+  /**
+   * Describes the items for the interface.
+   *
+   * @returns The items, and why the copies of some backends are unknown, null when every copy is known.
+   */
+  private async describeItems (): Promise<{ items: EnvironmentItemPayload[], error: string | null }> {
+    const lease = this.lease()
+    try {
+      return await this.describeWith(lease?.environment ?? null)
+    } finally {
+      lease?.release()
+    }
+  }
+
+  /**
+   * Describes the items of an environment for the interface.
+   *
+   * @param environment - The environment, null when the configuration declares none or no backend.
+   * @returns The items, and why the copies of some backends are unknown, null when every copy is known.
+   */
+  private async describeWith (environment: Environment | null): Promise<{ items: EnvironmentItemPayload[], error: string | null }> {
     const options = this._options
     let items: EnvironmentItemPayload[] = []
     let error = this._error
@@ -290,14 +369,7 @@ export class DevtoolEnvironment {
         })
       )
     }
-    if (generation < this._publishedRefresh) {
-      return
-    }
-
-    this._publishedRefresh = generation
-    this._error = error
-    this._items = items
-    await this._publish(this.state())
+    return { items, error }
   }
 
   /**
@@ -307,17 +379,19 @@ export class DevtoolEnvironment {
    * @returns True when the configuration was downloaded.
    */
   async pullSharedConfig (): Promise<boolean> {
-    const environment = this.environment()
     const item = this._options && sharedConfigItem(this._options)
-    if (!environment || !item) {
+    const lease = item ? this.lease() : null
+    if (!lease || !item) {
       return false
     }
 
     try {
-      const result = await environment.pull({ item, tables: null })
+      const result = await lease.environment.pull({ item, tables: null })
       this._error = result.done ? null : `${SHARED_CONFIG_PATH} is not on ${item.backend}`
     } catch (error) {
       this._error = error instanceof Error ? error.message : String(error)
+    } finally {
+      lease.release()
     }
 
     await this._publish(this.state())
@@ -350,14 +424,17 @@ export class DevtoolEnvironment {
    * @returns The differing keys, or why they could not be listed.
    */
   async keys (path: string): Promise<EnvironmentKeysPayload> {
-    const environment = this.environment()
     const item = this._options?.items.find(candidate => candidate.path === path)
-    if (!environment || item?.kind !== 'file') {
+    if (item?.kind !== 'file') {
       return { path, entries: [], error: `${path} is not a file of the environment` }
+    }
+    const lease = this.lease()
+    if (!lease) {
+      return { path, entries: [], error: 'the environment declares no backend it can use' }
     }
 
     try {
-      const differences = await environment.diffKeys(item)
+      const differences = await lease.environment.diffKeys(item)
       return {
         path,
         error: null,
@@ -369,14 +446,19 @@ export class DevtoolEnvironment {
       }
     } catch (error) {
       return { path, entries: [], error: error instanceof Error ? error.message : String(error) }
+    } finally {
+      lease.release()
     }
   }
 
   /**
-   * Forgets the last run once it is finished and publishes the state.
+   * Forgets a run once it is finished and publishes the state; nothing happens for another run than
+   * the last one.
+   *
+   * @param runId - The run.
    */
-  async dismissRun (): Promise<void> {
-    if (!this._run?.finished) {
+  async dismissRun (runId: string): Promise<void> {
+    if (this._run?.id !== runId || !this._run.finished) {
       return
     }
 
@@ -385,102 +467,162 @@ export class DevtoolEnvironment {
   }
 
   /**
-   * Cancels the download of items of the pull in progress: the item being downloaded is left as it
-   * was, an item waiting is skipped, and an item whose restore has started runs to its end.
-   * Nothing happens outside a pull in progress.
+   * Cancels the transfer of items of the pull or push in progress: the item whose file moves is left
+   * as it was, an item waiting is skipped at once, and an item whose restore started or whose file
+   * is stored runs to its end. Nothing happens outside a pull or push in progress, nor for another
+   * run than the one in progress.
    *
+   * @param runId - The run.
    * @param index - The step of the item, null for every step not finished.
    */
-  cancel (index: number | null): void {
-    if (this._run?.action !== 'pull' || this._run.finished) {
+  cancel (runId: string, index: number | null): void {
+    const run = this._run
+    if (run?.id !== runId || (run.action !== 'pull' && run.action !== 'push') || run.finished) {
       return
     }
+    let skipped = false
     for (const [step, cancel] of this._cancels.entries()) {
       if (index === null || index === step) {
         cancel.abort(new Error('cancelled'))
+        if (run.steps[step].status === 'pending') {
+          run.steps[step] = { ...run.steps[step], status: 'skipped', detail: 'cancelled', progress: null }
+          skipped = true
+        }
       }
+    }
+    if (skipped) {
+      this._publish(this.state()).catch((error: unknown) => logger.warn('Environment', 'Cancel', `Not published: ${error instanceof Error ? error.message : String(error)}`))
     }
   }
 
   /**
    * Runs an action over items one after the other, publishing the progress of each and the end of
-   * the run, then describes the items again. A request while a run is in progress does nothing.
+   * the run, then describes the items again. The run starts before the call returns, `state()` then
+   * giving it as the run in progress, and always ends, every step in a final state, even when the
+   * configuration changes meanwhile. A request while a run is in progress, or for an unknown action,
+   * does nothing.
    *
    * @param action - Pull or push the items, restore their local data from their local copies, or remove those copies.
    * @param targets - The items, with the tables of the databases and the keys of the configuration files.
    * @param skipped - Items reported as skipped in the run, with the reason.
    */
   async run (action: EnvironmentAction, targets: EnvironmentTarget[], skipped: { path: string, detail: string }[] = []): Promise<void> {
-    const environment = this.environment()
-    if (!environment || !this._options || (this._run && !this._run.finished)) {
+    const items = this._options?.items
+    if (!RUN_ACTIONS.has(action)) {
+      logger.warn('Environment', 'Run', `Unknown action ${JSON.stringify(action)}`)
       return
     }
-
+    if (!items || (this._run && !this._run.finished)) {
+      return
+    }
     const steps: EnvironmentRunPayload['steps'] = [
       ...targets.map(target => ({ target: targetName(target), status: 'pending' as const, detail: null, progress: null })),
       ...skipped.map(({ path, detail }) => ({ target: path, status: 'skipped' as const, detail, progress: null }))
     ]
-    const run: EnvironmentRunPayload = { action, steps, finished: false }
+    const lease = this.lease()
+    if (!lease) {
+      return
+    }
+    const { environment } = lease
     const actions: Record<EnvironmentAction, (selection: EnvironmentSelection) => Promise<TransferResult>> = {
       pull: async selection => environment.pull(selection),
       push: async selection => environment.push(selection),
       restore: async selection => environment.restoreLocal(selection),
       remove: async selection => environment.removeLocalCopy(selection)
     }
+    const run: EnvironmentRunPayload = { id: randomUUID(), action, steps, finished: false }
+    const cancels = targets.map(() => new AbortController())
     this._run = run
-    this._cancels = targets.map(() => new AbortController())
-    await this._publish(this.state())
+    this._cancels = cancels
 
     let pendingPublish: NodeJS.Timeout | undefined
-    for (const [index, target] of targets.entries()) {
-      const { signal } = this._cancels[index]
-      const item = this._options.items.find(candidate => candidate.path === target.path)
-      run.steps[index] = { ...run.steps[index], status: 'running' }
+    try {
       await this._publish(this.state())
-      try {
-        if (signal.aborted) {
-          throw new TransferCancelledError(target.path)
+      for (const [index, target] of targets.entries()) {
+        const { signal } = cancels[index]
+        if (run.steps[index].status !== 'pending') {
+          continue
         }
-        if (!item) {
-          throw new Error(`${target.path} is not part of the environment`)
-        }
-
-        const result = await actions[action]({
-          item,
-          tables: (item.kind === 'database' || item.kind === 'redis') && target.tables?.length ? target.tables : null,
-          keys: item.kind === 'file' && target.keys ? target.keys : null,
-          signal,
-          onProgress: (done, total) => {
-            run.steps[index] = { ...run.steps[index], progress: { done, total } }
-            pendingPublish ??= setTimeout(() => {
-              pendingPublish = undefined
-              this._publish(this.state()).catch((error: unknown) => logger.warn('Environment', 'Progress', `Not published: ${error instanceof Error ? error.message : String(error)}`))
-            }, PROGRESS_PUBLISH_MS)
+        try {
+          run.steps[index] = { ...run.steps[index], status: 'running' }
+          await this._publish(this.state())
+          if (signal.aborted) {
+            throw new TransferCancelledError(target.path)
           }
-        })
-        run.steps[index] = { ...run.steps[index], status: result.done ? 'done' : 'skipped', detail: result.detail, progress: null }
-      } catch (error) {
-        const cancelled = error instanceof TransferCancelledError
-        const detail = cancelled ? 'cancelled' : error instanceof Error ? error.message : String(error)
-        run.steps[index] = { ...run.steps[index], status: cancelled ? 'skipped' : 'failed', detail, progress: null }
+          const item = items.find(candidate => candidate.path === target.path)
+          if (!item) {
+            throw new Error(`${target.path} is not part of the environment`)
+          }
+          const tables = action === 'remove' ? null : target.tables ?? null
+          if (tables !== null && item.kind !== 'database' && item.kind !== 'redis') {
+            throw new Error(`${target.path} has no tables or key groups to choose from`)
+          }
+          if (tables?.length === 0) {
+            throw new Error(`no table or key group chosen for ${target.path}`)
+          }
+
+          const result = await actions[action]({
+            item,
+            tables,
+            keys: item.kind === 'file' && target.keys ? target.keys : null,
+            signal,
+            onProgress: (done, total) => {
+              if (run.steps[index].status !== 'running') {
+                return
+              }
+              run.steps[index] = { ...run.steps[index], progress: { done, total } }
+              pendingPublish ??= setTimeout(() => {
+                pendingPublish = undefined
+                this._publish(this.state()).catch((error: unknown) => logger.warn('Environment', 'Progress', `Not published: ${error instanceof Error ? error.message : String(error)}`))
+              }, PROGRESS_PUBLISH_MS)
+            }
+          })
+          run.steps[index] = { ...run.steps[index], status: result.done ? 'done' : 'skipped', detail: result.detail, progress: null }
+        } catch (error) {
+          const cancelled = error instanceof TransferCancelledError
+          const detail = cancelled ? 'cancelled' : error instanceof Error ? error.message : String(error)
+          run.steps[index] = { ...run.steps[index], status: cancelled ? 'skipped' : 'failed', detail, progress: null }
+        }
+        clearTimeout(pendingPublish)
+        pendingPublish = undefined
+        await this._publish(this.state())
       }
+    } finally {
       clearTimeout(pendingPublish)
-      pendingPublish = undefined
+      run.steps = run.steps.map(step => (step.status === 'pending' || step.status === 'running' ? { ...step, status: 'failed', detail: 'the run stopped before this item', progress: null } : step))
+      run.finished = true
+      this._cancels = []
+      lease.release()
       await this._publish(this.state())
     }
-
-    run.finished = true
-    this._cancels = []
-    await this._publish(this.state())
     await this.refresh()
   }
 
   /**
-   * Builds the environment of the configuration.
+   * Builds the environment of the configuration for an operation, whose backends stay open until
+   * the operation releases them, even when a new configuration replaces them meanwhile.
    *
-   * @returns The environment, or null when the configuration declares none or no backend.
+   * @returns The environment and its release, or null when the configuration declares none or no backend.
    */
-  private environment (): Environment | null {
-    return this._options && this._context && this._backends.size > 0 ? new Environment(this._backends, this._options, this._context) : null
+  private lease (): EnvironmentLease | null {
+    const set = this._backends
+    if (!this._options || !this._context || set.backends.size === 0) {
+      return null
+    }
+    set.users += 1
+    let released = false
+    return {
+      environment: new Environment(set.backends, this._options, this._context),
+      release: () => {
+        if (released) {
+          return
+        }
+        released = true
+        set.users -= 1
+        if (set.replaced && set.users === 0) {
+          closeBackends(set.backends.values())
+        }
+      }
+    }
   }
 }

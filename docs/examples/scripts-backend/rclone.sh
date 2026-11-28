@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Backend of the devtool environment storing the files on any storage rclone reaches (Google Drive,
 # Dropbox, OneDrive, WebDAV, Backblaze B2...), under the remote folder given by $REMOTE, such as
-# `myremote:dev-environment`. Needs rclone, configured with `rclone config`, and jq.
+# `myremote:dev-environment`. Needs rclone 1.63 or later, configured with `rclone config`, and jq.
+# A download writes straight into the file the devtool gives, so the devtool sees it grow.
 #
 # Usage: rclone.sh list
 #        rclone.sh download <path> <file>
@@ -12,16 +13,16 @@ set -euo pipefail
 : "${REMOTE:?set REMOTE to the rclone remote folder, such as myremote:dev-environment}"
 
 list () {
-  rclone lsjson -R --files-only --hash "$REMOTE" 2>/dev/null \
-    | jq '{ files: [ .[] | { path: .Path, size: .Size, updatedAt: .ModTime, version: (((.Hashes // {}) | to_entries | first | .value) // "\(.ModTime)-\(.Size)") } ] }' \
-    || echo '{"files":[]}'
+  rclone mkdir "$REMOTE"
+  rclone lsjson -R --files-only --hash "$REMOTE" \
+    | jq '{ files: [ .[] | { path: .Path, size: .Size, updatedAt: .ModTime, version: (((.Hashes // {}) | to_entries | first | .value) // "\(.ModTime)-\(.Size)") } ] }'
 }
 
 download () {
   if ! rclone lsf "$REMOTE/$1" >/dev/null 2>&1 || [ -z "$(rclone lsf "$REMOTE/$1")" ]; then
     exit 2
   fi
-  rclone copyto "$REMOTE/$1" "$2"
+  rclone copyto --inplace "$REMOTE/$1" "$2"
 }
 
 upload () {

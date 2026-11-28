@@ -6,7 +6,7 @@ import { PassThrough, Readable } from 'node:stream'
 import { setImmediate } from 'node:timers/promises'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BackendContext, EnvironmentBackend, RemoteFile, TransferOptions } from '../../src/backends/backend.js'
-import { decrypt, encrypt, encrypted, EncryptionSecret, keyFileKey, passwordFileKey, plainLengthOf, readEncryption } from '../../src/backends/encryption.js'
+import { decrypt, encrypt, encrypted, EncryptionSecret, keyFileKey, passwordFileKey, plainBytesOf, plainLengthOf, readEncryption } from '../../src/backends/encryption.js'
 import { progressRecorder } from './progress-fixtures.js'
 
 const KEY = randomBytes(32)
@@ -134,10 +134,10 @@ describe('encrypted', () => {
     expect((await store.list())?.[0].size).toBe(11)
     expect((await bytesOf((await store.download('api/config.yml'))!)).toString()).toBe('name: acme\n')
     expect(await store.download('absent.yml')).toBeNull()
-    await expect(fs.stat(`${local}.sealed`)).rejects.toThrow()
+    expect(await fs.readdir(folder)).toEqual(['config.yml'])
   })
 
-  it('reports the progress of the encrypted file its backend moves', async () => {
+  it('reports the progress of the encrypted file its backend moves in bytes of content, as its listing does', async () => {
     const { backend, files } = memoryBackend()
     const store = encrypted(backend, new EncryptionSecret({ key: KEY.toString('base64') }, contextOf().context, 'team'))
     const local = path.join(folder, 'db.gz')
@@ -145,15 +145,22 @@ describe('encrypted', () => {
 
     const sent = progressRecorder()
     await store.upload('api/db.gz', local, 'application/gzip', { onProgress: sent.onProgress })
-    const sealed = files.get('api/db.gz')!.length
-    expect(sent.reports).toEqual([[sealed, sealed]])
+    expect(files.get('api/db.gz')!.length).toBeGreaterThan(100_000)
+    expect(sent.reports).toEqual([[100_000, 100_000]])
 
     const received = progressRecorder()
     await bytesOf((await store.download('api/db.gz', { onProgress: received.onProgress }))!)
-    expect(received.reports).toEqual([[sealed, sealed]])
+    expect(received.reports).toEqual([[100_000, 100_000]])
+    expect((await store.list())?.[0].size).toBe(100_000)
   })
 
-  it('passes the signal of a listing and the options of a transfer to its backend', async () => {
+  it.each([0, 1, 65535, 65536, 65537, 200_000])('counts %i bytes of content in their encrypted file, and none in its header', async length => {
+    const sealed = await bytesOf(encrypt(Readable.from([randomBytes(length)]), keyFileKey(KEY), 'api/db.gz'))
+    expect(plainBytesOf(sealed.length)).toBe(length)
+    expect(plainBytesOf(10)).toBe(0)
+  })
+
+  it('passes the signal of a listing and the options of a transfer to its backend, and how its backend is bounded', async () => {
     const { backend } = memoryBackend()
     const list = vi.spyOn(backend, 'list')
     const download = vi.spyOn(backend, 'download')
@@ -164,6 +171,8 @@ describe('encrypted', () => {
     await store.download('absent.gz', { signal: cancel.signal })
     expect(list).toHaveBeenCalledWith(cancel.signal)
     expect(download).toHaveBeenCalledWith('absent.gz', { signal: cancel.signal })
+    expect(store.boundsItself).toBeUndefined()
+    expect(encrypted({ ...backend, boundsItself: true }, new EncryptionSecret({ key: KEY.toString('base64') }, contextOf().context, 'team')).boundsItself).toBe(true)
   })
 
   it('closes the stored file when its decrypted content is closed before being read', async () => {

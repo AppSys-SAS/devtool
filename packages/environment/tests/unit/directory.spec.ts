@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { Readable } from 'node:stream'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { withFileLock, writeLocalFile } from '../../src/directory.js'
+import { scratchPath, withFileLock, writeLocalFile } from '../../src/directory.js'
 
 let folder: string
 
@@ -56,11 +56,37 @@ describe('withFileLock', () => {
       })
     })
     await running
-    await expect(withFileLock(lockPath, 'api/db.gz', async () => 'second')).rejects.toThrow(/^api\/db\.gz is being transferred: try again once it ends$/)
+    await expect(withFileLock(lockPath, 'api/db.gz', async () => 'second')).rejects.toThrow(/^api\/db\.gz is in use: try again once it ends$/)
 
     release()
     await first
     expect(await withFileLock(lockPath, 'api/db.gz', async () => 'third')).toBe('third')
+  })
+
+  it('waits the given time for a lock another process holds, then runs the task', async () => {
+    const lockPath = path.join(folder, 'sync.json.lock')
+    await fs.writeFile(lockPath, String(process.ppid))
+    setTimeout(() => {
+      void fs.rm(lockPath)
+    }, 150)
+
+    expect(await withFileLock(lockPath, 'the journal', async () => fs.readFile(lockPath, 'utf-8'), 5_000)).toBe(String(process.pid))
+    await fs.writeFile(lockPath, String(process.ppid))
+    await expect(withFileLock(lockPath, 'the journal', async () => 'done', 100)).rejects.toThrow(`the journal is in use by another process (${process.ppid})`)
+  })
+
+  it('gives what the task did though its lock cannot be removed, the lock then refusing the next task', async () => {
+    const locks = path.join(folder, 'locks')
+    const lockPath = path.join(locks, 'db.gz.lock')
+    try {
+      expect(await withFileLock(lockPath, 'api/db.gz', async () => {
+        await fs.chmod(locks, 0o500)
+        return 'done'
+      })).toBe('done')
+      await expect(withFileLock(lockPath, 'api/db.gz', async () => 'again')).rejects.toThrow(`or remove ${lockPath} if none runs`)
+    } finally {
+      await fs.chmod(locks, 0o700)
+    }
   })
 
   it('runs the task once a lock left behind is removed', async () => {
@@ -86,5 +112,25 @@ describe('writeLocalFile', () => {
     const content = Readable.from([Buffer.from('hello')])
     await expect(writeLocalFile(path.join(folder, 'blocker/b.txt'), content)).rejects.toThrow()
     expect(content.destroyed).toBe(true)
+  })
+})
+
+describe('scratchPath', () => {
+  it('gives files of this process, removing first what processes no longer running left', async () => {
+    const root = path.join(folder, 'environment', 'tmp')
+    const ended = spawnSync(process.execPath, ['-e', '0']).pid
+    await fs.mkdir(path.join(root, String(ended)), { recursive: true })
+    await fs.writeFile(path.join(root, String(ended), 'copy.remote'), 'secret copy')
+    await fs.mkdir(path.join(root, String(process.ppid)), { recursive: true })
+    await fs.writeFile(path.join(root, String(process.ppid), 'copy.remote'), 'copy being read')
+
+    const scratches = await Promise.all(Array.from({ length: 5 }, async () => {
+      const scratch = await scratchPath(folder, 'remote')
+      await fs.writeFile(scratch, 'copy')
+      return scratch
+    }))
+    expect(scratches.every(scratch => path.dirname(scratch) === path.join(root, String(process.pid)) && scratch.endsWith('.remote'))).toBe(true)
+    expect((await fs.readdir(root)).sort()).toEqual([String(process.pid), String(process.ppid)].sort())
+    expect(await fs.readdir(path.join(root, String(process.pid)))).toHaveLength(5)
   })
 })

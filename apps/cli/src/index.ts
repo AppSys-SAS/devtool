@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 
-import { createWriteStream } from 'node:fs'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -28,7 +27,8 @@ import {
   sharedConfigItem,
   transfersParts,
   type TransferDirection,
-  type TransferResult
+  type TransferResult,
+  writeLocalFile
 } from '@appsys-sas/devtool-environment'
 import { CONFIG_FOLDER_VARIABLE, loadMergedConfig, resolveDefaultConfigPaths } from '@appsys-sas/devtool-config'
 import runProxy from '@appsys-sas/devtool-proxy'
@@ -503,13 +503,7 @@ async function main (): Promise<void> {
         }
 
         const target = path.resolve(destination ?? path.basename(filePath))
-        const partial = `${target}.part`
-        try {
-          await pipeline(content, createWriteStream(partial, { mode: 0o600 }))
-          await fs.rename(partial, target)
-        } finally {
-          await fs.rm(partial, { force: true })
-        }
+        await writeLocalFile(target, content)
         logger.info('CLI', 'Pull', `${filePath} -> ${target}`)
       })
     })

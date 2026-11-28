@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import type { Readable } from 'node:stream'
 import { setTimeout as delay } from 'node:timers/promises'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { TransferAccess } from '../../src/access.js'
 import type { BackendContext, BackendSettings, EnvironmentBackend } from '../../src/backends/backend.js'
 import { scripts } from '../../src/backends/scripts.js'
@@ -101,6 +101,7 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
+  vi.restoreAllMocks()
   await fs.rm(folder, { recursive: true, force: true })
 })
 
@@ -153,6 +154,13 @@ describe.skipIf(!hasBash)('scripts backend commands', () => {
     await expect(backend.list()).rejects.toThrow('the list command printed no JSON')
     const invalid = backendOf({ list: ['bash', '-c', 'echo \'{"files":[{"path":"a"}]}\''], download: ['true'], upload: ['true'], remove: ['true'] })
     await expect(invalid.list()).rejects.toThrow('the list command printed an invalid file')
+    const textSize = backendOf({ list: ['bash', '-c', 'echo \'{"files":[{"path":"a","size":"big","updatedAt":"2026-01-02T03:04:05Z"}]}\''], download: ['true'], upload: ['true'], remove: ['true'] })
+    await expect(textSize.list()).rejects.toThrow('the list command printed an invalid file')
+  })
+
+  it('reads a listing that leaves out the size of a file as a size it does not know', async () => {
+    const backend = backendOf({ list: ['bash', '-c', 'echo \'{"files":[{"path":"a","updatedAt":"2026-01-02T03:04:05Z"},{"path":"b","size":null,"updatedAt":"2026-01-02T03:04:05Z"}]}\''], download: ['true'], upload: ['true'], remove: ['true'] })
+    expect((await backend.list())?.map(file => [file.path, file.size])).toEqual([['a', null], ['b', null]])
   })
 
   it('reads the value blocks of the arguments and of the environment, and defaults the version to the date', async () => {
@@ -168,7 +176,7 @@ describe.skipIf(!hasBash)('scripts backend commands', () => {
     expect(files).toEqual([{ path: 's3cr3t-s3cr3t', size: 1, updatedAt: new Date('2026-01-02T03:04:05Z'), version: '2026-01-02T03:04:05.000Z' }])
   })
 
-  it('reports the size of the file the download command writes while it runs, then the whole file', async () => {
+  it('reports the size of the file the download command writes while it runs, then once it is written', async () => {
     const backend = backendOf({
       list: ['true'],
       download: ['bash', '-c', 'printf %s "$0" > "$1"; sleep 0.8; printf %s "$0$0" > "$1"', 'abcdef', '%{ADT:FILE}'],
@@ -178,10 +186,10 @@ describe.skipIf(!hasBash)('scripts backend commands', () => {
     const received = progressRecorder()
     expect(await textOf(await backend.download('a.gz', { onProgress: received.onProgress }))).toBe('abcdefabcdef')
     expect(received.reports).toContainEqual([6, null])
-    expect(received.reports.at(-1)).toEqual([12, 12])
+    expect(received.reports.at(-1)).toEqual([12, null])
   })
 
-  it('reports the progress lines of the upload command, split or not, at most the size of the file', async () => {
+  it('reports the progress lines of the upload command, split or not, against the size of the file', async () => {
     const backend = backendOf({
       list: ['true'],
       download: ['true'],
@@ -190,7 +198,7 @@ describe.skipIf(!hasBash)('scripts backend commands', () => {
     })
     const sent = progressRecorder()
     await backend.upload('a.gz', await localFile('a.gz', '0123456789'), 'application/gzip', { onProgress: sent.onProgress })
-    expect(sent.reports).toEqual([[4, 10], [9, 10], [10, 10], [10, 10]])
+    expect(sent.reports).toEqual([[4, 10], [9, 10], [99, 10]])
   })
 
   it('leaves the progress lines out of the message of a failing command', async () => {
@@ -238,6 +246,205 @@ describe.skipIf(!hasBash)('scripts backend commands', () => {
     expect(Date.now() - started).toBeLessThan(1000)
     await delay(1500)
     await expect(fs.access(marker)).rejects.toThrow()
+  }, 10_000)
+
+  it('kills a cancelled command ignoring the stop request once its grace delay is over', async () => {
+    const backend = backendOf({ list: ['true'], download: ['bash', '-c', 'trap "" TERM; sleep 30'], upload: ['true'], remove: ['true'] })
+    const cancel = new AbortController()
+    setTimeout(() => cancel.abort(new Error('cancelled')), 300)
+    const started = Date.now()
+    await expect(backend.download('a.gz', { signal: cancel.signal })).rejects.toThrow('download of shared stopped')
+    expect(Date.now() - started).toBeGreaterThanOrEqual(5000)
+    expect(Date.now() - started).toBeLessThan(8000)
+  }, 15_000)
+
+  it('passes a stop signal of the devtool on to a cancellable command and the processes it started', async () => {
+    const pidFile = path.join(folder, 'started')
+    const backend = backendOf({ list: ['true'], download: ['bash', '-c', 'sleep 30 & echo $! > "$0"; wait', pidFile], upload: ['true'], remove: ['true'] })
+    const listeners = process.listenerCount('SIGTERM')
+    const kill = process.kill.bind(process)
+    const raised: (string | number | undefined)[] = []
+    vi.spyOn(process, 'kill').mockImplementation((pid, name) => {
+      if (pid === process.pid) {
+        raised.push(name)
+        return true
+      }
+      return kill(pid, name)
+    })
+    const download = backend.download('a.gz', { signal: new AbortController().signal })
+    await vi.waitFor(async () => fs.access(pidFile), { timeout: 5000 })
+    const sleeper = Number((await fs.readFile(pidFile, 'utf-8')).trim())
+    process.emit('SIGTERM', 'SIGTERM')
+
+    await expect(download).rejects.toThrow('download of shared failed')
+    expect(() => kill(sleeper, 0)).toThrow()
+    expect(process.listenerCount('SIGTERM')).toBe(listeners)
+    expect(raised).toEqual(listeners === 0 ? ['SIGTERM'] : [])
+  }, 10_000)
+
+  it('leaves a stop signal to the listener the devtool already has, after passing it on', async () => {
+    const pidFile = path.join(folder, 'started')
+    const backend = backendOf({ list: ['true'], download: ['bash', '-c', 'sleep 30 & echo $! > "$0"; wait', pidFile], upload: ['true'], remove: ['true'] })
+    const kill = process.kill.bind(process)
+    const raised: (string | number | undefined)[] = []
+    vi.spyOn(process, 'kill').mockImplementation((pid, name) => {
+      if (pid === process.pid) {
+        raised.push(name)
+        return true
+      }
+      return kill(pid, name)
+    })
+    const stopping = vi.fn()
+    process.once('SIGTERM', stopping)
+    const download = backend.download('a.gz', { signal: new AbortController().signal })
+    await vi.waitFor(async () => fs.access(pidFile), { timeout: 5000 })
+    const sleeper = Number((await fs.readFile(pidFile, 'utf-8')).trim())
+    process.emit('SIGTERM', 'SIGTERM')
+
+    await expect(download).rejects.toThrow('download of shared failed')
+    expect(() => kill(sleeper, 0)).toThrow()
+    expect(stopping).toHaveBeenCalledOnce()
+    expect(raised).toEqual([])
+  }, 10_000)
+
+  it('kills every cancellable command and the processes they started as the devtool exits, with one listener', async () => {
+    const backend = backendOf({ list: ['true'], download: ['bash', '-c', 'trap "" TERM INT; sleep 30 & echo $! > "$0"; wait', '%{ADT:PATH}'], upload: ['true'], remove: ['true'] })
+    const exits = process.listeners('exit')
+    const stops = process.listenerCount('SIGTERM')
+    const pidFiles = [1, 2, 3].map(index => path.join(folder, `started-${index}`))
+    const outcomes = pidFiles.map(async pidFile => backend.download(pidFile, { signal: new AbortController().signal }).then(() => 'downloaded', (error: unknown) => (error as Error).message))
+    await vi.waitFor(async () => Promise.all(pidFiles.map(async pidFile => fs.access(pidFile))), { timeout: 5000 })
+    const sleepers = await Promise.all(pidFiles.map(async pidFile => Number((await fs.readFile(pidFile, 'utf-8')).trim())))
+    expect(process.listeners('exit')).toHaveLength(exits.length + 1)
+    expect(process.listenerCount('SIGTERM')).toBe(stops + 1)
+    for (const listener of process.listeners('exit').filter(candidate => !exits.includes(candidate))) {
+      (listener as () => void)()
+    }
+
+    for (const outcome of await Promise.all(outcomes)) {
+      expect(outcome).toMatch(/^download of shared failed/)
+    }
+    await vi.waitFor(() => {
+      for (const sleeper of sleepers) {
+        expect(() => process.kill(sleeper, 0)).toThrow()
+      }
+    })
+    expect(process.listeners('exit')).toEqual(exits)
+    expect(process.listenerCount('SIGTERM')).toBe(stops)
+  }, 10_000)
+
+  it('ends a stopped command once it exits, though a process that left its group keeps its output open', async () => {
+    const pidFile = path.join(folder, 'escaped')
+    const escape = `perl -MPOSIX -e 'POSIX::setsid(); open(my $f, ">", $ARGV[0]); print $f $$; close $f; sleep 8' "$0" & wait`
+    const backend = backendOf({ list: ['true'], download: ['true'], upload: ['bash', '-c', escape, pidFile], remove: ['true'] })
+    const cancel = new AbortController()
+    const upload = backend.upload('a.gz', await localFile('a.gz', 'content'), 'application/gzip', { signal: cancel.signal })
+    await vi.waitFor(async () => fs.access(pidFile), { timeout: 5000 })
+    const escaped = Number((await fs.readFile(pidFile, 'utf-8')).trim())
+    const started = Date.now()
+    cancel.abort(new Error('cancelled'))
+
+    try {
+      await expect(upload).rejects.toThrow('upload of shared stopped')
+      expect(Date.now() - started).toBeLessThan(2000)
+    } finally {
+      process.kill(escaped, 'SIGKILL')
+    }
+  }, 15_000)
+
+  it('ends a command once it exits, though a process that left its group keeps its output open', async () => {
+    const pidFile = path.join(folder, 'escaped')
+    const escape = `perl -MPOSIX -e 'POSIX::setsid(); open(my $f, ">", $ARGV[0]); print $f $$; close $f; sleep 8' "$0" & sleep 0.3; echo '{"files":[]}'`
+    const backend = backendOf({ list: ['bash', '-c', escape, pidFile], download: ['true'], upload: ['true'], remove: ['true'] })
+    const started = Date.now()
+
+    try {
+      expect(await backend.list()).toEqual([])
+      expect(Date.now() - started).toBeLessThan(3000)
+    } finally {
+      process.kill(Number((await fs.readFile(pidFile, 'utf-8')).trim()), 'SIGKILL')
+    }
+  }, 15_000)
+
+  it('ends a command cancelled once it exited as it ended, not as stopped', async () => {
+    const pidFile = path.join(folder, 'escaped')
+    const escape = `perl -MPOSIX -e 'POSIX::setsid(); open(my $f, ">", $ARGV[0]); print $f $$; close $f; sleep 5' "$0" & sleep 0.2; exit 0`
+    const backend = backendOf({ list: ['true'], download: ['true'], upload: ['bash', '-c', escape, pidFile], remove: ['true'] })
+    const cancel = new AbortController()
+    setTimeout(() => cancel.abort(new Error('cancelled')), 600)
+
+    try {
+      await backend.upload('a.gz', await localFile('a.gz', 'content'), 'application/gzip', { signal: cancel.signal })
+    } finally {
+      process.kill(Number((await fs.readFile(pidFile, 'utf-8')).trim()), 'SIGKILL')
+    }
+  }, 15_000)
+
+  it('kills what a command left running in its group once it ends', async () => {
+    const pidFile = path.join(folder, 'left')
+    const backend = backendOf({ list: ['true'], download: ['true'], upload: ['bash', '-c', 'sleep 300 > /dev/null 2>&1 & echo $! > "$0"', pidFile], remove: ['true'] })
+
+    await backend.upload('a.gz', await localFile('a.gz', 'content'), 'application/gzip')
+    const left = Number((await fs.readFile(pidFile, 'utf-8')).trim())
+    await vi.waitFor(() => {
+      expect(() => process.kill(left, 0)).toThrow()
+    })
+  }, 10_000)
+
+  it('runs every command in a group of its own that the stop signals of the devtool reach', async () => {
+    const pidFile = path.join(folder, 'started')
+    const backend = backendOf({ list: ['true'], download: ['true'], upload: ['true'], remove: ['bash', '-c', 'sleep 30 & echo $! > "$0"; wait', pidFile] })
+    const stopping = vi.fn()
+    process.once('SIGTERM', stopping)
+    const removal = backend.remove('a.gz')
+    await vi.waitFor(async () => fs.access(pidFile), { timeout: 5000 })
+    const sleeper = Number((await fs.readFile(pidFile, 'utf-8')).trim())
+    process.emit('SIGTERM', 'SIGTERM')
+
+    await expect(removal).rejects.toThrow('remove of shared failed')
+    await vi.waitFor(() => {
+      expect(() => process.kill(sleeper, 0)).toThrow()
+    })
+  }, 10_000)
+
+  it('counts the progress lines of the download command as bytes received', async () => {
+    const backend = backendOf({
+      list: ['true'],
+      download: ['bash', '-c', 'echo "progress: 5" >&2; sleep 0.3; printf abcdef > "$0"', '%{ADT:FILE}'],
+      upload: ['true'],
+      remove: ['true']
+    })
+    const received = progressRecorder()
+    expect(await textOf(await backend.download('a.gz', { onProgress: received.onProgress }))).toBe('abcdef')
+    expect(received.reports).toContainEqual([5, null])
+    expect(received.reports.at(-1)).toEqual([6, null])
+  })
+
+  it('reads the value blocks once, before any command runs', async () => {
+    const resolve = vi.fn(async (text: string) => text)
+    const { options } = scripts.readOptions({ list: ['bash', '-c', 'echo \'{"files":[]}\''], download: ['true'], upload: ['true'], remove: ['true'], env: { TOKEN: 'x' } }, sharedOf(), 'environment.backends.shared')
+    const backend = scripts.create(options!, { ...contextOf(), resolve })
+
+    await backend.prepare!()
+    const read = resolve.mock.calls.length
+    await backend.list()
+    await backend.list()
+    expect(resolve).toHaveBeenCalledTimes(read)
+  })
+
+  it('stops the upload command its signal cancels, with the processes it started', async () => {
+    const pidFile = path.join(folder, 'started')
+    const backend = backendOf({ list: ['true'], download: ['true'], upload: ['bash', '-c', 'echo "progress: 1" >&2; sleep 30 & echo $! > "$0"; wait', pidFile], remove: ['true'] })
+    const cancel = new AbortController()
+    const upload = backend.upload('a.gz', await localFile('a.gz', 'content'), 'application/gzip', { signal: cancel.signal })
+    await vi.waitFor(async () => fs.access(pidFile), { timeout: 5000 })
+    const sleeper = Number((await fs.readFile(pidFile, 'utf-8')).trim())
+    cancel.abort(new Error('cancelled'))
+
+    await expect(upload).rejects.toThrow('upload of shared stopped')
+    await vi.waitFor(() => {
+      expect(() => process.kill(sleeper, 0)).toThrow()
+    })
   }, 10_000)
 
   it('needs upload and remove commands unless the backend refuses every push', async () => {

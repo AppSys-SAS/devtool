@@ -1,25 +1,24 @@
 <script setup lang="ts">
-import { computed, provide } from 'vue'
+import { computed } from 'vue'
 import { Icon } from '@iconify/vue'
 import { Bookmark, FolderTree, Sparkles } from '@lucide/vue'
 import { RouterLink, RouterView } from 'vue-router'
 import type { DirectoryExtra } from '@appsys-sas/devtool-shared'
 import CommandItem from '@/components/CommandItem.vue'
 import IntegrationLink from '@/components/IntegrationLink.vue'
+import SidebarFrame from '@/components/SidebarFrame.vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import bookmarkStore from '@/stores/bookmark'
 import configStore from '@/stores/config'
-import layoutStore, { rightSidebarKey } from '@/stores/layout'
+import layoutStore from '@/stores/layout'
 
 const props = defineProps<{
   projectSlug: string
   directorySlug: string
 }>()
-
-provide(rightSidebarKey, true)
 
 type DirectoryCommand
   = | {
@@ -87,10 +86,14 @@ const handleOpenLinkInNewTab = (href: string) => {
 
 <template>
   <div class="flex h-full min-h-0">
-    <RouterView class="min-w-0 flex-1" />
-    <aside
-      v-show="layoutStore.isVisible('right')"
-      class="flex w-80 shrink-0 flex-col border-l bg-card"
+    <RouterView
+      class="min-w-0 flex-1"
+      :inert="layoutStore.covers('right')"
+    />
+    <SidebarFrame
+      side="right"
+      tag="aside"
+      class="w-80 flex-col border-l bg-card"
     >
       <ScrollArea class="min-h-0 flex-1 p-3">
         <Card>
@@ -215,6 +218,6 @@ const handleOpenLinkInNewTab = (href: string) => {
           </CardContent>
         </Card>
       </ScrollArea>
-    </aside>
+    </SidebarFrame>
   </div>
 </template>

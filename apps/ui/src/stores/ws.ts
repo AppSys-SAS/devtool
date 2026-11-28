@@ -287,18 +287,20 @@ class WsStore {
   }
 
   /**
-   * Asks the server to cancel downloads of the pull in progress.
+   * Asks the server to cancel transfers of a pull or a push in progress.
+   * @param run The run.
    * @param index The step of the item, null for every step not finished.
    */
-  envCancel (index: number | null): void {
-    this.send('envCancel', { index })
+  envCancel (run: string, index: number | null): void {
+    this.send('envCancel', { run, index })
   }
 
   /**
-   * Asks the server to forget the last finished pull or push.
+   * Asks the server to forget a finished run.
+   * @param run The run.
    */
-  envDismissRun (): void {
-    this.send('envDismissRun', {})
+  envDismissRun (run: string): void {
+    this.send('envDismissRun', { run })
   }
 
   /**

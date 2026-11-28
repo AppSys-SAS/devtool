@@ -6,13 +6,17 @@ import os from 'node:os'
 import path from 'node:path'
 import type { Readable } from 'node:stream'
 import { setTimeout as delay } from 'node:timers/promises'
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BackendContext, BackendSettings, EnvironmentBackend, RemoteFile } from '../../src/backends/backend.js'
 import { s3 } from '../../src/backends/s3.js'
 import { expectCompleteProgress, openDescriptors, progressContent, progressRecorder } from './progress-fixtures.js'
 
+vi.mock('../../src/backends/backend.js', async original => ({ ...await original<typeof import('../../src/backends/backend.js')>(), BACKEND_IDLE_MS: 1_000 }))
+
 const BUCKET = 'acme-dev'
 const PAGE_SIZE = 2
+const SLOW_CHUNKS = 8
+const SLOW_GAP_MS = 400
 
 interface StoredObject {
   body: Buffer
@@ -74,6 +78,16 @@ async function answer (request: IncomingMessage, response: ServerResponse): Prom
   const key = keyParts.map(decodeURIComponent).join('/')
   requests.push(`${request.method} ${key}`)
   if (key === 'never/answered.gz' || url.searchParams.get('prefix') === 'never/') {
+    request.resume()
+    return
+  }
+  if (key === 'slow/body.gz') {
+    response.writeHead(200, { 'Content-Length': String(SLOW_CHUNKS), 'ETag': '"slow"' })
+    for (let sent = 0; sent < SLOW_CHUNKS; sent++) {
+      await delay(SLOW_GAP_MS)
+      response.write('x')
+    }
+    response.end()
     return
   }
   if (bucket !== BUCKET) {
@@ -292,6 +306,34 @@ describe('s3 backend', () => {
     setTimeout(() => cancel.abort(new Error('cancelled')), 100)
     await expect(backend.download('never/answered.gz', { signal: cancel.signal })).rejects.toThrow()
     expect(cancel.signal.aborted).toBe(true)
+    await backend.close()
+  }, 10_000)
+
+  it('abandons an upload its signal cancels before the service answers, the stored object left as it was', async () => {
+    const backend = backendOf()
+    objects.set('never/answered.gz', { body: Buffer.from('stored'), contentType: 'application/gzip', etag: 'stored', updatedAt: new Date() })
+    const cancel = new AbortController()
+    setTimeout(() => cancel.abort(new Error('cancelled')), 100)
+    await expect(backend.upload('never/answered.gz', await localFile('db.gz', 'replacement'), 'application/gzip', { signal: cancel.signal })).rejects.toThrow()
+    expect(objects.get('never/answered.gz')?.body.toString()).toBe('stored')
+    await backend.close()
+  }, 10_000)
+
+  it('reads a body that keeps coming for longer than the silence it tolerates', async () => {
+    const backend = backendOf()
+    const started = Date.now()
+    expect(await textOf(await backend.download('slow/body.gz'))).toBe('x'.repeat(SLOW_CHUNKS))
+    expect(Date.now() - started).toBeGreaterThan(2_000)
+    await backend.close()
+  }, 15_000)
+
+  it('fails an upload whose service reads the whole file then never answers, the stored object left as it was', async () => {
+    const backend = backendOf()
+    objects.set('never/answered.gz', { body: Buffer.from('stored'), contentType: 'application/gzip', etag: 'stored', updatedAt: new Date() })
+    const started = Date.now()
+    await expect(backend.upload('never/answered.gz', await localFile('db.gz', 'replacement'), 'application/gzip')).rejects.toThrow()
+    expect(Date.now() - started).toBeLessThan(5_000)
+    expect(objects.get('never/answered.gz')?.body.toString()).toBe('stored')
     await backend.close()
   }, 10_000)
 

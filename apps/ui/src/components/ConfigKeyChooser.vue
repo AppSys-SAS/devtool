@@ -85,6 +85,16 @@ function choose (ids: string[], side: Side): void {
 }
 
 /**
+ * Gives the indentation of a key, one step deeper for each nesting level, its steps narrowing with
+ * its cell so that the deepest keys keep most of it.
+ * @param depth The nesting depth of the key.
+ * @returns The CSS padding.
+ */
+function indentOf (depth: number): string {
+  return `min(${depth}rem, ${Math.min(depth * 6, 30)}%)`
+}
+
+/**
  * Tells which side all the keys of a branch take.
  * @param branch The branch.
  * @returns The common side, or "mixed".
@@ -170,7 +180,7 @@ const allRevealed = computed(() => sensitiveIds.value.length > 0 && sensitiveIds
       </span>
       <div
         v-if="entries.length > 0"
-        class="flex gap-1"
+        class="flex flex-wrap gap-1"
       >
         <Button
           v-if="sensitiveIds.length > 0"
@@ -225,18 +235,21 @@ const allRevealed = computed(() => sensitiveIds.value.length > 0 && sensitiveIds
         <template v-if="row.kind === 'branch'">
           <span
             class="truncate font-mono font-medium"
-            :style="{ paddingLeft: `${row.depth * 1}rem` }"
+            :style="{ paddingLeft: indentOf(row.depth) }"
+            :title="row.name"
           >{{ row.name }}</span>
           <button
             type="button"
-            :class="cn('rounded px-2 py-0.5 text-left transition-colors', branchSide(row) === 'local' ? 'bg-primary/15 text-foreground' : 'text-muted-foreground hover:bg-accent')"
+            :class="cn('min-w-0 truncate rounded px-2 py-0.5 text-left transition-colors', branchSide(row) === 'local' ? 'bg-primary/15 text-foreground' : 'text-muted-foreground hover:bg-accent')"
+            :title="branchSide(row) === 'mixed' ? 'Mixed' : branchSide(row) === 'local' ? 'All local' : 'Take local'"
             @click="choose(row.leaves, 'local')"
           >
             {{ branchSide(row) === "mixed" ? "Mixed" : branchSide(row) === "local" ? "All local" : "Take local" }}
           </button>
           <button
             type="button"
-            :class="cn('rounded px-2 py-0.5 text-left transition-colors', branchSide(row) === 'remote' ? 'bg-primary/15 text-foreground' : 'text-muted-foreground hover:bg-accent')"
+            :class="cn('min-w-0 truncate rounded px-2 py-0.5 text-left transition-colors', branchSide(row) === 'remote' ? 'bg-primary/15 text-foreground' : 'text-muted-foreground hover:bg-accent')"
+            :title="branchSide(row) === 'mixed' ? 'Mixed' : branchSide(row) === 'remote' ? `All ${remoteName}` : `Take ${remoteName}`"
             @click="choose(row.leaves, 'remote')"
           >
             {{ branchSide(row) === "mixed" ? "Mixed" : branchSide(row) === "remote" ? `All ${remoteName}` : `Take ${remoteName}` }}
@@ -246,14 +259,18 @@ const allRevealed = computed(() => sensitiveIds.value.length > 0 && sensitiveIds
         <template v-else>
           <div
             class="flex min-w-0 items-center gap-1.5"
-            :style="{ paddingLeft: `${row.depth * 1}rem` }"
+            :style="{ paddingLeft: indentOf(row.depth) }"
           >
-            <span class="truncate font-mono">{{ row.name }}</span>
+            <span
+              class="truncate font-mono"
+              :title="row.name"
+            >{{ row.name }}</span>
             <Badge
               variant="outline"
-              class="shrink-0 px-1.5 py-0 text-[10px]"
+              class="max-w-1/2 min-w-0 shrink px-1.5 py-0 text-[10px]"
+              :title="differenceLabel(row.entry)"
             >
-              {{ differenceLabel(row.entry) }}
+              <span class="truncate">{{ differenceLabel(row.entry) }}</span>
             </Badge>
             <button
               v-if="isSensitive(row)"
