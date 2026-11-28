@@ -207,6 +207,7 @@ export async function stopRun (container: string, run: string): Promise<void> {
  * @returns The output, failing at its end when the script failed.
  */
 async function* scriptOutput (target: DatabaseTarget, script: string, args: string[] = [], signal?: AbortSignal): AsyncGenerator<Buffer> {
+  signal?.throwIfAborted()
   const run = signal ? randomUUID() : undefined
   const child = spawn('docker', dockerExec(target, false, script, args, run), { stdio: ['ignore', 'pipe', 'pipe'], signal })
   const errors = collectTail(child.stderr)

@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import fs from 'node:fs/promises'
 import os from 'node:os'
@@ -7,6 +7,11 @@ import { Readable } from 'node:stream'
 import { gzipSync } from 'node:zlib'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { assertDatabaseLessDump, databaseEngine, splitPostgresName } from '../../src/engines.js'
+
+vi.mock('node:child_process', async original => {
+  const actual = await original<typeof import('node:child_process')>()
+  return { ...actual, spawn: vi.fn(actual.spawn) }
+})
 
 const MAGIC = Buffer.from([0x6d, 0xe2, 0x99, 0x81])
 const TERMINATOR = Buffer.from([0xff, 0xff, 0xff, 0xff])
@@ -148,6 +153,33 @@ describe('splitPostgresName', () => {
     expect(splitPostgresName('"My Schema"."Order.Lines"')).toEqual({ schema: 'My Schema', table: 'Order.Lines' })
     expect(splitPostgresName('public."say ""hi"""')).toEqual({ schema: 'public', table: 'say "hi"' })
     expect(() => splitPostgresName('users')).toThrow('not a schema.table name: users')
+  })
+})
+
+describe('cancelled dumps', () => {
+  /**
+   * Reads a dump to its end.
+   * @param dump - The dump.
+   */
+  async function drain (dump: AsyncIterable<Buffer>): Promise<void> {
+    for await (const chunk of dump) {
+      expect(chunk).toBeDefined()
+    }
+  }
+
+  it('start no process once their signal is aborted', async () => {
+    vi.mocked(spawn).mockClear()
+    const cancel = new AbortController()
+    cancel.abort(new Error('cancelled'))
+    for (const name of ['postgres', 'mariadb', 'mongodb'] as const) {
+      const engine = databaseEngine(name)
+      const target = { container: name, database: 'catalog' }
+      await expect(engine.listTables(target, cancel.signal)).rejects.toThrow('cancelled')
+      await expect(drain(engine.dumpTable(target, 'users', cancel.signal))).rejects.toThrow('cancelled')
+    }
+
+    expect(spawn).not.toHaveBeenCalled()
+    expect(await dockerCalls()).toEqual([])
   })
 })
 
