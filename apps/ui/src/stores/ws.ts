@@ -281,9 +281,10 @@ class WsStore {
    * Asks the server to run an action over environment items.
    * @param action Pull or push the items, restore their local data from their local copies, or remove those copies.
    * @param targets The items, with the tables of the databases and the keys of the YAML files (null for the whole item).
+   * @param revision The configuration the items were chosen on, the server refusing the action once it changed.
    */
-  envRun (action: EnvironmentAction, targets: { path: string, tables: string[] | null, keys: EnvironmentKeyChoicePayload[] | null }[]): void {
-    this.send('envRun', { action, targets })
+  envRun (action: EnvironmentAction, targets: { path: string, tables: string[] | null, keys: EnvironmentKeyChoicePayload[] | null }[], revision: number): void {
+    this.send('envRun', { action, targets, revision })
   }
 
   /**

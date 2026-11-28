@@ -370,7 +370,8 @@ A pull or a push can be cancelled while its file moves, item by item or whole. A
 to a temporary file next to the local copy, so a cancelled item keeps its local data, its local copy
 and its synchronization record; once an archive is complete, its restore always runs to its end. A
 pushed dump replaces the local copy only once stored, and every backend replaces its copy only once
-the whole file is stored, so a cancelled or failed push leaves both copies as they were.
+the whole file is stored, so a cancelled or failed push leaves both copies as they were. A push to a
+git backend can no longer be cancelled once git sent the whole commit: it runs to its end.
 
 A transfer also stops when its backend shows no activity for a minute: a listing that does not
 answer, a download that sends nothing, an upload that, once it reported some progress, reports none
@@ -381,7 +382,9 @@ git itself: an exchange that moves no data for a minute fails, its SSH connectio
 server keep answering within a minute (unless you set your own SSH command), and what git or SSH asks
 you, such as approving a key or signing a commit, is never timed; cancel it to stop it.
 The time the developer takes to type a password or to approve the reading of a secret is not counted;
-it must be given within five minutes. A failed or interrupted transfer
+what a backend reads before its first transfer must be given within five minutes, what it reads when
+a transfer starts, such as the secrets of the `upload` command of a scripts backend, waits until you
+give it or cancel the transfer. A failed or interrupted transfer
 reports why; once the file is stored or restored, what fails afterwards, such as recording the item
 as synchronized, is told without failing the transfer.
 

@@ -272,8 +272,11 @@ describe.skipIf(!hasBash)('scripts backend commands', () => {
       return kill(pid, name)
     })
     const download = backend.download('a.gz', { signal: new AbortController().signal })
-    await vi.waitFor(async () => fs.access(pidFile), { timeout: 5000 })
-    const sleeper = Number((await fs.readFile(pidFile, 'utf-8')).trim())
+    const sleeper = await vi.waitFor(async () => {
+      const pid = Number((await fs.readFile(pidFile, 'utf-8')).trim())
+      expect(pid).toBeGreaterThan(0)
+      return pid
+    }, { timeout: 5000 })
     process.emit('SIGTERM', 'SIGTERM')
 
     await expect(download).rejects.toThrow('download of shared failed')
@@ -297,8 +300,11 @@ describe.skipIf(!hasBash)('scripts backend commands', () => {
     const stopping = vi.fn()
     process.once('SIGTERM', stopping)
     const download = backend.download('a.gz', { signal: new AbortController().signal })
-    await vi.waitFor(async () => fs.access(pidFile), { timeout: 5000 })
-    const sleeper = Number((await fs.readFile(pidFile, 'utf-8')).trim())
+    const sleeper = await vi.waitFor(async () => {
+      const pid = Number((await fs.readFile(pidFile, 'utf-8')).trim())
+      expect(pid).toBeGreaterThan(0)
+      return pid
+    }, { timeout: 5000 })
     process.emit('SIGTERM', 'SIGTERM')
 
     await expect(download).rejects.toThrow('download of shared failed')
@@ -397,8 +403,11 @@ describe.skipIf(!hasBash)('scripts backend commands', () => {
     const stopping = vi.fn()
     process.once('SIGTERM', stopping)
     const removal = backend.remove('a.gz')
-    await vi.waitFor(async () => fs.access(pidFile), { timeout: 5000 })
-    const sleeper = Number((await fs.readFile(pidFile, 'utf-8')).trim())
+    const sleeper = await vi.waitFor(async () => {
+      const pid = Number((await fs.readFile(pidFile, 'utf-8')).trim())
+      expect(pid).toBeGreaterThan(0)
+      return pid
+    }, { timeout: 5000 })
     process.emit('SIGTERM', 'SIGTERM')
 
     await expect(removal).rejects.toThrow('remove of shared failed')
@@ -432,13 +441,41 @@ describe.skipIf(!hasBash)('scripts backend commands', () => {
     expect(resolve).toHaveBeenCalledTimes(read)
   })
 
+  it('cancels an upload while the developer approves the reading of its value blocks', async () => {
+    const resolve = vi.fn(async (text: string) => (text === 'upload-secret' ? new Promise<string>(() => {}) : text))
+    const { options } = scripts.readOptions({ list: ['true'], download: ['true'], upload: ['true', 'upload-secret'], remove: ['true'] }, sharedOf(), 'environment.backends.shared')
+    const backend = scripts.create(options!, { ...contextOf(), resolve })
+    const cancel = new AbortController()
+    setTimeout(() => cancel.abort(new Error('cancelled')), 200)
+    await fs.writeFile(path.join(folder, 'a.gz'), 'archive')
+
+    await expect(backend.upload('a.gz', path.join(folder, 'a.gz'), 'application/gzip', { signal: cancel.signal })).rejects.toThrow('cancelled')
+  })
+
+  it('reads the value blocks of the upload and remove commands only when they run', async () => {
+    const resolve = vi.fn(async (text: string) => text)
+    const { options } = scripts.readOptions({ list: ['bash', '-c', 'echo \'{"files":[]}\''], download: ['true'], upload: ['true', 'upload-secret'], remove: ['true', 'remove-secret'] }, sharedOf(), 'environment.backends.shared')
+    const backend = scripts.create(options!, { ...contextOf(), resolve })
+
+    await backend.prepare!()
+    await backend.list()
+    expect(resolve.mock.calls.flat()).not.toContain('upload-secret')
+    expect(resolve.mock.calls.flat()).not.toContain('remove-secret')
+    await backend.remove('a.gz')
+    expect(resolve.mock.calls.flat()).toContain('remove-secret')
+    expect(resolve.mock.calls.flat()).not.toContain('upload-secret')
+  })
+
   it('stops the upload command its signal cancels, with the processes it started', async () => {
     const pidFile = path.join(folder, 'started')
     const backend = backendOf({ list: ['true'], download: ['true'], upload: ['bash', '-c', 'echo "progress: 1" >&2; sleep 30 & echo $! > "$0"; wait', pidFile], remove: ['true'] })
     const cancel = new AbortController()
     const upload = backend.upload('a.gz', await localFile('a.gz', 'content'), 'application/gzip', { signal: cancel.signal })
-    await vi.waitFor(async () => fs.access(pidFile), { timeout: 5000 })
-    const sleeper = Number((await fs.readFile(pidFile, 'utf-8')).trim())
+    const sleeper = await vi.waitFor(async () => {
+      const pid = Number((await fs.readFile(pidFile, 'utf-8')).trim())
+      expect(pid).toBeGreaterThan(0)
+      return pid
+    }, { timeout: 5000 })
     cancel.abort(new Error('cancelled'))
 
     await expect(upload).rejects.toThrow('upload of shared stopped')

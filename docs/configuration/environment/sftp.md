@@ -24,7 +24,8 @@ The devtool signs in with the first of these it finds:
 3. your SSH agent, through `SSH_AUTH_SOCK`.
 
 Without any of them, it stops with `cannot sign in to nas.example.dev: set privateKey or password on
-the sftp backend, or start an SSH agent`. `passphrase` and `password` read value blocks.
+the sftp backend, or start an SSH agent`. `passphrase` and `password` read value blocks, once, and
+again when the passphrase does not open the key or the server refused the password.
 
 An upload is written next to its place as `<file>.part`, then renamed, so a cut upload never replaces
 the stored file; the folders are created as needed. The connection is opened on first use, and

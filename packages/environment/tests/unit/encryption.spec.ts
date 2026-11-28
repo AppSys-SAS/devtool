@@ -175,6 +175,20 @@ describe('encrypted', () => {
     expect(encrypted({ ...backend, boundsItself: true }, new EncryptionSecret({ key: KEY.toString('base64') }, contextOf().context, 'team')).boundsItself).toBe(true)
   })
 
+  it('stops encrypting an upload once cancelled, its backend never reached and no file left', async () => {
+    const { backend } = memoryBackend()
+    const upload = vi.spyOn(backend, 'upload')
+    const store = encrypted(backend, new EncryptionSecret({ key: KEY.toString('base64') }, contextOf().context, 'team'))
+    const local = path.join(folder, 'db.gz')
+    await fs.writeFile(local, randomBytes(100_000))
+    const cancel = new AbortController()
+    cancel.abort(new Error('cancelled'))
+
+    await expect(store.upload('api/db.gz', local, 'application/gzip', { signal: cancel.signal })).rejects.toThrow('cancelled')
+    expect(upload).not.toHaveBeenCalled()
+    expect(await fs.readdir(folder)).toEqual(['db.gz'])
+  })
+
   it('closes the stored file when its decrypted content is closed before being read', async () => {
     const { backend, files } = memoryBackend()
     const store = encrypted(backend, new EncryptionSecret({ key: KEY.toString('base64') }, contextOf().context, 'team'))

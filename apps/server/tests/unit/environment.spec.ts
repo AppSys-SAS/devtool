@@ -21,7 +21,17 @@ function environmentOf (wait: number): DevtoolEnvironment {
   const environment = new DevtoolEnvironment(async payload => {
     published.push(structuredClone(payload))
   }, async () => '')
-  environment.configure({
+  environment.configure(configOf(wait))
+  return environment
+}
+
+/**
+ * Gives the configuration of two files on a scripts backend whose download waits before writing.
+ * @param wait - The seconds each download waits.
+ * @returns The raw configuration.
+ */
+function configOf (wait: number): Parameters<DevtoolEnvironment['configure']>[0] {
+  return {
     environment: {
       folder: path.join(folder, 'env'),
       backends: {
@@ -35,8 +45,7 @@ function environmentOf (wait: number): DevtoolEnvironment {
       },
       files: ['api/a.txt', 'api/b.txt']
     }
-  })
-  return environment
+  }
 }
 
 /**
@@ -109,6 +118,72 @@ afterEach(async () => {
 })
 
 describe('DevtoolEnvironment run', () => {
+  it('runs a request made before the items were first described', async () => {
+    const environment = environmentOf(0)
+    await environment.run('pull', [{ path: 'api/a.txt', tables: null }], [], environment.state().revision)
+
+    expect(environment.state().run?.steps.map(step => step.status)).toEqual(['done'])
+    expect(await localCopy('a.txt')).toBe('new')
+  })
+
+  it('refuses a run requested on a configuration replaced since, every item failed and left as it was', async () => {
+    const environment = environmentOf(0)
+    await environment.refresh()
+    const revision = environment.state().revision
+    environment.configure(configOf(1))
+    await environment.run('pull', [{ path: 'api/a.txt', tables: null }], [], revision)
+
+    expect(environment.state().run?.steps.map(step => [step.status, step.detail])).toEqual([['failed', 'the configuration changed since this was requested: check the items and start again']])
+    expect(await localCopy('a.txt')).toBe('old')
+  })
+
+  it('publishes the configuration its items were described from, refusing a request on it once replaced, then describes the new one', async () => {
+    const environment = environmentOf(0)
+    await environment.refresh()
+    const described = environment.state().revision
+    environment.configure(configOf(1))
+    expect(environment.state().revision).toBe(described)
+    await environment.run('pull', [{ path: 'api/a.txt', tables: null }], [], environment.state().revision)
+
+    expect(environment.state().run?.steps.map(step => step.status)).toEqual(['failed'])
+    expect(await localCopy('a.txt')).toBe('old')
+    expect(environment.state().revision).toBeGreaterThan(described)
+  })
+
+  it('runs a request made before a reload that changed nothing of the environment', async () => {
+    const environment = environmentOf(0)
+    await environment.refresh()
+    const revision = environment.state().revision
+    environment.configure(configOf(0))
+    await environment.run('pull', [{ path: 'api/a.txt', tables: null }], [], revision)
+
+    expect(environment.state().run?.steps.map(step => step.status)).toEqual(['done'])
+    expect(await localCopy('a.txt')).toBe('new')
+  })
+
+  it('tells why a request made on a configuration replaced by one without environment did nothing', async () => {
+    const environment = environmentOf(0)
+    await environment.refresh()
+    const revision = environment.state().revision
+    environment.configure({})
+    await environment.run('pull', [{ path: 'api/a.txt', tables: null }], [], revision)
+
+    expect(environment.state().run?.steps.map(step => step.status)).toEqual(['failed'])
+  })
+
+  it('drops an automatic pull whose configuration changes while its items are checked', async () => {
+    const environment = environmentOf(0)
+    await fs.rm(path.join(folder, 'env', 'api', 'a.txt'))
+    const release = gatedDescribe(3)
+    const pulling = environment.autoPull(['api/a.txt'])
+    environment.configure(configOf(1))
+    release()
+    await pulling
+
+    expect(environment.state().run).toBeNull()
+    await expect(localCopy('a.txt')).rejects.toThrow()
+  })
+
   it('cancels every item of a pull, the one downloading and the one waiting, leaving their copies as they were', async () => {
     const environment = environmentOf(5)
     const run = environment.run('pull', [{ path: 'api/a.txt', tables: null }, { path: 'api/b.txt', tables: null }])

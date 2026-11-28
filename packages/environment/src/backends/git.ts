@@ -6,7 +6,7 @@ import path from 'node:path'
 import { pipeline, type Readable } from 'node:stream'
 import { promisify } from 'node:util'
 import { scratchPath, withFileLock } from '../directory.js'
-import { BACKEND_IDLE_MS, type BackendContext, type BackendSettings, type BackendType, byteCounter, type EnvironmentBackend, lineReader, readText, type RemoteFile, type TransferOptions } from './backend.js'
+import { BACKEND_IDLE_MS, type BackendContext, type BackendSettings, type BackendType, byteCounter, type EnvironmentBackend, lineReader, readText, type RemoteFile, STDIO_GRACE_MS, type TransferOptions } from './backend.js'
 
 const execFileAsync = promisify(execFile)
 const queues = new Map<string, Promise<unknown>>()
@@ -15,9 +15,11 @@ const DEFAULT_IDENTITY = ['-c', 'user.name=devtool', '-c', 'user.email=devtool@l
 const PROGRESS_LINE = /^(Enumerating|Counting|Delta compression|Compressing|Writing|Total) /
 const WRITTEN_PATTERN = /^Writing objects:.*?, (\d+(?:\.\d+)?) (bytes|KiB|MiB|GiB)/
 const WRITTEN_ALL = /, done\.?$/
+const SENT_ALL = /^Writing objects: +100% /
 const UNIT_BYTES: Record<string, number> = { bytes: 1, KiB: 1024, MiB: 1024 ** 2, GiB: 1024 ** 3 }
 const IDLE_SECONDS = Math.max(1, Math.round(BACKEND_IDLE_MS / 1000))
 const TRANSPORT_LIMITS = ['-c', 'http.lowSpeedLimit=1', '-c', `http.lowSpeedTime=${IDLE_SECONDS}`]
+const NO_HOOKS = ['-c', 'core.hooksPath=/dev/null']
 const REMOTE_COMMANDS = new Set(['ls-remote', 'fetch', 'push'])
 const SSH_COMMAND = `ssh -o ConnectTimeout=${IDLE_SECONDS} -o ServerAliveInterval=${Math.max(1, Math.round(IDLE_SECONDS / 4))} -o ServerAliveCountMax=3`
 const WORKING_COPY_WAIT_MS = 10 * 60_000
@@ -206,12 +208,13 @@ class GitBackend implements EnvironmentBackend {
 
   /**
    * Commits what is staged and pushes it, rebasing once on the remote when the push is refused, a
-   * rebase that fails being undone. A cancelled push leaves the remote as it was, the commit being
-   * dropped by the next sync.
+   * rebase that fails being undone. A push cancelled before git sent the whole commit leaves the
+   * remote as it was, the commit being dropped by the next sync; once it is sent, the push runs to
+   * its end, the remote then deciding alone whether it takes it.
    * @param message The message of the commit.
    * @param onWritten Told the bytes git reports as written to the remote, as it writes them, and
    * whether it wrote them all.
-   * @param signal Cancels the commit and the push.
+   * @param signal Cancels the commit, and the push until git sent the whole commit.
    */
   private async commitAndPush (message: string, onWritten?: (bytes: number, all: boolean) => void, signal?: AbortSignal): Promise<void> {
     const staged = await execFileAsync('git', ['-C', this._folder, 'diff', '--cached', '--quiet']).then(() => false, () => true)
@@ -220,21 +223,33 @@ class GitBackend implements EnvironmentBackend {
     }
     await this.git([...(await this.identity()), 'commit', '-q', '-m', message], undefined, signal)
     const push = ['push', '--progress', 'origin', `HEAD:${this._settings.branch}`]
+    let sent = false
     /**
      * Reports the bytes of a "Writing objects" progress line of git, and whether git wrote them all.
      * @param line A complete line of the error output of git.
      */
     const onLine = (line: string): void => {
       const written = WRITTEN_PATTERN.exec(line)
+      sent ||= SENT_ALL.test(line)
       if (written) {
         onWritten?.(Math.round(Number(written[1]) * UNIT_BYTES[written[2]]), WRITTEN_ALL.test(line))
       }
     }
+    const pushing = new AbortController()
+    /**
+     * Stops the push once it is cancelled, unless git already sent the whole commit.
+     */
+    const cancel = (): void => {
+      if (!sent) {
+        pushing.abort(signal?.reason)
+      }
+    }
     signal?.throwIfAborted()
+    signal?.addEventListener('abort', cancel, { once: true })
     try {
-      await this.git(push, lineReader(onLine), signal)
+      await this.git(push, lineReader(onLine), pushing.signal)
     } catch (error) {
-      if (signal?.aborted) {
+      if (pushing.signal.aborted) {
         throw error
       }
       await this.git(['fetch', '-q', 'origin', this._settings.branch], undefined, signal)
@@ -243,7 +258,10 @@ class GitBackend implements EnvironmentBackend {
         throw failure
       })
       signal?.throwIfAborted()
-      await this.git(push, lineReader(onLine), signal)
+      sent = false
+      await this.git(push, lineReader(onLine), pushing.signal)
+    } finally {
+      signal?.removeEventListener('abort', cancel)
     }
   }
 
@@ -285,27 +303,53 @@ class GitBackend implements EnvironmentBackend {
 
   /**
    * Runs git in the working copy, in the C locale so its messages read the same on every machine,
-   * never asking for credentials, its HTTP exchanges with the remote failing once they move no data
-   * for a while.
+   * never asking for credentials nor running hooks, its HTTP exchanges with the remote failing once
+   * they move no data for a while. It ends at most a second after git exited, whatever the programs
+   * git started still hold.
    * @param args The arguments of git.
    * @param onStderr Told each piece of the error output as git writes it.
-   * @param signal Stops git.
+   * @param signal Stops git, which settles only once git exited.
    * @returns The standard output.
    */
   private async git (args: string[], onStderr?: (text: string) => void, signal?: AbortSignal): Promise<string> {
+    const env = { ...process.env, GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C', ...REMOTE_COMMANDS.has(args[0]) ? await this.sshCommand() : {} }
+    signal?.throwIfAborted()
+    const run = execFileAsync('git', ['-C', this._folder, ...TRANSPORT_LIMITS, ...NO_HOOKS, ...args], { env, maxBuffer: 64 * 1024 * 1024 })
+    const { child } = run
+    let grace: NodeJS.Timeout | undefined
+    /**
+     * Stops reading the output of git, which the programs git started may still hold once it exited.
+     */
+    const release = (): void => {
+      child.stdout?.destroy()
+      child.stderr?.destroy()
+    }
+    child.once('exit', () => {
+      grace = setTimeout(release, signal?.aborted ? 0 : STDIO_GRACE_MS)
+    })
+    child.once('close', () => clearTimeout(grace))
+    /**
+     * Stops git once the operation is cancelled.
+     */
+    const stop = (): void => {
+      child.kill()
+      if (child.exitCode !== null || child.signalCode !== null) {
+        release()
+      }
+    }
+    signal?.addEventListener('abort', stop, { once: true })
+    child.stderr?.on('data', (chunk: Buffer) => onStderr?.(chunk.toString()))
     try {
-      const run = execFileAsync('git', ['-C', this._folder, ...TRANSPORT_LIMITS, ...args], {
-        env: { ...process.env, GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C', ...REMOTE_COMMANDS.has(args[0]) ? await this.sshCommand() : {} },
-        maxBuffer: 64 * 1024 * 1024,
-        signal
-      })
-      run.child.stderr?.on('data', (chunk: Buffer) => onStderr?.(chunk.toString()))
       const { stdout } = await run
+      signal?.throwIfAborted()
       return stdout
     } catch (error) {
+      signal?.throwIfAborted()
       const stderr = (error as { stderr?: string }).stderr?.split(/[\r\n]+/).filter(line => line.trim() !== '' && !PROGRESS_LINE.test(line)).join('\n')
       const shown = args.filter((arg, index) => !arg.startsWith('user.') && !(arg === '-c' && args[index + 1]?.startsWith('user.')))
       throw new Error(`git ${shown.join(' ')} failed for ${this._settings.slug}: ${stderr || (error as Error).message}`, { cause: error })
+    } finally {
+      signal?.removeEventListener('abort', stop)
     }
   }
 

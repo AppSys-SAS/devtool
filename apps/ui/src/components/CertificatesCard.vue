@@ -10,13 +10,14 @@ import { expiresWithin, expiryClass, expiryLabel } from '@/lib/expiry'
 import certificatesStore from '@/stores/certificates'
 import commandRunsStore from '@/stores/command-runs'
 import configStore from '@/stores/config'
+import environmentStore from '@/stores/environment'
 import wsStore from '@/stores/ws'
 
 const certificates = certificatesStore.items
 
 /** The renewal this interface asked for, followed until it ends. */
 const pending = shallowRef<{ name: string, tag: string, started: boolean } | null>(null)
-const pushOffer = shallowRef<{ name: string, paths: string[] } | null>(null)
+const pushOffer = shallowRef<{ name: string, paths: string[], revision: number } | null>(null)
 const pushOpen = computed({
   get: () => pushOffer.value !== null && commandRunsStore.current.value === null,
   set: open => {
@@ -48,7 +49,7 @@ watch(certificates, items => {
     return
   }
   if (item.push.length) {
-    pushOffer.value = { name: item.name, paths: item.push }
+    pushOffer.value = { name: item.name, paths: item.push, revision: environmentStore.state.value?.revision ?? 0 }
   }
 })
 
@@ -91,7 +92,7 @@ function renew (certificate: CertificatePayload): void {
  */
 function push (): void {
   if (pushOffer.value) {
-    wsStore.envRun('push', pushOffer.value.paths.map(path => ({ path, tables: null, keys: null })))
+    wsStore.envRun('push', pushOffer.value.paths.map(path => ({ path, tables: null, keys: null })), pushOffer.value.revision)
   }
 }
 </script>

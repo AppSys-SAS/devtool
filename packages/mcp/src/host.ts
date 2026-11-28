@@ -110,7 +110,7 @@ export interface McpEnvironment {
   state(): EnvironmentPayload
   keys(path: string): Promise<EnvironmentKeysPayload>
   tables(path: string): Promise<EnvironmentTablesPayload>
-  run(direction: 'pull' | 'push', targets: { path: string, tables: string[] | null }[]): Promise<void>
+  run(direction: 'pull' | 'push', targets: { path: string, tables: string[] | null }[], skipped: { path: string, detail: string }[], revision: number): Promise<void>
   pullSharedConfig(): Promise<boolean>
 }
 

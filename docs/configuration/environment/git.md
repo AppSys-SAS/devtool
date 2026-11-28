@@ -26,7 +26,8 @@ change makes no commit. The branch is created by the first push when the reposit
 
 It runs the `git` of your machine with its credentials, never asking for them: an SSH key or agent, or
 a credential helper, must let `git push` work without a prompt. Commits carry your git identity, or
-`devtool <devtool@localhost>` when git has none.
+`devtool <devtool@localhost>` when git has none, and are signed when your git signs commits; your git
+hooks, such as a global `core.hooksPath`, never run in the working copy.
 
 ::: warning Large files
 Git keeps every version of every file forever. Database archives and bucket snapshots of a few

@@ -35,10 +35,13 @@ folder), without a shell, with the environment variables of the devtool plus `en
 - `%{ADT:FILE}` is a local file: the one to write for `download`, the one to read for `upload`.
 
 The arguments and the values of `env` read value blocks, so a script can receive a token from your
-password manager; they are read once, before the first transfer, and the time you take to approve
-their reading is not counted. A command never waits for input: its standard input reads `/dev/null`.
+password manager. Those of `env`, `list` and `download` are read once, before the first transfer,
+those of `upload` and `remove` the first time they run, so a pull never reads the secrets of the
+commands that write; the time you take to approve their reading is not counted, and a transfer
+waiting for it can be cancelled. A command never waits for input: its standard input reads `/dev/null`.
 Every command runs in a session of its own, without terminal, so that stopping one stops every
-process it started: when a transfer is cancelled, when the command shows no activity for a minute
+process it started that stays in that session (a process that starts a session of its own, such
+as a daemon, is not reached): when a transfer is cancelled, when the command shows no activity for a minute
 (see [Progress](#progress)), and when devtool itself is stopped. A command ends once its own process
 exits, even when a process it detached, such as a persistent SSH connection, still holds its output;
 the processes it left running in its session are then stopped, so a command must wait for its work. `upload` must therefore

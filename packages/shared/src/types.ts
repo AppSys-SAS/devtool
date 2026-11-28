@@ -768,8 +768,11 @@ export interface EnvironmentItemPayload {
   local: EnvironmentCopyPayload | null
   /** The copy of the backend, null when there is none, "unknown" when the backend could not list its files. */
   remote: EnvironmentCopyPayload | null | 'unknown'
-  /** Dates of both copies, in ISO format, when a pull or a push last made them equal. */
-  synced: { localUpdatedAt: string, remoteUpdatedAt: string } | null
+  /**
+   * Dates of both copies, in ISO format, and the version of the copy of the backend, null when it
+   * gives none, when a pull or a push last made them equal.
+   */
+  synced: { localUpdatedAt: string, remoteUpdatedAt: string, remoteVersion: string | null } | null
   /** What the local copy of a PEM file holds, null for any other item. */
   pem: EnvironmentPemPayload | null
 }
@@ -850,6 +853,8 @@ export interface EnvironmentPayload {
   /** Whether the items are being described again, their copies on the backends listed again. */
   refreshing: boolean
   run: EnvironmentRunPayload | null
+  /** Identifies the environment and sign-in settings the items were described from, changing only when they change. */
+  revision: number
 }
 
 /** A secret the server asks the developer to type, such as the password of encrypted files. */

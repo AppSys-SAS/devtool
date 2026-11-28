@@ -316,13 +316,14 @@ export function encrypted (backend: EnvironmentBackend, secret: EncryptionSecret
      * @param path The path of the file in the backend.
      * @param localFile The local file.
      * @param _mediaType Unused, an encrypted file being stored as bytes.
-     * @param options Follows the bytes sent.
+     * @param options Follows the bytes sent, and cancels the encryption or the upload.
      */
     async upload (path: string, localFile: string, _mediaType: string, options: TransferOptions = {}): Promise<void> {
       const fileKey = await secret.fileKey()
       const sealedFile = temporaryPathOf(localFile, 'sealed')
       try {
-        await pipeline(Readable.from(encrypt(createReadStream(localFile), fileKey, path)), createWriteStream(sealedFile, { mode: 0o600 }))
+        options.signal?.throwIfAborted()
+        await pipeline(Readable.from(encrypt(createReadStream(localFile), fileKey, path)), createWriteStream(sealedFile, { mode: 0o600 }), { signal: options.signal })
         await backend.upload(path, sealedFile, 'application/octet-stream', { ...options, onProgress: plainProgress(options.onProgress) })
       } finally {
         await fs.rm(sealedFile, { force: true })

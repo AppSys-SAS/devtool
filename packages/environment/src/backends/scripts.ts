@@ -4,14 +4,13 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import type { Readable } from 'node:stream'
 import { scratchPath } from '../directory.js'
-import { type BackendContext, type BackendProblem, type BackendSettings, type BackendType, type EnvironmentBackend, knownSize, lineReader, readText, type RemoteFile, type TransferOptions } from './backend.js'
+import { type BackendContext, type BackendProblem, type BackendSettings, type BackendType, type EnvironmentBackend, knownSize, lineReader, readText, type RemoteFile, STDIO_GRACE_MS, type TransferOptions, unlessAborted } from './backend.js'
 
 const OPERATIONS = ['list', 'download', 'upload', 'remove'] as const
 const ABSENT_EXIT_CODE = 2
 const STDERR_TAIL_LENGTH = 2000
 const PROGRESS_POLL_MS = 250
 const STOP_GRACE_MS = 5000
-const STDIO_GRACE_MS = 1000
 const STOP_SIGNALS = ['SIGINT', 'SIGTERM', 'SIGHUP'] as const
 const PROGRESS_LINE = /^progress: (\d+)$/
 
@@ -31,12 +30,6 @@ interface RunOptions {
   onReported?: (bytes: number) => void
   /** Stops the command and every process it started in its process group. */
   signal?: AbortSignal
-}
-
-/** The commands and the environment variables of the backend, their value blocks read. */
-interface ResolvedValues {
-  commands: Record<Operation, string[] | null>
-  env: Record<string, string>
 }
 
 /** Settings of a backend made of your own commands. */
@@ -189,7 +182,7 @@ function parseListing (output: string): RemoteFile[] {
  * A backend running your own commands for each operation.
  */
 class ScriptsBackend implements EnvironmentBackend {
-  private _values: Promise<ResolvedValues> | null = null
+  private readonly _resolved = new Map<Operation | 'env', Promise<unknown>>()
 
   /**
    * @param _settings The settings of the backend.
@@ -282,39 +275,51 @@ class ScriptsBackend implements EnvironmentBackend {
   }
 
   /**
-   * Reads the value blocks of the commands and of their environment, which may ask the developer
-   * to approve their reading.
+   * Reads the value blocks of the environment and of the commands that read the files, which may
+   * ask the developer to approve their reading; those of the other commands are read when used.
    */
   async prepare (): Promise<void> {
-    await this.values()
+    await Promise.all([this.env(), this.command('list'), this.command('download')])
   }
 
   /**
-   * Gives the commands and the environment variables, their value blocks read once.
-   * @returns The command of each operation, null when undeclared, and the variables.
+   * Gives the environment variables of the commands, their value blocks read once.
+   * @returns The variables.
    */
-  private async values (): Promise<ResolvedValues> {
-    this._values ??= this.resolveValues().catch((error: unknown) => {
-      this._values = null
-      throw error
+  private async env (): Promise<Record<string, string>> {
+    return this.once('env', async () => {
+      const env: Record<string, string> = {}
+      for (const [key, value] of Object.entries(this._settings.env)) {
+        env[key] = await this._context.resolve(value)
+      }
+      return env
     })
-    return this._values
   }
 
   /**
-   * Reads the value blocks of the commands and of their environment.
-   * @returns The command of each operation, null when undeclared, and the variables.
+   * Gives the command of an operation, its value blocks read once.
+   * @param operation The operation.
+   * @returns The command, null when undeclared.
    */
-  private async resolveValues (): Promise<ResolvedValues> {
-    const commands = Object.fromEntries(await Promise.all(OPERATIONS.map(async operation => {
-      const command = this._settings[operation]
-      return [operation, command && await Promise.all(command.map(async arg => this._context.resolve(arg)))] as const
-    }))) as Record<Operation, string[] | null>
-    const env: Record<string, string> = {}
-    for (const [key, value] of Object.entries(this._settings.env)) {
-      env[key] = await this._context.resolve(value)
+  private async command (operation: Operation): Promise<string[] | null> {
+    const command = this._settings[operation]
+    return this.once(operation, async () => command && Promise.all(command.map(async arg => this._context.resolve(arg))))
+  }
+
+  /**
+   * Reads values once, read again after a failure.
+   * @param key What the values are.
+   * @param read Reads them.
+   * @returns The values.
+   */
+  private async once<T> (key: Operation | 'env', read: () => Promise<T>): Promise<T> {
+    let values = this._resolved.get(key) as Promise<T> | undefined
+    if (!values) {
+      values = read()
+      this._resolved.set(key, values)
+      values.catch(() => this._resolved.delete(key))
     }
-    return { commands, env }
+    return values
   }
 
   /**
@@ -330,8 +335,7 @@ class ScriptsBackend implements EnvironmentBackend {
    * @returns What the command printed and its exit code.
    */
   private async run (operation: Operation, filePath: string, localFile: string, { allowAbsent = false, onReported, signal }: RunOptions = {}): Promise<CommandResult> {
-    const { commands, env: values } = await this.values()
-    const command = commands[operation]
+    const [command, values] = await unlessAborted(Promise.all([this.command(operation), this.env()]), signal)
     if (command === null) {
       throw new Error(`${this._settings.slug} declares no ${operation} command`)
     }

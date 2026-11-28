@@ -307,6 +307,9 @@ importers:
       oauth4webapi:
         specifier: ^3.8.8
         version: 3.8.8
+      ssh2:
+        specifier: ^1.17.0
+        version: 1.17.0
       ssh2-sftp-client:
         specifier: ^12.1.1
         version: 12.1.1
@@ -667,6 +670,9 @@ importers:
       mime-types:
         specifier: ^3.0.2
         version: 3.0.2
+      ssh2:
+        specifier: ^1.17.0
+        version: 1.17.0
       ssh2-sftp-client:
         specifier: ^12.1.1
         version: 12.1.1
@@ -686,9 +692,6 @@ importers:
       '@types/ssh2-sftp-client':
         specifier: ^9.0.6
         version: 9.0.6
-      ssh2:
-        specifier: ^1.17.0
-        version: 1.17.0
 
   packages/git:
     dependencies:
