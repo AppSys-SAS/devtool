@@ -556,6 +556,12 @@ describe('readEnvironmentOptions', () => {
       }
     })
 
+    it('refuses an item path named like a temporary file of a transfer, or inside a folder named so', () => {
+      for (const temporary of ['api/config.yml.0b5c2f0e-3d1a-4f6b-9c2d-1e2f3a4b5c6d.part', 'api/config.yml.0b5c2f0e-3d1a-4f6b-9c2d-1e2f3a4b5c6d.part/inner.yml']) {
+        expect(() => readEnvironmentOptions({ files: [temporary] }), temporary).toThrow(`invalid path of ${temporary} in the environment: its name is the one of a temporary file of a transfer`)
+      }
+    })
+
     it('refuses an item path declared twice', () => {
       expect(() => readEnvironmentOptions({ files: ['api/config.yml'], buckets: [{ path: 'api/config.yml', bucket: 'b' }] })).toThrow('api/config.yml is declared twice in the environment')
     })

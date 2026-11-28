@@ -38,6 +38,9 @@ const TEMPORARY_PART = `${UUID}\\.(?:part|pull|push|base|merged|sealed)`
 /** What follows the name of a local file in the names of its temporary files, nested ones included. */
 export const TEMPORARY_SUFFIX = new RegExp(`^\\.${TEMPORARY_PART}(?:\\.${TEMPORARY_PART})*$`)
 
+/** A path ending like the name of a temporary file. */
+export const TEMPORARY_NAME = new RegExp(`\\.${TEMPORARY_PART}$`)
+
 /**
  * Gives a new path for a temporary file next to a local file, named after it with a unique
  * identifier, so that it never names another file.

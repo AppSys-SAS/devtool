@@ -13,7 +13,7 @@ set -euo pipefail
 : "${REMOTE:?set REMOTE to the rclone remote folder, such as myremote:dev-environment}"
 
 list () {
-  rclone mkdir "$REMOTE"
+  rclone mkdir "$REMOTE" || true
   rclone lsjson -R --files-only --hash "$REMOTE" \
     | jq '{ files: [ .[] | { path: .Path, size: .Size, updatedAt: .ModTime, version: (((.Hashes // {}) | to_entries | first | .value) // "\(.ModTime)-\(.Size)") } ] }'
 }

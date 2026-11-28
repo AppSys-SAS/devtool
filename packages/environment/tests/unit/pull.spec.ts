@@ -5,7 +5,7 @@ import path from 'node:path'
 import { PassThrough, Readable } from 'node:stream'
 import { gzipSync } from 'node:zlib'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ArchiveWriter } from '../../src/archive.js'
+import { ArchiveWriter, type RecordHeader } from '../../src/archive.js'
 import { IgnoredKeys } from '../../src/config-merge.js'
 import type { BackendContext, EnvironmentBackend, RemoteFile } from '../../src/backends/backend.js'
 import { Environment, type EnvironmentItem, TransferCancelledError } from '../../src/environment.js'
@@ -135,6 +135,24 @@ describe('pull of an item holding local data', () => {
     await expect(environmentOf(item, whole.subarray(0, Math.floor(whole.length / 2))).pull({ item, tables: null })).rejects.toThrow()
     await expect(fs.access(path.join(folder, 'seen'))).rejects.toThrow()
     expect(await localState()).toEqual({ files: ['db.dump'], copy: 'previous copy' })
+  })
+
+  it.each<[string, RecordHeader[]]>([
+    ['a key record without a numeric time to live', [{ type: 'redis' }, { type: 'key', key: Buffer.from('session:a').toString('base64'), ttl: 'soon' }]],
+    ['a key record with a negative time to live', [{ type: 'redis' }, { type: 'key', key: Buffer.from('session:a').toString('base64'), ttl: -1 }]],
+    ['a second Redis header', [{ type: 'redis' }, { type: 'key', key: Buffer.from('session:a').toString('base64'), ttl: 0 }, { type: 'redis' }]]
+  ])('refuses a Redis archive holding %s before reaching the database', async (_case, headers) => {
+    const item: EnvironmentItem = { kind: 'redis', path: ITEM_PATH, ...open, url: 'redis://127.0.0.1:1/0' }
+    const archivePath = path.join(folder, 'redis.gz')
+    const writer = new ArchiveWriter(archivePath)
+    for (const header of headers) {
+      await writer.add(header, header.type === 'key' ? Readable.from([Buffer.from('x')]) : undefined)
+    }
+    await writer.close()
+
+    await expect(environmentOf(item, await fs.readFile(archivePath)).pull({ item, tables: null })).rejects.toThrow('not a Redis snapshot')
+    expect(await localState()).toEqual({ files: ['db.dump'], copy: 'previous copy' })
+    expect((await readSyncJournal()).get(ITEM_PATH)).toEqual(PREVIOUS_RECORD)
   })
 
   it('replaces the local copy and records the synchronization only once the data is restored', async () => {
@@ -578,6 +596,34 @@ describe('push of an item holding local data', () => {
 
     await expect(new Environment(new Map([['team', backend]]), options, context).push({ item: postgresItem, tables: null })).rejects.toThrow('storage full')
     expect(await localState()).toEqual({ files: ['db.dump'], copy: 'previous copy' })
+  })
+
+  it('keeps the stored values of the ignored keys of a configuration file when its backend cannot list its files', async () => {
+    const item: EnvironmentItem = { kind: 'file', path: 'api/app.yml', ...open, ignore: new IgnoredKeys(['secret']) }
+    await fs.writeFile(path.join(folder, 'env', 'api', 'app.yml'), 'port: 1\nsecret: local\n')
+    const uploaded: string[] = []
+    const environment = environmentWith({
+      list: async () => Promise.reject(new Error('backend unreachable')),
+      download: async () => Readable.from([Buffer.from('port: 2\nsecret: stored\n')]),
+      upload: async (_path, localFile) => {
+        uploaded.push(await fs.readFile(localFile, 'utf-8'))
+      }
+    }, [item])
+
+    await environment.push({ item, tables: null })
+    expect(uploaded).toEqual(['port: 1\nsecret: stored\n'])
+  })
+
+  it('lists the backend once for a pull of a configuration file whose listing fails, keeping its ignored keys', async () => {
+    const item: EnvironmentItem = { kind: 'file', path: 'api/app.yml', ...open, ignore: new IgnoredKeys(['secret']) }
+    const localPath = path.join(folder, 'env', 'api', 'app.yml')
+    await fs.writeFile(localPath, 'port: 1\nsecret: local\n')
+    const list = vi.fn(async () => Promise.reject(new Error('backend unreachable')))
+    const environment = environmentWith({ list, download: async () => Readable.from([Buffer.from('port: 2\nsecret: stored\n')]) }, [item])
+
+    await environment.pull({ item, tables: null })
+    expect(list).toHaveBeenCalledOnce()
+    expect(await fs.readFile(localPath, 'utf-8')).toBe('port: 2\nsecret: local\n')
   })
 })
 

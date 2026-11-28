@@ -8,7 +8,7 @@ import { ArchiveWriter, readArchive, type RecordHeader } from './archive.js'
 import { BACKEND_IDLE_MS, DEVELOPER_ANSWER_MS, type BackendContext, type BackendOptions, encrypted, EncryptionSecret, type EncryptionSettings, type EnvironmentBackend, readBackends, readEncryption, type RemoteFile, type TransferOptions, type TransferProgress } from './backends/index.js'
 import { plainLengthOf } from './backends/encryption.js'
 import { checkTar, createS3Client, objectsOfArchive, objectsOfTar, restoreBucket, type S3Options, snapshotBucket, snapshotBucketTar } from './buckets.js'
-import { defaultEnvironmentFolder, localPathOf, scratchPath, TEMPORARY_SUFFIX, temporaryPathOf, withFileLock, writeLocalFile } from './directory.js'
+import { defaultEnvironmentFolder, localPathOf, scratchPath, TEMPORARY_NAME, TEMPORARY_SUFFIX, temporaryPathOf, withFileLock, writeLocalFile } from './directory.js'
 import { databaseEngine, type DatabaseEngineName, isDatabaseEngineName } from './engines.js'
 import { listRedisGroups, redisDatabaseName, redisRecordGroup, restoreRedis, snapshotRedis } from './redis.js'
 import { readSyncJournal, type SyncRecord, writeSyncRecord } from './sync-journal.js'
@@ -335,6 +335,9 @@ export function readEnvironmentOptions (section: unknown): EnvironmentOptions | 
       throw new Error(`invalid path of ${item.path} in the environment: write it ${canonical}`)
     }
     const folded = foldedPath(item.path)
+    if (item.path.split('/').some(segment => TEMPORARY_NAME.test(segment))) {
+      throw new Error(`invalid path of ${item.path} in the environment: its name is the one of a temporary file of a transfer`)
+    }
     if (folded === LOCKS_FOLDER || folded.startsWith(`${LOCKS_FOLDER}/`)) {
       throw new Error(`invalid path of ${item.path} in the environment: ${LOCKS_FOLDER} holds the locks of the transfers`)
     }
@@ -1038,7 +1041,7 @@ export class Environment {
     const pulled = files && (files.find(file => file.path === item.path) ?? undefined)
     const transfer = { onProgress, signal, listedSize: pulled?.size }
     if (item.kind === 'file') {
-      if (selection.keys || await this.mergesWhole(item, files, signal)) {
+      if (selection.keys || await this.mergesWhole(item, listingError === undefined ? files : null, signal)) {
         return this.pullKeys(item, selection.keys ?? null, pulled, transfer, listingError)
       }
       if (!(await this.download(item, localPath, transfer))) {
@@ -1131,8 +1134,13 @@ export class Environment {
       }
     } else if (item.kind === 'redis' || item.format === 'devtool') {
       const archived = new Set<string>()
+      let first = true
       for await (const { header, body } of readArchive(archivePath)) {
         const part = item.kind === 'redis' ? redisRecordGroup(header) : header.type === 'table' && typeof header.name === 'string' ? header.name : null
+        if (item.kind === 'redis' && (first ? header.type !== 'redis' : part === null)) {
+          throw new Error(first ? `${item.path} is not a Redis archive` : 'not a Redis snapshot')
+        }
+        first = false
         if (part !== null) {
           archived.add(part)
         }
@@ -1324,7 +1332,7 @@ export class Environment {
   /**
    * Tells whether a whole configuration file is transferred key by key, to keep the values of its
    * ignored keys: when it ignores some, has a local copy, and its backend lists a copy of it or
-   * cannot list its files.
+   * cannot list its files, a listing that fails counting as one the backend cannot give.
    *
    * @param item - The file item.
    * @param files - The files its backend listed, null when it cannot list them, listed when not given.
@@ -1335,7 +1343,14 @@ export class Environment {
     if (!ignoredKeysOf(item) || !(await fs.stat(localPathOf(this._options.folder, item.path)).then(stat => stat.isFile(), () => false))) {
       return false
     }
-    const listed = files === undefined ? await listWatched(this.backendFor(item), item.path, signal) : files
+    const listed = files !== undefined
+      ? files
+      : await listWatched(this.backendFor(item), item.path, signal).catch((error: unknown) => {
+          if (error instanceof TransferCancelledError) {
+            throw error
+          }
+          return null
+        })
     return listed === null || listed.some(file => file.path === item.path)
   }
 

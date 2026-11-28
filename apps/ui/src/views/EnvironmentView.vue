@@ -33,6 +33,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { expiryClass, expiryLabel } from '@/lib/expiry'
 import { formatBytes, formatProgress, formatRelativeDate, progressPercent } from '@/lib/format'
+import { differs, remoteChangedSince, SAME_DATE_TOLERANCE_MS } from '@/lib/sync-changes'
 import { cn } from '@/lib/utils'
 import environmentStore from '@/stores/environment'
 import sessionStore from '@/stores/session'
@@ -58,7 +59,6 @@ interface TransferSpeed {
 /** What an item restricted to some of its parts is restricted to: tables or key groups, or keys. */
 type ChoiceKind = 'tables' | 'keys'
 
-const SAME_DATE_TOLERANCE_MS = 1000
 const STALE_SPEED_MS = 2000
 const ACTION_LABELS: Record<EnvironmentAction, string> = { pull: 'Pull', push: 'Push', restore: 'Restore', remove: 'Removal of local copies' }
 const TONE_CLASSES: Record<SyncStatus['tone'], string> = {
@@ -73,6 +73,7 @@ const state = environmentStore.state
 const session = sessionStore.state
 const selected = ref<Record<string, ItemSelection>>({})
 let confirmedTargets = ''
+let confirmedRevision = 0
 const tableFilters = ref<Record<string, string>>({})
 const pendingAction = ref<EnvironmentAction | null>(null)
 const confirmOpen = ref(false)
@@ -348,22 +349,24 @@ function shows (action: EnvironmentAction): boolean {
  * @param action The action.
  */
 function start (action: EnvironmentAction): void {
+  const revision = state.value?.revision ?? 0
   if (action === 'push' || (action === 'pull' && !targets.value.some(target => (itemAt(target.path)?.kind ?? 'file') !== 'file'))) {
-    wsStore.envRun(action, targets.value)
+    wsStore.envRun(action, targets.value, revision)
     return
   }
   pendingAction.value = action
   confirmedTargets = JSON.stringify(targetsOf(action))
+  confirmedRevision = revision
   confirmOpen.value = true
 }
 
 /**
  * Runs the action waiting for confirmation over the selected items it applies to, only when they
- * are still those the confirmation showed.
+ * are still those the confirmation showed, the server refusing it once the configuration changed.
  */
 function confirm (): void {
   if (pendingAction.value && canRun(pendingAction.value) && JSON.stringify(targetsOf(pendingAction.value)) === confirmedTargets) {
-    wsStore.envRun(pendingAction.value, targetsOf(pendingAction.value))
+    wsStore.envRun(pendingAction.value, targetsOf(pendingAction.value), confirmedRevision)
   }
 }
 
@@ -391,16 +394,6 @@ function backendOf (item: EnvironmentItemPayload): string {
 }
 
 /**
- * Tells whether two dates differ by more than the precision of the stores.
- * @param date The first date, in ISO format.
- * @param other The second date, in ISO format.
- * @returns True when they differ.
- */
-function differs (date: string, other: string): boolean {
-  return Math.abs(new Date(date).getTime() - new Date(other).getTime()) > SAME_DATE_TOLERANCE_MS
-}
-
-/**
  * Compares the local copy of an item with its copy on its backend. An item whose local data lives
  * apart from its local copy stays synchronized once that copy is removed, as long as the copy of its
  * backend does not change.
@@ -420,12 +413,12 @@ function syncStatus (item: EnvironmentItemPayload): SyncStatus | null {
     if (item.kind === 'file' || !item.synced) {
       return { label: `Only on ${backendOf(item)}`, tone: 'remote' }
     }
-    return differs(item.remote.updatedAt, item.synced.remoteUpdatedAt) ? { label: `Newer on ${backendOf(item)}`, tone: 'remote' } : { label: 'Up to date', tone: 'synced' }
+    return remoteChangedSince(item.remote, item.synced) ? { label: `Newer on ${backendOf(item)}`, tone: 'remote' } : { label: 'Up to date', tone: 'synced' }
   }
 
   if (item.synced) {
     const localChanged = differs(item.local.updatedAt, item.synced.localUpdatedAt)
-    const remoteChanged = differs(item.remote.updatedAt, item.synced.remoteUpdatedAt)
+    const remoteChanged = remoteChangedSince(item.remote, item.synced)
     if (localChanged && remoteChanged) {
       return { label: 'Conflict', tone: 'conflict' }
     }

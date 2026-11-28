@@ -4,8 +4,9 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { pipeline, type Readable } from 'node:stream'
+import ssh2 from 'ssh2'
 import SftpClient from 'ssh2-sftp-client'
-import { BACKEND_IDLE_MS, type BackendContext, type BackendProblem, type BackendSettings, type BackendType, byteCounter, type EnvironmentBackend, readText, type RemoteFile, type TransferOptions } from './backend.js'
+import { BACKEND_IDLE_MS, type BackendContext, type BackendProblem, type BackendSettings, type BackendType, byteCounter, type EnvironmentBackend, readText, type RemoteFile, type TransferOptions, unlessAborted } from './backend.js'
 
 const PARTIAL_SUFFIX = '.part'
 const KEEPALIVE_TRIES = 4
@@ -103,37 +104,41 @@ class SftpBackend implements EnvironmentBackend {
    * @param filePath The path of the file.
    * @param localFile The local file.
    * @param _mediaType Unused, a file of the server having no media type.
-   * @param options Follows the bytes sent, and cancels the upload before the stored file is
-   * replaced, the partial file then removed.
+   * @param options Follows the bytes sent, and cancels the upload at once, before the stored file is
+   * replaced, the partial file being removed once the server ends writing it.
    */
   async upload (filePath: string, localFile: string, _mediaType: string, { onProgress, signal }: TransferOptions = {}): Promise<void> {
-    const client = await this.client()
+    const client = await unlessAborted(this.client(), signal)
     const remotePath = this.remotePath(filePath)
     const partialPath = `${remotePath}.${randomUUID()}${PARTIAL_SUFFIX}`
     const { size } = await fs.stat(localFile)
-    await client.mkdir(path.posix.dirname(remotePath), true)
-    signal?.throwIfAborted()
+    await unlessAborted(client.mkdir(path.posix.dirname(remotePath), true), signal)
     const source = createReadStream(localFile)
     /**
-     * Stops reading the local file once the upload is cancelled, which fails the transfer.
+     * Stops reading the local file once the upload is cancelled.
      */
     const cancel = (): void => {
       source.destroy(new Error('upload cancelled'))
     }
     signal?.addEventListener('abort', cancel, { once: true })
+    const written = client.put(pipeline(source, byteCounter(size, onProgress), () => undefined), partialPath)
     try {
-      if (signal?.aborted) {
-        cancel()
-      }
-      await client.put(pipeline(source, byteCounter(size, onProgress), () => undefined), partialPath)
+      await unlessAborted(written, signal)
       signal?.throwIfAborted()
     } catch (error) {
-      throw await withoutPartial(client, partialPath, error)
+      if (!signal?.aborted) {
+        throw await withoutPartial(client, partialPath, error)
+      }
+      void written.catch(() => undefined).then(async () => client.delete(partialPath, true)).catch(() => undefined)
+      throw error
     } finally {
       signal?.removeEventListener('abort', cancel)
       source.destroy()
     }
-    await client.posixRename(partialPath, remotePath).catch(async () => this.replaceAside(client, partialPath, remotePath)).catch(async (error: unknown) => {
+    await client.posixRename(partialPath, remotePath).catch(async () => {
+      signal?.throwIfAborted()
+      await this.replaceAside(client, partialPath, remotePath)
+    }).catch(async (error: unknown) => {
       throw await withoutPartial(client, partialPath, error)
     })
   }
@@ -241,11 +246,21 @@ class SftpBackend implements EnvironmentBackend {
     for (const event of ['error', 'end', 'close']) {
       client.on(event, forget)
     }
+    client.on('error', (error: { level?: string }) => {
+      if (error.level === 'client-authentication' && privateKey === null && password !== null) {
+        this._secrets.delete(password)
+      }
+    })
     const auth: SftpClient.ConnectOptions = {}
     if (privateKey !== null) {
       auth.privateKey = await fs.readFile(privateKey.startsWith('~/') ? path.join(os.homedir(), privateKey.slice(2)) : privateKey)
       if (passphrase !== null) {
         auth.passphrase = await this.secret(passphrase)
+        const parsed = ssh2.utils.parseKey(auth.privateKey, auth.passphrase)
+        if (parsed instanceof Error) {
+          this._secrets.delete(passphrase)
+          throw new Error(`cannot read the private key ${privateKey}: ${parsed.message}`)
+        }
       }
     } else if (password !== null) {
       auth.password = await this.secret(password)
@@ -260,7 +275,7 @@ class SftpBackend implements EnvironmentBackend {
 
   /**
    * Reads a secret that signs in, its value blocks read once, so that opening the connection again
-   * never asks the developer again.
+   * never asks the developer again, unless the server refused them.
    * @param value The secret, value blocks not read yet.
    * @returns The secret.
    */

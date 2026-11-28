@@ -29,10 +29,10 @@ export function redisKeyGroup (key: Buffer): string {
  * Gives the group of the key of a snapshot record.
  *
  * @param header - The header of a key record.
- * @returns The group, or null when the record holds no key.
+ * @returns The group, or null when the record is not a valid key record.
  */
 export function redisRecordGroup (header: RecordHeader): string | null {
-  return header.type === 'key' && typeof header.key === 'string' ? redisKeyGroup(Buffer.from(header.key, 'base64')) : null
+  return header.type === 'key' && typeof header.key === 'string' && Number.isSafeInteger(header.ttl) && (header.ttl as number) >= 0 ? redisKeyGroup(Buffer.from(header.key, 'base64')) : null
 }
 
 /**
@@ -164,12 +164,12 @@ export async function restoreRedis (url: string, records: AsyncIterable<ArchiveR
     let count = 0
     for await (const { header, body } of records) {
       const group = redisRecordGroup(header)
-      if (group === null || typeof header.ttl !== 'number') {
+      if (group === null) {
         throw new Error('not a Redis snapshot')
       }
 
       if (groups === null || groups.includes(group)) {
-        await client.restore(Buffer.from(header.key as string, 'base64'), header.ttl, await bytesOf(body), 'REPLACE')
+        await client.restore(Buffer.from(header.key as string, 'base64'), header.ttl as number, await bytesOf(body), 'REPLACE')
         count += 1
       }
     }

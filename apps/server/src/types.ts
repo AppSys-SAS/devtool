@@ -152,7 +152,7 @@ export type ConnectionMessage
   }
   | {
     type: 'envRun'
-    data: { action: EnvironmentAction, targets: EnvironmentTarget[] }
+    data: { action: EnvironmentAction, targets: EnvironmentTarget[], revision: number }
   }
   | {
     type: 'envCancel'

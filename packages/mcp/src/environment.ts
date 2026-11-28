@@ -256,7 +256,7 @@ export function environmentTools (host: McpHost): McpTool[] {
           throw new McpToolError('A run over the environment is already in progress')
         }
         const paths = targets.map(target => target.path)
-        const items = host.environment.state().items
+        const { items, revision } = host.environment.state()
         const refused = paths.filter(path => items.find(item => item.path === path)?.allowed[direction] === false)
         if (refused.length > 0) {
           throw new McpToolError(`The groups of the user do not let them ${direction} ${refused.join(', ')}`)
@@ -272,12 +272,15 @@ export function environmentTools (host: McpHost): McpTool[] {
           grantLabel: `Pull ${paths.join(', ')}`
         })
         const previous = host.environment.state().run
-        host.environment.run(direction, targets.map(target => ({ path: target.path, tables: target.tables ?? null }))).catch((error: unknown) => {
+        host.environment.run(direction, targets.map(target => ({ path: target.path, tables: target.tables ?? null })), [], revision).catch((error: unknown) => {
           logger.warn('MCP', 'Environment', error instanceof Error ? error.message : String(error))
         })
         const { run: started, error } = host.environment.state()
         if (!started || started === previous) {
           throw new McpToolError(previous?.finished === false ? 'A run over the environment is already in progress' : `The environment declares no backend it can use${error ? `: ${error}` : ''}`)
+        }
+        if (started.finished) {
+          throw new McpToolError(`Nothing started: ${started.steps[0]?.detail ?? 'the run was refused'}`)
         }
         return { started: direction, targets: paths }
       }

@@ -58,7 +58,7 @@ export function createBackendContext (config: RawConfig, askSecret: (label: stri
   const secrets = new CommandSecrets({
     account: null,
     folder: configFolder,
-    runShell: async command => (await execFileAsync('/bin/sh', ['-c', command], { cwd: configFolder, timeout: DEVELOPER_ANSWER_MS })).stdout,
+    runShell: async command => (await execFileAsync('/bin/sh', ['-c', command], { cwd: configFolder, timeout: DEVELOPER_ANSWER_MS, killSignal: 'SIGKILL' })).stdout,
     readAuth: authReaderOf(auth)
   })
   return { resolve: async text => secrets.resolve(text), askSecret, cacheDir: resolveCacheFolder(config), configFolder, auth }
@@ -166,6 +166,12 @@ export class DevtoolEnvironment {
   private _pullJobs: Cron[] = []
   /** Why some scheduled pulls could not be scheduled. */
   private _scheduleErrors: string[] = []
+  /** Counts the configurations read whose environment or sign-in settings changed. */
+  private _revision = 0
+  /** The environment and sign-in settings of the configuration read last. */
+  private _settings: string | null = null
+  /** The configuration the published items were described from. */
+  private _itemsRevision = 0
 
   /**
    * @param _publish - Sends the state to every connected interface.
@@ -179,11 +185,20 @@ export class DevtoolEnvironment {
   /**
    * Takes the `auth` and `environment` sections of the configuration, connects the backends it
    * declares, replacing the previous ones, closed once no operation uses them, and schedules the
-   * pulls it declares. A refresh started before never publishes its items.
+   * pulls it declares. A refresh started before never publishes its items. The revision changes only
+   * when these sections change, and is published at once while no item is published.
    *
    * @param config - The raw configuration.
    */
   configure (config: RawConfig): void {
+    const settings = JSON.stringify([config.environment ?? null, config.auth ?? null])
+    if (settings !== this._settings) {
+      this._settings = settings
+      this._revision += 1
+      if (this._items.length === 0) {
+        this._itemsRevision = this._revision
+      }
+    }
     this._publishedRefresh = ++this._refreshes
     const previous = this._backends
     previous.replaced = true
@@ -227,7 +242,7 @@ export class DevtoolEnvironment {
   state (): EnvironmentPayload {
     const error = [this._error, ...this._scheduleErrors].filter(Boolean).join('; ') || null
     const backends = (this._options?.backends ?? []).map(backend => ({ name: backend.slug, type: backend.type, default: backend.slug === this._options?.defaultBackend, encrypted: backend.encryption !== null }))
-    return { configured: this._backends.backends.size > 0, backends, items: this._items, error, refreshing: this._refreshing > 0, run: this._run }
+    return { configured: this._backends.backends.size > 0, backends, items: this._items, error, refreshing: this._refreshing > 0, run: this._run, revision: this._itemsRevision }
   }
 
   /**
@@ -255,7 +270,8 @@ export class DevtoolEnvironment {
    * Pulls items on their own: an item whose copy on its backend is missing or unchanged since the last
    * sync is left alone, one whose local copy changed since the last sync (or was never synchronized), or
    * that the groups of the developer do not let pull, is skipped and reported, the others are pulled.
-   * Nothing happens while another run is in progress.
+   * Nothing happens while another run is in progress, nor when the configuration changes while the
+   * items are checked.
    *
    * @param paths - The paths of the items.
    */
@@ -264,6 +280,7 @@ export class DevtoolEnvironment {
     if (!lease) {
       return
     }
+    const revision = this._revision
 
     const targets: EnvironmentTarget[] = []
     const skipped: { path: string, detail: string }[] = []
@@ -287,7 +304,7 @@ export class DevtoolEnvironment {
     } finally {
       lease.release()
     }
-    if (targets.length || skipped.length) {
+    if ((targets.length || skipped.length) && revision === this._revision) {
       await this.run('pull', targets, skipped)
     }
   }
@@ -301,11 +318,13 @@ export class DevtoolEnvironment {
     this._refreshing += 1
     try {
       await this._publish(this.state())
+      const revision = this._revision
       const { items, error } = await this.describeItems()
       if (generation >= this._publishedRefresh) {
         this._publishedRefresh = generation
         this._error = error
         this._items = items
+        this._itemsRevision = revision
       }
     } catch (error) {
       if (generation >= this._publishedRefresh) {
@@ -363,7 +382,7 @@ export class DevtoolEnvironment {
             keyed,
             local: local ? copyPayload(local) : null,
             remote: remote === 'unknown' || remote === null ? remote : copyPayload(remote),
-            synced: synced ? { localUpdatedAt: synced.localUpdatedAt.toISOString(), remoteUpdatedAt: synced.remoteUpdatedAt.toISOString() } : null,
+            synced: synced ? { localUpdatedAt: synced.localUpdatedAt.toISOString(), remoteUpdatedAt: synced.remoteUpdatedAt.toISOString(), remoteVersion: synced.remoteVersion ?? null } : null,
             pem: item.kind === 'file' && !keyed && local ? await readPem(localPathOf(options.folder, item.path), local.size) : null
           }
         })
@@ -500,25 +519,37 @@ export class DevtoolEnvironment {
    * the run, then describes the items again. The run starts before the call returns, `state()` then
    * giving it as the run in progress, and always ends, every step in a final state, even when the
    * configuration changes meanwhile. A request while a run is in progress, or for an unknown action,
-   * does nothing.
+   * does nothing; one made on another configuration than the current one fails every item, nothing
+   * done, then describes the items of the current one.
    *
    * @param action - Pull or push the items, restore their local data from their local copies, or remove those copies.
    * @param targets - The items, with the tables of the databases and the keys of the configuration files.
    * @param skipped - Items reported as skipped in the run, with the reason.
+   * @param revision - The configuration the request was made on, the current one when not given.
    */
-  async run (action: EnvironmentAction, targets: EnvironmentTarget[], skipped: { path: string, detail: string }[] = []): Promise<void> {
+  async run (action: EnvironmentAction, targets: EnvironmentTarget[], skipped: { path: string, detail: string }[] = [], revision = this._revision): Promise<void> {
     const items = this._options?.items
     if (!RUN_ACTIONS.has(action)) {
       logger.warn('Environment', 'Run', `Unknown action ${JSON.stringify(action)}`)
       return
     }
-    if (!items || (this._run && !this._run.finished)) {
+    if (this._run && !this._run.finished) {
       return
     }
     const steps: EnvironmentRunPayload['steps'] = [
       ...targets.map(target => ({ target: targetName(target), status: 'pending' as const, detail: null, progress: null })),
       ...skipped.map(({ path, detail }) => ({ target: path, status: 'skipped' as const, detail, progress: null }))
     ]
+    if (revision !== this._revision) {
+      const detail = 'the configuration changed since this was requested: check the items and start again'
+      this._run = { id: randomUUID(), action, steps: steps.map(step => ({ ...step, status: 'failed', detail })), finished: true }
+      await this._publish(this.state())
+      await this.refresh()
+      return
+    }
+    if (!items) {
+      return
+    }
     const lease = this.lease()
     if (!lease) {
       return

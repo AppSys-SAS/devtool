@@ -9,6 +9,9 @@ export const BACKEND_IDLE_MS = 60_000
 /** How long the developer may take to answer what a backend asks, such as a password, in milliseconds. */
 export const DEVELOPER_ANSWER_MS = 5 * 60_000
 
+/** How long the output of a command that exited is still read, the processes it left holding it, in milliseconds. */
+export const STDIO_GRACE_MS = 1000
+
 /**
  * Reads the size a backend gives for a file.
  * @param value The size given.
@@ -168,6 +171,34 @@ export function byteCounter (expected: number | null, onProgress?: TransferProgr
     flush (callback: TransformCallback): void {
       callback(expected !== null && received !== expected ? new Error(`incomplete transfer: ${received} of ${expected} bytes`) : null)
     }
+  })
+}
+
+/**
+ * Waits for a task unless it is cancelled first, then failing at once with the reason of the
+ * cancellation while the task ends on its own.
+ * @param pending The task.
+ * @param signal Cancels the wait.
+ * @returns What the task gives.
+ */
+export async function unlessAborted<T> (pending: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) {
+    return pending
+  }
+  return new Promise((resolve, reject) => {
+    /**
+     * Gives up the wait.
+     */
+    const abort = (): void => {
+      reject(signal.reason instanceof Error ? signal.reason : new Error(String(signal.reason)))
+    }
+    if (signal.aborted) {
+      pending.catch(() => undefined)
+      abort()
+      return
+    }
+    signal.addEventListener('abort', abort, { once: true })
+    pending.finally(() => signal.removeEventListener('abort', abort)).then(resolve, reject)
   })
 }
 

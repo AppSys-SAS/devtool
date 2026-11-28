@@ -27,6 +27,7 @@ let proxyPort: number
 let frozen = false
 let refusedRenames = 0
 let refusedOpens = false
+let heldCloses: (() => void)[] | null = null
 let backend: EnvironmentBackend
 let local: string
 let context: BackendContext
@@ -98,7 +99,17 @@ function serveFiles (channel: SFTPWrapper): void {
     const id = handle.readUInt32BE(0)
     const entry = handles.get(id)
     handles.delete(id)
-    Promise.resolve(entry?.file?.close()).then(() => channel.status(reqid, STATUS_CODE.OK), (error: unknown) => fail(reqid, error))
+    /**
+     * Closes the file and answers the client.
+     */
+    const close = (): void => {
+      Promise.resolve(entry?.file?.close()).then(() => channel.status(reqid, STATUS_CODE.OK), (error: unknown) => fail(reqid, error))
+    }
+    if (heldCloses) {
+      heldCloses.push(close)
+    } else {
+      close()
+    }
   })
   channel.on('OPENDIR', (reqid, target) => {
     fs.readdir(target, { withFileTypes: true }).then(async dirents => {
@@ -231,6 +242,7 @@ beforeEach(async () => {
   frozen = false
   refusedRenames = 0
   refusedOpens = false
+  heldCloses = null
   const base = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'devtool-sftp-')))
   root = path.join(base, 'remote', 'environment')
   local = path.join(base, 'local')
@@ -365,6 +377,70 @@ describe('sftp backend', { timeout: 30_000 }, () => {
     expect((await backend.list())?.map(file => file.path)).toEqual(['a.txt'])
     expect(resolve).toHaveBeenCalledTimes(1)
     await backend.close()
+  })
+
+  it('cancels at once an upload whose file the server never ends writing, then removes its partial file', async () => {
+    await backend.upload('api/db.gz', await localFile('first.gz', 'stored'), 'application/gzip')
+    heldCloses = []
+    const cancel = new AbortController()
+    const upload = backend.upload('api/db.gz', await localFile('second.gz', 'another upload'), 'application/gzip', { signal: cancel.signal })
+    await vi.waitFor(() => expect(heldCloses).toHaveLength(1))
+    cancel.abort(new Error('cancelled'))
+
+    await expect(upload).rejects.toThrow('cancelled')
+    expect(await fs.readFile(path.join(root, 'api', 'db.gz'), 'utf-8')).toBe('stored')
+    const held = heldCloses
+    heldCloses = null
+    for (const close of held) {
+      close()
+    }
+    await vi.waitFor(async () => expect(await fs.readdir(path.join(root, 'api'))).toEqual(['db.gz']))
+  })
+
+  it('cancels at once an upload waiting for a server that does not answer its connection', async () => {
+    const reached = backendOn(proxyPort)
+    frozen = true
+    const cancel = new AbortController()
+    setTimeout(() => cancel.abort(new Error('cancelled')), 300)
+
+    await expect(reached.upload('api/db.gz', await localFile('first.gz', 'stored'), 'application/gzip', { signal: cancel.signal })).rejects.toThrow('cancelled')
+    frozen = false
+    await reached.close()
+  })
+
+  it('reads a passphrase that does not open its private key again, before reaching the server', async () => {
+    const { private: key } = ssh2.utils.generateKeyPairSync('ed25519', { passphrase: 'right', cipher: 'aes256-cbc', rounds: 16 })
+    const keyFile = path.join(local, 'id_ed25519')
+    await fs.writeFile(keyFile, key)
+    const shared: BackendSettings = { type: 'sftp', slug: 'nas', default: true, encryption: null, groups: { pull: null, push: null } }
+    const { options } = sftp.readOptions({ host: '127.0.0.1', port, username: USER, path: root, privateKey: keyFile, passphrase: '{{ passphrase }}' }, shared, 'environment.backends.nas')
+    const resolve = vi.fn(async () => 'wrong')
+    const keyed = sftp.create(options!, { ...context, resolve })
+
+    await expect(keyed.list()).rejects.toThrow(`cannot read the private key ${keyFile}: `)
+    await expect(keyed.list()).rejects.toThrow(`cannot read the private key ${keyFile}: `)
+    expect(resolve).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps a passphrase that opens its private key when the server refuses the key', async () => {
+    const { private: key } = ssh2.utils.generateKeyPairSync('ed25519', { passphrase: 'right', cipher: 'aes256-cbc', rounds: 16 })
+    const keyFile = path.join(local, 'id_ed25519')
+    await fs.writeFile(keyFile, key)
+    const shared: BackendSettings = { type: 'sftp', slug: 'nas', default: true, encryption: null, groups: { pull: null, push: null } }
+    const { options } = sftp.readOptions({ host: '127.0.0.1', port, username: USER, path: root, privateKey: keyFile, passphrase: '{{ passphrase }}' }, shared, 'environment.backends.nas')
+    const resolve = vi.fn(async () => 'right')
+    const keyed = sftp.create(options!, { ...context, resolve })
+
+    await expect(keyed.list()).rejects.toThrow('authentication')
+    await expect(keyed.list()).rejects.toThrow('authentication')
+    expect(resolve).toHaveBeenCalledOnce()
+  })
+
+  it('reads its password again once the server refused it', async () => {
+    const resolve = vi.spyOn(context, 'resolve').mockResolvedValueOnce('wrong-password')
+    await expect(backend.list()).rejects.toThrow()
+    expect(await backend.list()).toEqual([])
+    expect(resolve).toHaveBeenCalledTimes(2)
   })
 
   it('fails what waits on a server that stops answering, then connects again', async () => {

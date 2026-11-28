@@ -8,7 +8,7 @@ import environmentStore from '@/stores/environment'
  * @returns The state.
  */
 function stateOf (refreshing: boolean): EnvironmentPayload {
-  return { configured: true, backends: [], items: [], error: null, refreshing, run: null }
+  return { configured: true, backends: [], items: [], error: null, refreshing, run: null, revision: 1 }
 }
 
 describe('environment store', () => {

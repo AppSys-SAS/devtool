@@ -83,6 +83,16 @@ function remoteLog (): string[] {
   return execFileSync('git', ['--git-dir', remote, 'log', '--format=%s', 'main'], { encoding: 'utf8' }).trim().split('\n')
 }
 
+/**
+ * Makes every commit wait for its signature, the way a signing program waits for the developer.
+ * @param seconds - How long the signature takes.
+ */
+async function slowSigner (seconds: number): Promise<void> {
+  const signer = path.join(folder, 'signer')
+  await fs.writeFile(signer, `#!/bin/sh\nsleep ${seconds}\nexit 1\n`, { mode: 0o755 })
+  await fs.writeFile(process.env.GIT_CONFIG_GLOBAL!, `[commit]\n\tgpgsign = true\n[gpg]\n\tprogram = ${signer}\n`)
+}
+
 beforeEach(async () => {
   folder = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'devtool-git-')))
   remote = path.join(folder, 'remote.git')
@@ -168,10 +178,7 @@ describe.skipIf(!hasGit)('git backend', { timeout: 30_000 }, () => {
   })
 
   it('cancels a commit waiting for the developer', async () => {
-    const hooks = path.join(folder, 'hooks')
-    await fs.mkdir(hooks)
-    await fs.writeFile(path.join(hooks, 'pre-commit'), '#!/bin/sh\nsleep 30\n', { mode: 0o755 })
-    await fs.writeFile(process.env.GIT_CONFIG_GLOBAL!, `[core]\n\thooksPath = ${hooks}\n`)
+    await slowSigner(30)
     const cancel = new AbortController()
     setTimeout(() => cancel.abort(new Error('cancelled')), 500)
     const started = Date.now()
@@ -181,11 +188,63 @@ describe.skipIf(!hasGit)('git backend', { timeout: 30_000 }, () => {
     await fs.writeFile(process.env.GIT_CONFIG_GLOBAL!, '')
   }, 15_000)
 
-  it('never publishes a file of a first commit that was cancelled with the next upload', async () => {
+  it('settles a cancelled operation only once git exited', async () => {
+    const bin = path.join(folder, 'bin')
+    const exited = path.join(folder, 'exited')
+    await fs.mkdir(bin)
+    await fs.writeFile(path.join(bin, 'git'), `#!/bin/sh\n"${execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim()}" "$@" &\npid=$!\ntrap 'kill $pid; wait $pid; sleep 1; touch "${exited}"; exit 143' TERM\nwait $pid\n`, { mode: 0o755 })
+    await slowSigner(5)
+    const original = process.env.PATH
+    process.env.PATH = `${bin}:${original}`
+    const cancel = new AbortController()
+    setTimeout(() => cancel.abort(new Error('cancelled')), 1000)
+    try {
+      await expect(backendOf('team').upload('api/config.yml', await localFile('a', 'port: 3000\n'), 'application/yaml', { signal: cancel.signal })).rejects.toThrow()
+      await expect(fs.access(exited)).resolves.toBeUndefined()
+    } finally {
+      process.env.PATH = original
+      await fs.writeFile(process.env.GIT_CONFIG_GLOBAL!, '')
+    }
+  }, 15_000)
+
+  it('runs to its end a push cancelled once git sent the whole commit, while the remote checks it', async () => {
+    const hook = path.join(remote, 'hooks', 'pre-receive')
+    const checked = path.join(folder, 'checked')
+    await fs.writeFile(hook, `#!/bin/sh\nsleep 3\ntouch "${checked}"\n`, { mode: 0o755 })
+    const cancel = new AbortController()
+    setTimeout(() => cancel.abort(new Error('cancelled')), 1500)
+
+    await backendOf('team').upload('api/config.yml', await localFile('a', 'port: 3000\n'), 'application/yaml', { signal: cancel.signal })
+    expect(execFileSync('git', ['--git-dir', remote, 'ls-tree', '-r', '--name-only', 'main'], { encoding: 'utf8' }).trim()).toBe('api/config.yml')
+    await expect(fs.access(checked)).resolves.toBeUndefined()
+    await fs.rm(hook)
+  }, 15_000)
+
+  it('ends an operation shortly after git exited, whatever the programs git started still hold', async () => {
+    const backend = backendOf('team')
+    await backend.upload('api/config.yml', await localFile('a', 'port: 3000\n'), 'application/yaml')
+    await fs.writeFile(process.env.GIT_CONFIG_GLOBAL!, `[remote "origin"]\n\tuploadpack = sh -c 'sleep 8 >/dev/null & exec git-upload-pack "$@"' upload-pack\n`)
+    const started = Date.now()
+
+    expect((await backend.list())?.map(file => file.path)).toEqual(['api/config.yml'])
+    expect(Date.now() - started).toBeLessThan(5000)
+    await fs.writeFile(process.env.GIT_CONFIG_GLOBAL!, '')
+  }, 15_000)
+
+  it('never runs the hooks of the developer in its working copy', async () => {
     const hooks = path.join(folder, 'hooks')
+    const ran = path.join(folder, 'ran')
     await fs.mkdir(hooks)
-    await fs.writeFile(path.join(hooks, 'pre-commit'), '#!/bin/sh\nsleep 3\n', { mode: 0o755 })
+    await fs.writeFile(path.join(hooks, 'pre-commit'), `#!/bin/sh\ntouch "${ran}"\nexit 1\n`, { mode: 0o755 })
     await fs.writeFile(process.env.GIT_CONFIG_GLOBAL!, `[core]\n\thooksPath = ${hooks}\n`)
+
+    await backendOf('team').upload('api/config.yml', await localFile('a', 'port: 3000\n'), 'application/yaml')
+    expect(remoteLog()).toEqual(['devtool: push api/config.yml'])
+    await expect(fs.access(ran)).rejects.toThrow()
+  })
+
+  it('never publishes a file of a first commit that was cancelled with the next upload', async () => {
+    await slowSigner(3)
     const backend = backendOf('team')
     const cancel = new AbortController()
     setTimeout(() => cancel.abort(new Error('cancelled')), 1000)
