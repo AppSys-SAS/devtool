@@ -10,6 +10,7 @@ export {
   type EnvironmentBackend,
   readBackends,
   type RemoteFile,
+  STDIO_GRACE_MS,
   type TransferOptions,
   type TransferProgress
 } from './backends/index.js'

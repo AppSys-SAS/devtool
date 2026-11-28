@@ -170,7 +170,7 @@ class SftpBackend implements EnvironmentBackend {
       if (!signal?.aborted) {
         throw await withoutPartial(client, partialPath, error)
       }
-      void this.dropPartial(client, partialPath)
+      void this.dropPartial(client, partialPath, written)
       throw error
     } finally {
       signal?.removeEventListener('abort', cancel)
@@ -189,12 +189,15 @@ class SftpBackend implements EnvironmentBackend {
 
   /**
    * Deletes the partial file of a cancelled upload without waiting for the server to end writing it,
-   * the partial file being left under a name the listing leaves out when the server does not answer.
+   * then waits for that write to end, the connection being closed when the server does not answer;
+   * the partial file is left under a name the listing leaves out when the server does not answer.
    * @param client The connected client.
    * @param partialPath The partial file.
+   * @param written The write of the partial file.
    */
-  private async dropPartial (client: SftpClient, partialPath: string): Promise<void> {
+  private async dropPartial (client: SftpClient, partialPath: string, written: Promise<unknown>): Promise<void> {
     await answered(client, client.delete(partialPath, true)).catch(() => undefined)
+    await answered(client, written).catch(() => undefined)
   }
 
   /**

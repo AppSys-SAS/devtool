@@ -23,6 +23,7 @@ import {
   sectionOf,
   SHARED_CONFIG_PATH,
   sharedConfigItem,
+  STDIO_GRACE_MS,
   TransferCancelledError,
   transfersParts,
   type TransferResult
@@ -45,9 +46,9 @@ import { CommandSecrets } from './command-automation.js'
 const execFileAsync = promisify(execFile)
 
 /**
- * Runs the shell command of a value block, killed with every process it started when it does not
- * end within the time the developer has to answer, then ended whatever a detached process still
- * holds of its output.
+ * Runs the shell command of a value block. Its output is read until a second after it ends, the
+ * processes it left running, such as an agent meant to outlive it, being left alone; a command that
+ * does not end within the time the developer has to answer is killed with every process it started.
  *
  * @param command - The shell command.
  * @param cwd - The folder it runs in.
@@ -57,13 +58,23 @@ async function runValueCommand (command: string, cwd: string): Promise<string> {
   const run = execFileAsync('/bin/sh', ['-c', command], { cwd })
   const { child } = run
   let late = false
+  let grace: NodeJS.Timeout | undefined
+  /**
+   * Stops reading the output of the command, which the processes it left may still hold.
+   */
+  const release = (): void => {
+    child.stdout?.destroy()
+    child.stderr?.destroy()
+  }
+  child.once('exit', () => {
+    grace = setTimeout(release, STDIO_GRACE_MS)
+  })
   const timer = setTimeout(() => {
     late = true
     if (child.pid !== undefined) {
       treeKill(child.pid, 'SIGKILL', () => undefined)
     }
-    child.stdout?.destroy()
-    child.stderr?.destroy()
+    release()
   }, DEVELOPER_ANSWER_MS)
   try {
     return (await run).stdout
@@ -71,6 +82,7 @@ async function runValueCommand (command: string, cwd: string): Promise<string> {
     throw late ? new Error(`the command of a value block did not end within ${DEVELOPER_ANSWER_MS / 60_000} minutes`, { cause: error }) : error
   } finally {
     clearTimeout(timer)
+    clearTimeout(grace)
   }
 }
 

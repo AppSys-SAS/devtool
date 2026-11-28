@@ -7,7 +7,7 @@ import { s3, type S3Settings } from './s3.js'
 import { scripts, type ScriptsSettings } from './scripts.js'
 import { sftp, type SftpSettings } from './sftp.js'
 
-export { BACKEND_IDLE_MS, DEVELOPER_ANSWER_MS, PossiblyStoredError } from './backend.js'
+export { BACKEND_IDLE_MS, DEVELOPER_ANSWER_MS, PossiblyStoredError, STDIO_GRACE_MS } from './backend.js'
 export type { BackendContext, BackendProblem, EnvironmentBackend, RemoteFile, TransferOptions, TransferProgress } from './backend.js'
 export { CdnRequestError } from './cdn.js'
 export { encrypted, EncryptionSecret, type EncryptionSettings, readEncryption } from './encryption.js'
