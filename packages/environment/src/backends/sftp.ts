@@ -6,10 +6,49 @@ import path from 'node:path'
 import { pipeline, type Readable } from 'node:stream'
 import ssh2 from 'ssh2'
 import SftpClient from 'ssh2-sftp-client'
-import { BACKEND_IDLE_MS, type BackendContext, type BackendProblem, type BackendSettings, type BackendType, byteCounter, type EnvironmentBackend, readText, type RemoteFile, type TransferOptions, unlessAborted } from './backend.js'
+import { BACKEND_IDLE_MS, type BackendContext, type BackendProblem, type BackendSettings, type BackendType, byteCounter, type EnvironmentBackend, PossiblyStoredError, readText, type RemoteFile, type TransferOptions, unlessAborted } from './backend.js'
 
 const PARTIAL_SUFFIX = '.part'
 const KEEPALIVE_TRIES = 4
+
+/** A request whose answer never came, the connection having dropped: the server may have done it. */
+class UnansweredError extends Error {}
+
+/**
+ * Waits for the answer of the server to a request, closing the connection when none comes within
+ * the time a backend may show no activity, which fails the request.
+ * @param client The connected client.
+ * @param request The request.
+ * @returns What the request gives.
+ * @throws {UnansweredError} When the connection dropped before the answer came.
+ */
+async function answered<T> (client: SftpClient, request: Promise<T>): Promise<T> {
+  let dropped = false
+  /**
+   * Notes that the connection dropped while the request waits.
+   */
+  const drop = (): void => {
+    dropped = true
+  }
+  const events = ['error', 'end', 'close']
+  for (const event of events) {
+    client.on(event, drop)
+  }
+  const late = setTimeout(() => {
+    dropped = true
+    client.end().catch(() => undefined)
+  }, BACKEND_IDLE_MS)
+  try {
+    return await request
+  } catch (error) {
+    throw dropped ? new UnansweredError(`the server did not answer: ${error instanceof Error ? error.message : String(error)}`, { cause: error }) : error
+  } finally {
+    clearTimeout(late)
+    for (const event of events) {
+      client.removeListener(event, drop)
+    }
+  }
+}
 
 /**
  * Removes the partial file of a failed upload.
@@ -19,7 +58,7 @@ const KEEPALIVE_TRIES = 4
  * @returns The error to raise, telling also when the partial file could not be removed.
  */
 async function withoutPartial (client: SftpClient, partialPath: string, error: unknown): Promise<Error> {
-  const failure = await client.delete(partialPath, true).then(() => null, (cause: unknown) => cause)
+  const failure = await answered(client, client.delete(partialPath, true)).then(() => null, (cause: unknown) => cause)
   const reason = error instanceof Error ? error : new Error(String(error))
   return failure === null ? reason : new Error(`${reason.message}; the partial file ${partialPath} could not be removed`, { cause: error })
 }
@@ -100,12 +139,14 @@ class SftpBackend implements EnvironmentBackend {
   /**
    * Stores a local file, written next to its place then renamed, so a cut upload never replaces the
    * stored file. A server without atomic rename gets the stored file moved aside, never deleted,
-   * until the new one takes its place.
+   * until the new one takes its place. A connection that drops while the server renames tells that
+   * the stored file may have been replaced.
    * @param filePath The path of the file.
    * @param localFile The local file.
    * @param _mediaType Unused, a file of the server having no media type.
-   * @param options Follows the bytes sent, and cancels the upload at once, before the stored file is
-   * replaced, the partial file being removed once the server ends writing it.
+   * @param options Follows the bytes sent, and cancels the upload: at once while the file is written,
+   * the partial file then removed, and between two renames that put it in place, the stored file
+   * then put back, so a cancelled upload never replaces it.
    */
   async upload (filePath: string, localFile: string, _mediaType: string, { onProgress, signal }: TransferOptions = {}): Promise<void> {
     const client = await unlessAborted(this.client(), signal)
@@ -129,46 +170,68 @@ class SftpBackend implements EnvironmentBackend {
       if (!signal?.aborted) {
         throw await withoutPartial(client, partialPath, error)
       }
-      void written.catch(() => undefined).then(async () => client.delete(partialPath, true)).catch(() => undefined)
+      void this.dropPartial(client, partialPath)
       throw error
     } finally {
       signal?.removeEventListener('abort', cancel)
       source.destroy()
     }
-    await client.posixRename(partialPath, remotePath).catch(async () => {
+    await answered(client, client.posixRename(partialPath, remotePath)).catch(async (error: unknown) => {
+      if (error instanceof UnansweredError) {
+        throw new PossiblyStoredError(`the stored file may have been replaced: ${error.message}`, { cause: error })
+      }
       signal?.throwIfAborted()
-      await this.replaceAside(client, partialPath, remotePath)
+      await this.replaceAside(client, partialPath, remotePath, signal)
     }).catch(async (error: unknown) => {
-      throw await withoutPartial(client, partialPath, error)
+      throw error instanceof PossiblyStoredError ? error : await withoutPartial(client, partialPath, error)
     })
   }
 
   /**
+   * Deletes the partial file of a cancelled upload without waiting for the server to end writing it,
+   * the partial file being left under a name the listing leaves out when the server does not answer.
+   * @param client The connected client.
+   * @param partialPath The partial file.
+   */
+  private async dropPartial (client: SftpClient, partialPath: string): Promise<void> {
+    await answered(client, client.delete(partialPath, true)).catch(() => undefined)
+  }
+
+  /**
    * Replaces a stored file by another one with plain renames: the stored file is moved aside under
-   * a name the listing leaves out, put back when the new one cannot take its place, and deleted
-   * once it did, or left aside when it cannot be deleted.
+   * a name the listing leaves out, put back when the new one cannot take its place or the upload is
+   * cancelled meanwhile, and deleted once it did, or left aside when it cannot be deleted. A rename
+   * whose answer never came tells where each file may be.
    * @param client The connected client.
    * @param partialPath The new file.
    * @param remotePath The stored file.
+   * @param signal Cancels the replacement before the new file takes the place of the stored one.
    */
-  private async replaceAside (client: SftpClient, partialPath: string, remotePath: string): Promise<void> {
+  private async replaceAside (client: SftpClient, partialPath: string, remotePath: string, signal?: AbortSignal): Promise<void> {
     const asidePath = `${remotePath}.${randomUUID()}${PARTIAL_SUFFIX}`
-    const stored = await client.exists(remotePath) === '-'
+    const stored = await answered(client, client.exists(remotePath)) === '-'
+    signal?.throwIfAborted()
     if (stored) {
-      await client.rename(remotePath, asidePath)
+      await answered(client, client.rename(remotePath, asidePath)).catch((error: unknown) => {
+        throw error instanceof UnansweredError ? new Error(`${error.message}; the stored file may now be at ${asidePath}`, { cause: error }) : error
+      })
     }
     try {
-      await client.rename(partialPath, remotePath)
+      signal?.throwIfAborted()
+      await answered(client, client.rename(partialPath, remotePath))
     } catch (error) {
+      if (error instanceof UnansweredError) {
+        throw new PossiblyStoredError(`the stored file may have been replaced${stored ? `, the former one being at ${asidePath}` : ''}: ${error.message}`, { cause: error })
+      }
       if (stored) {
-        await client.rename(asidePath, remotePath).catch((failure: unknown) => {
+        await answered(client, client.rename(asidePath, remotePath)).catch((failure: unknown) => {
           throw new Error(`${error instanceof Error ? error.message : String(error)}; the stored file stays at ${asidePath}: ${failure instanceof Error ? failure.message : String(failure)}`, { cause: error })
         })
       }
       throw error
     }
     if (stored) {
-      await client.delete(asidePath, true).catch(() => undefined)
+      await answered(client, client.delete(asidePath, true)).catch(() => undefined)
     }
   }
 
@@ -219,6 +282,9 @@ class SftpBackend implements EnvironmentBackend {
    */
   private async client (): Promise<SftpClient> {
     if (this._client === null) {
+      /**
+       * Forgets the connection once it failed or closed, so the next use opens another one.
+       */
       const forget = (): void => {
         if (this._client === connection) {
           this._client = null

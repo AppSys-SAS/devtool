@@ -3,7 +3,7 @@ import fs from 'node:fs/promises'
 import { pipeline, Readable } from 'node:stream'
 import type { ReadableStream as WebReadableStream } from 'node:stream/web'
 import { accessToken, type AuthOptions } from '@appsys-sas/devtool-auth'
-import { type BackendSettings, type BackendType, byteCounter, type EnvironmentBackend, knownSize, readText, type RemoteFile, type TransferOptions } from './backend.js'
+import { type BackendSettings, type BackendType, byteCounter, type EnvironmentBackend, knownSize, PossiblyStoredError, readText, type RemoteFile, type TransferOptions } from './backend.js'
 
 /** Settings of a CDN serving the devtool files API under `<url>/devtool`. */
 export interface CdnSettings extends BackendSettings {
@@ -74,18 +74,29 @@ class CdnBackend implements EnvironmentBackend {
    * @param path The path of the file on the CDN.
    * @param localFile The local file.
    * @param mediaType The media type served with the file.
-   * @param options Follows the bytes sent, and cancels the request.
+   * @param options Follows the bytes sent, and cancels the request; a cancel once the whole file
+   * was sent tells that the CDN may have stored it.
    */
   async upload (path: string, localFile: string, mediaType: string, { onProgress, signal }: TransferOptions = {}): Promise<void> {
     const { size } = await fs.stat(localFile)
     const source = createReadStream(localFile)
+    const counted = pipeline(source, byteCounter(size, onProgress), () => undefined)
+    let sent = false
+    counted.once('end', () => {
+      sent = true
+    })
     try {
       await this.assertOk(await this.request('PUT', path, {
         headers: { 'Content-Type': mediaType, 'Content-Length': String(size) },
-        body: Readable.toWeb(pipeline(source, byteCounter(size, onProgress), () => undefined)) as ReadableStream<Uint8Array>,
+        body: Readable.toWeb(counted, { strategy: { highWaterMark: 0 } }) as ReadableStream<Uint8Array>,
         duplex: 'half',
         signal
       }))
+    } catch (error) {
+      if (signal?.aborted && sent) {
+        throw new PossiblyStoredError('the upload to the CDN was cancelled once the whole file was sent', { cause: error })
+      }
+      throw error
     } finally {
       source.destroy()
     }

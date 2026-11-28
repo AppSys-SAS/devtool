@@ -5,7 +5,7 @@ import path from 'node:path'
 import type { S3Client } from '@aws-sdk/client-s3'
 import { mergeTransferGroups, OPEN_ACCESS, type TransferAccess, type TransferDirection, TransferGate, readTransferGroups } from './access.js'
 import { ArchiveWriter, readArchive, type RecordHeader } from './archive.js'
-import { BACKEND_IDLE_MS, DEVELOPER_ANSWER_MS, type BackendContext, type BackendOptions, encrypted, EncryptionSecret, type EncryptionSettings, type EnvironmentBackend, readBackends, readEncryption, type RemoteFile, type TransferOptions, type TransferProgress } from './backends/index.js'
+import { BACKEND_IDLE_MS, DEVELOPER_ANSWER_MS, PossiblyStoredError, type BackendContext, type BackendOptions, encrypted, EncryptionSecret, type EncryptionSettings, type EnvironmentBackend, readBackends, readEncryption, type RemoteFile, type TransferOptions, type TransferProgress } from './backends/index.js'
 import { plainLengthOf } from './backends/encryption.js'
 import { checkTar, createS3Client, objectsOfArchive, objectsOfTar, restoreBucket, type S3Options, snapshotBucket, snapshotBucketTar } from './buckets.js'
 import { defaultEnvironmentFolder, localPathOf, scratchPath, TEMPORARY_NAME, TEMPORARY_SUFFIX, temporaryPathOf, withFileLock, writeLocalFile } from './directory.js'
@@ -28,15 +28,23 @@ const MEDIA_TYPES: Record<string, string> = {
   '.gz': 'application/gzip'
 }
 
-/** Raised when a transfer is cancelled while its file moves, nothing of the item being changed. */
+/**
+ * Raised when a transfer is cancelled while its file moves, nothing of the item being changed unless
+ * the backend tells that it may have stored the file.
+ */
 export class TransferCancelledError extends Error {
+  /** Whether the backend may have stored the file before the cancel, and may still keep it. */
+  readonly possiblyStored: boolean
+
   /**
    * @param itemPath - The path of the item.
-   * @param options - The error that ended the transfer, if any.
+   * @param options - The error that ended the transfer, if any, telling whether the backend may have
+   * stored the file.
    */
   constructor (itemPath: string, options?: ErrorOptions) {
     super(`${itemPath}: transfer cancelled`, options)
     this.name = 'TransferCancelledError'
+    this.possiblyStored = options?.cause instanceof PossiblyStoredError
   }
 }
 
@@ -1278,7 +1286,9 @@ export class Environment {
 
     const pushedPath = temporaryPathOf(localPath, 'push')
     try {
-      const detail = await this.dumpLocalData(item, tables, pushedPath, signal)
+      const detail = await this.dumpLocalData(item, tables, pushedPath, signal).catch((error: unknown) => {
+        throw signal?.aborted && !(error instanceof TransferCancelledError) ? new TransferCancelledError(item.path, { cause: error }) : error
+      })
       await this.upload(item, pushedPath, onProgress, signal)
       return await this.completed({ done: true, detail }, async () => {
         await fs.rename(pushedPath, localPath)
@@ -1295,24 +1305,25 @@ export class Environment {
    * @param item - The database, bucket or Redis item.
    * @param tables - The tables or key groups to dump, or null for the whole item.
    * @param archivePath - The archive to write.
-   * @param signal - Cancels the download of the copy of the backend some tables or key groups replace.
+   * @param signal - Cancels the dump, and the download of the copy of the backend some tables or key
+   * groups replace.
    * @returns What was dumped.
    */
   private async dumpLocalData (item: Exclude<EnvironmentItem, { kind: 'file' }>, tables: string[] | null, archivePath: string, signal?: AbortSignal): Promise<string> {
     if (item.kind === 'database' && item.format === 'native') {
-      await writeLocalFile(archivePath, databaseEngine(item.engine).dumpNative(item))
+      await writeLocalFile(archivePath, databaseEngine(item.engine).dumpNative(item, signal), signal)
       return `database dumped from ${databaseNameOf(item)}`
     }
     if (item.kind === 'database') {
-      return this.writeLocal(archivePath, archive => this.dumpDatabase(item, tables, archive, signal))
+      return this.writeLocal(archivePath, archive => this.dumpDatabase(item, tables, archive, signal), signal)
     }
     if (item.kind === 'bucket' && item.format === 'native') {
-      return `${await snapshotBucketTar(this.s3(), item.bucket, archivePath)} objects of ${item.bucket}`
+      return `${await snapshotBucketTar(this.s3(), item.bucket, archivePath, signal)} objects of ${item.bucket}`
     }
     if (item.kind === 'bucket') {
-      return this.writeLocal(archivePath, async archive => `${await snapshotBucket(this.s3(), item.bucket, archive)} objects of ${item.bucket}`)
+      return this.writeLocal(archivePath, async archive => `${await snapshotBucket(this.s3(), item.bucket, archive, signal)} objects of ${item.bucket}`, signal)
     }
-    return this.writeLocal(archivePath, archive => this.dumpRedis(item, tables, archive, signal))
+    return this.writeLocal(archivePath, archive => this.dumpRedis(item, tables, archive, signal), signal)
   }
 
   /**
@@ -1476,17 +1487,17 @@ export class Environment {
    * @param item - The database item.
    * @param tables - The tables to dump, or null for the whole database.
    * @param archive - The archive being written.
-   * @param signal - Cancels the download of the stored archive.
+   * @param signal - Cancels the dump and the download of the stored archive.
    * @returns What was dumped.
    */
   private async dumpDatabase (item: Extract<EnvironmentItem, { kind: 'database' }>, tables: string[] | null, archive: ArchiveWriter, signal?: AbortSignal): Promise<string> {
     const engine = databaseEngine(item.engine)
-    const localTables = await engine.listTables(item)
+    const localTables = await engine.listTables(item, signal)
     if (tables === null) {
       await archive.add({ type: 'database', engine: item.engine })
-      await archive.add({ type: 'schema' }, engine.dumpSchema(item))
+      await archive.add({ type: 'schema' }, engine.dumpSchema(item, signal))
       for (const table of localTables) {
-        await archive.add({ type: 'table', name: table }, engine.dumpTable(item, table))
+        await archive.add({ type: 'table', name: table }, engine.dumpTable(item, table, signal))
       }
       return `database dumped (${localTables.length} tables)`
     }
@@ -1494,7 +1505,7 @@ export class Environment {
     assertKnownTables(tables, localTables, databaseNameOf(item))
     await this.copyBase(item, archive, header => header.type !== 'table' || typeof header.name !== 'string' || !tables.includes(header.name), signal)
     for (const table of tables) {
-      await archive.add({ type: 'table', name: table }, engine.dumpTable(item, table))
+      await archive.add({ type: 'table', name: table }, engine.dumpTable(item, table, signal))
     }
 
     return `tables dumped: ${tables.join(', ')}`
@@ -1507,21 +1518,21 @@ export class Environment {
    * @param item - The Redis item.
    * @param groups - The key groups to dump, or null for the whole database.
    * @param archive - The archive being written.
-   * @param signal - Cancels the download of the stored archive.
+   * @param signal - Cancels the dump and the download of the stored archive.
    * @returns What was dumped.
    */
   private async dumpRedis (item: Extract<EnvironmentItem, { kind: 'redis' }>, groups: string[] | null, archive: ArchiveWriter, signal?: AbortSignal): Promise<string> {
     if (groups === null) {
       await archive.add({ type: 'redis' })
-      return `${await snapshotRedis(item.url, archive, null)} keys of Redis ${redisDatabaseName(item.url)}`
+      return `${await snapshotRedis(item.url, archive, null, signal)} keys of Redis ${redisDatabaseName(item.url)}`
     }
 
-    assertKnownTables(groups, await listRedisGroups(item.url), redisDatabaseName(item.url), 'key groups')
+    assertKnownTables(groups, await listRedisGroups(item.url, signal), redisDatabaseName(item.url), 'key groups')
     await this.copyBase(item, archive, header => {
       const group = redisRecordGroup(header)
       return group === null || !groups.includes(group)
     }, signal)
-    const count = await snapshotRedis(item.url, archive, groups)
+    const count = await snapshotRedis(item.url, archive, groups, signal)
 
     return `key groups dumped: ${groups.join(', ')} (${count} keys)`
   }
@@ -1556,12 +1567,13 @@ export class Environment {
    *
    * @param localPath - The local file.
    * @param fill - Writes the records of the archive.
+   * @param signal - Abandons the archive, leaving the file as it was.
    * @returns What `fill` reports.
    */
-  private async writeLocal (localPath: string, fill: (archive: ArchiveWriter) => Promise<string>): Promise<string> {
+  private async writeLocal (localPath: string, fill: (archive: ArchiveWriter) => Promise<string>, signal?: AbortSignal): Promise<string> {
     await fs.mkdir(path.dirname(localPath), { recursive: true, mode: 0o700 })
     const partialPath = temporaryPathOf(localPath, 'part')
-    const archive = new ArchiveWriter(partialPath)
+    const archive = new ArchiveWriter(partialPath, signal)
     try {
       const detail = await fill(archive)
       await archive.close()
@@ -1618,8 +1630,9 @@ export class Environment {
 
   /**
    * Sends a local file of an item to its backend, the whole file being told only once stored (see
-   * {@link ProgressRelay}). The upload stops, the stored file left as it was, when it is cancelled
-   * or when the backend, once it told some progress, tells none for a minute.
+   * {@link ProgressRelay}). The upload stops when it is cancelled or when the backend, once it told
+   * some progress, tells none for a minute; the stored file is left as it was, unless the backend
+   * tells that it may have stored it, which the cancel then tells.
    *
    * @param item - The item.
    * @param localFile - The local file.

@@ -27,8 +27,8 @@ Without any of them, it stops with `cannot sign in to nas.example.dev: set priva
 the sftp backend, or start an SSH agent`. `passphrase` and `password` read value blocks, once, and
 again when the passphrase does not open the key or the server refused the password.
 
-An upload is written next to its place as `<file>.part`, then renamed, so a cut upload never replaces
-the stored file; the folders are created as needed. The connection is opened on first use, and
+An upload is written next to its place under a name ending in `.part`, then renamed, so a cut or
+cancelled upload never replaces the stored file; the folders are created as needed. The connection is opened on first use, and
 opened again when it drops.
 
 ::: warning

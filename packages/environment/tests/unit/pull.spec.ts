@@ -580,6 +580,45 @@ describe('description of a configuration file ignoring keys', () => {
 })
 
 describe('push of an item holding local data', () => {
+  it.each([
+    ['writing', 'while true; do echo row; sleep 0.05; done'],
+    ['waiting silently', 'sleep 6; echo late']
+  ])('stops a dump %s that its push cancels, the backend never reached and the local copy left as it was', async (_case, dump) => {
+    await fakeDocker(dump)
+    const upload = vi.fn(async () => undefined)
+    const environment = environmentWith({ upload })
+    const cancel = new AbortController()
+    setTimeout(() => cancel.abort(new Error('cancelled')), 500)
+    const started = Date.now()
+
+    await expect(environment.push({ item: postgresItem, tables: null, signal: cancel.signal })).rejects.toThrow(TransferCancelledError)
+    expect(Date.now() - started).toBeLessThan(3000)
+    expect(upload).not.toHaveBeenCalled()
+    expect(await localState()).toEqual({ files: ['db.dump'], copy: 'previous copy' })
+  }, 10_000)
+
+  it('stops writing an archive once cancelled, leaving the body of the record unread', async () => {
+    const cancel = new AbortController()
+    const writer = new ArchiveWriter(path.join(folder, 'cancelled.gz'), cancel.signal)
+    let closed = false
+    const body = (async function* (): AsyncGenerator<Buffer> {
+      try {
+        for (let chunk = 0; ; chunk++) {
+          if (chunk === 3) {
+            cancel.abort(new Error('cancelled'))
+          }
+          yield Buffer.from('row\n')
+        }
+      } finally {
+        closed = true
+      }
+    })()
+
+    await expect(writer.add({ type: 'table', name: 'public.t' }, body)).rejects.toThrow('cancelled')
+    writer.abort()
+    expect(closed).toBe(true)
+  })
+
   it('leaves the local copy as it was when the backend refuses the dump', async () => {
     await fakeDocker('printf "fresh dump"')
     const backend: EnvironmentBackend = {

@@ -366,12 +366,18 @@ size of the file and the percentage when it is known; for an encrypted file, the
 
 When the size of a file is not known, the page shows the bytes received and the speed with a moving bar.
 
-A pull or a push can be cancelled while its file moves, item by item or whole. A pulled archive goes
-to a temporary file next to the local copy, so a cancelled item keeps its local data, its local copy
-and its synchronization record; once an archive is complete, its restore always runs to its end. A
-pushed dump replaces the local copy only once stored, and every backend replaces its copy only once
-the whole file is stored, so a cancelled or failed push leaves both copies as they were. A push to a
-git backend can no longer be cancelled once git sent the whole commit: it runs to its end.
+A pull can be cancelled while its file moves, a push until it ends, its dump included, item by item
+or whole. A pulled archive goes to a temporary file next to the local copy, so a cancelled item keeps
+its local data, its local copy and its synchronization record; once an archive is complete, its
+restore always runs to its end. A pushed dump replaces the local copy only once stored, and every
+backend replaces its copy only once the whole file is stored, so a failed or cancelled push leaves
+both copies as they were, except when the backend may already have the file: once the whole file
+was sent to a CDN backend, or handed to the HTTP client of an S3 backend (at once for a small file),
+while git exchanges with its remote, or once the `upload` command of a scripts backend started.
+Such a cancel says that the backend may have stored it all the same, and the refresh that follows
+shows whether it did. An SFTP upload is cancelled only while its file is written or between the
+renames that put it in place, so it never replaces the stored file; when its connection drops while
+the server renames, the push fails saying the stored file may have been replaced.
 
 A transfer also stops when its backend shows no activity for a minute: a listing that does not
 answer, a download that sends nothing, an upload that, once it reported some progress, reports none

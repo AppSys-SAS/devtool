@@ -38,8 +38,10 @@ export class ArchiveWriter {
 
   /**
    * @param filePath - The archive file to create, readable by the current user only.
+   * @param _signal - Stops the writing, before a record and between the pieces of its body, the body
+   * being left unread.
    */
-  constructor (filePath: string) {
+  constructor (filePath: string, private readonly _signal?: AbortSignal) {
     this._finished = pipelineAsync(this._gzip, createWriteStream(filePath, { mode: 0o600 }))
     this._finished.catch(() => undefined)
   }
@@ -51,8 +53,10 @@ export class ArchiveWriter {
    * @param body - The body of the record.
    */
   async add (header: RecordHeader, body: AsyncIterable<Buffer> | Iterable<Buffer> = []): Promise<void> {
+    this._signal?.throwIfAborted()
     await write(this._gzip, Buffer.from(`${JSON.stringify(header)}\n`))
     for await (const chunk of body) {
+      this._signal?.throwIfAborted()
       for (let offset = 0; offset < chunk.length; offset += MAX_FRAME_BYTES) {
         const frame = chunk.subarray(offset, offset + MAX_FRAME_BYTES)
         await write(this._gzip, Buffer.from(`${frame.length}\n`))

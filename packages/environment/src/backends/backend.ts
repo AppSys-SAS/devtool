@@ -72,7 +72,8 @@ export interface EnvironmentBackend {
    * @param path The path of the file in the backend.
    * @param localFile The local file.
    * @param mediaType The media type of the file.
-   * @param options Follows the bytes sent, and abandons the upload, the stored file then left as it was.
+   * @param options Follows the bytes sent, and abandons the upload, the stored file then left as it
+   * was, unless a {@link PossiblyStoredError} tells that the backend may have stored the file.
    */
   upload: (path: string, localFile: string, mediaType: string, options?: TransferOptions) => Promise<void>
   /**
@@ -163,15 +164,37 @@ export interface BackendType<T extends BackendSettings> {
 export function byteCounter (expected: number | null, onProgress?: TransferProgress): Transform {
   let received = 0
   return new Transform({
+    /**
+     * Counts a chunk and passes it on.
+     * @param chunk The chunk.
+     * @param _encoding Unused, the chunks being bytes.
+     * @param callback Takes the chunk passed on.
+     */
     transform (chunk: Buffer, _encoding: BufferEncoding, callback: TransformCallback): void {
       received += chunk.length
       onProgress?.(received, expected)
       callback(null, chunk)
     },
+    /**
+     * Ends the stream, failing it when it did not carry the expected length.
+     * @param callback Takes the failure, if any.
+     */
     flush (callback: TransformCallback): void {
       callback(expected !== null && received !== expected ? new Error(`incomplete transfer: ${received} of ${expected} bytes`) : null)
     }
   })
+}
+
+/** A transfer cancelled once its backend may have stored the file, which it may then still keep. */
+export class PossiblyStoredError extends Error {
+  /**
+   * @param message What was cancelled.
+   * @param options The error that ended the transfer, if any.
+   */
+  constructor (message: string, options?: ErrorOptions) {
+    super(message, options)
+    this.name = 'PossiblyStoredError'
+  }
 }
 
 /**

@@ -52,12 +52,13 @@ export function createS3Client (options: S3Options): S3Client {
  *
  * @param client - The S3 client.
  * @param bucket - The bucket.
+ * @param signal - Abandons the listing.
  * @returns The keys and sizes of the objects.
  */
-async function* listObjects (client: S3Client, bucket: string): AsyncGenerator<{ key: string, size: number }> {
+async function* listObjects (client: S3Client, bucket: string, signal?: AbortSignal): AsyncGenerator<{ key: string, size: number }> {
   let token: string | undefined
   do {
-    const page = await client.send(new ListObjectsV2Command({ Bucket: bucket, ContinuationToken: token }))
+    const page = await client.send(new ListObjectsV2Command({ Bucket: bucket, ContinuationToken: token }), { abortSignal: signal })
     for (const object of page.Contents ?? []) {
       if (object.Key !== undefined) {
         yield { key: object.Key, size: object.Size ?? 0 }
@@ -73,12 +74,13 @@ async function* listObjects (client: S3Client, bucket: string): AsyncGenerator<{
  *
  * @param client - The S3 client.
  * @param bucket - The bucket.
+ * @param signal - Abandons the reading, the object being read included.
  * @returns The objects; each body must be read before the next object is.
  */
-async function* readObjects (client: S3Client, bucket: string): AsyncGenerator<BucketObject> {
-  for await (const { key } of listObjects(client, bucket)) {
+async function* readObjects (client: S3Client, bucket: string, signal?: AbortSignal): AsyncGenerator<BucketObject> {
+  for await (const { key } of listObjects(client, bucket, signal)) {
     storableKey(key)
-    const object = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }))
+    const object = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }), { abortSignal: signal })
     yield { key, size: object.ContentLength ?? 0, contentType: object.ContentType, lastModified: object.LastModified, body: object.Body as Readable }
   }
 }
@@ -89,11 +91,12 @@ async function* readObjects (client: S3Client, bucket: string): AsyncGenerator<B
  * @param client - The S3 client.
  * @param bucket - The bucket.
  * @param archive - The archive being written.
+ * @param signal - Abandons the snapshot.
  * @returns The number of objects.
  */
-export async function snapshotBucket (client: S3Client, bucket: string, archive: ArchiveWriter): Promise<number> {
+export async function snapshotBucket (client: S3Client, bucket: string, archive: ArchiveWriter, signal?: AbortSignal): Promise<number> {
   let count = 0
-  for await (const { key, size, contentType, body } of readObjects(client, bucket)) {
+  for await (const { key, size, contentType, body } of readObjects(client, bucket, signal)) {
     await archive.add({ type: 'object', key, contentType: contentType ?? 'application/octet-stream', size }, body)
     count += 1
   }
@@ -108,17 +111,18 @@ export async function snapshotBucket (client: S3Client, bucket: string, archive:
  * @param client - The S3 client.
  * @param bucket - The bucket.
  * @param filePath - The local file, replaced once fully written.
+ * @param signal - Abandons the snapshot, leaving the file as it was.
  * @returns The number of objects.
  */
-export async function snapshotBucketTar (client: S3Client, bucket: string, filePath: string): Promise<number> {
+export async function snapshotBucketTar (client: S3Client, bucket: string, filePath: string, signal?: AbortSignal): Promise<number> {
   let count = 0
   const entries = async function* (): AsyncGenerator<TarEntry> {
-    for await (const { key, size, lastModified, body } of readObjects(client, bucket)) {
+    for await (const { key, size, lastModified, body } of readObjects(client, bucket, signal)) {
       count += 1
       yield { name: key, size, mtime: lastModified, body }
     }
   }
-  await writeLocalFile(filePath, transformed(writeTar(entries()), createGzip()))
+  await writeLocalFile(filePath, transformed(writeTar(entries()), createGzip()), signal)
   return count
 }
 

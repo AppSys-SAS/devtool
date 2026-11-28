@@ -78,15 +78,10 @@ export function progressPercent (done: number, total: number | null): number | n
  * @param total The size of the file, null when unknown.
  * @param bytesPerSecond The speed of the transfer, null when unknown.
  * @returns The bytes moved, with the size and the percentage when the size is known, then the speed
- * when known, such as `1.5 MB / 3.0 MB · 50% · 2.0 MB/s` or `1.5 MB / size unknown · 2.0 MB/s`.
+ * when known, such as `1.5 MB / 3.0 MB · 50% · 2.0 MB/s` or `1.5 MB · 2.0 MB/s`.
  */
 export function formatProgress (done: number, total: number | null, bytesPerSecond: number | null = null): string {
-  let moved: string
-  if (total !== null) {
-    moved = `${formatBytes(done)} / ${formatBytes(total)} · ${progressPercent(done, total)}%`
-  } else {
-    moved = done === 0 ? 'size unknown' : `${formatBytes(done)} / size unknown`
-  }
+  const moved = total === null ? formatBytes(done) : `${formatBytes(done)} / ${formatBytes(total)} · ${progressPercent(done, total)}%`
   return bytesPerSecond === null ? moved : `${moved} · ${formatBytes(bytesPerSecond)}/s`
 }
 

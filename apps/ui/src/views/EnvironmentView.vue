@@ -371,8 +371,8 @@ function confirm (): void {
 }
 
 /**
- * Tells whether a step of the pull or push in progress can still be cancelled: it waits, or its file
- * has not fully moved yet.
+ * Tells whether a step of the pull or push in progress can still be cancelled: it waits, it is a push
+ * not finished, or it is a pull whose file has not fully moved yet.
  * @param step The step.
  * @returns True when its cancel button is shown.
  */
@@ -381,7 +381,7 @@ function cancellable (step: EnvironmentStepPayload): boolean {
   if (!run || run.finished || (run.action !== 'pull' && run.action !== 'push')) {
     return false
   }
-  return step.status === 'pending' || (step.status === 'running' && !(step.progress?.total != null && step.progress.done >= step.progress.total))
+  return step.status === 'pending' || (step.status === 'running' && (run.action === 'push' || !(step.progress?.total != null && step.progress.done >= step.progress.total)))
 }
 
 /**
@@ -526,14 +526,14 @@ function choiceKey (kind: ChoiceKind, path: string): string {
 }
 
 /**
- * Gives what a list of tables or of differing keys of an item depends on: the copies of the item
- * for its keys, the latest description of the items for its tables.
+ * Gives what a list of tables or of differing keys of an item depends on: the configuration and the
+ * copies of the item for its keys, the latest description of the items for its tables.
  * @param kind Its tables or its keys.
  * @param item The item.
  * @returns A text changing whenever the list may change.
  */
 function stampOf (kind: ChoiceKind, item: EnvironmentItemPayload): string {
-  return kind === 'keys' ? JSON.stringify([item.local, item.remote]) : String(environmentStore.descriptions)
+  return kind === 'keys' ? JSON.stringify([state.value?.revision, item.local, item.remote]) : String(environmentStore.descriptions)
 }
 
 /**
